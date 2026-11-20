@@ -14,6 +14,14 @@ const mountSettings = api => settingsModule.exports.mount(api, 'Settings');
 const text = node => typeof node === 'string' || typeof node === 'number' ? String(node) : node?.children?.map(text).join('') || '';
 const visible = (ui, value) => ui.find(node => text(node).includes(value));
 const setting = (ui, label) => ui.find(node => node.type === 'label' && text(node).startsWith(label))?.children.find(node => node?.type === 'input');
+const changeSetting = async (ui, label, checked) => {
+  setting(ui, label).props.onChange({ target: { checked } });
+  await ui.flush();
+  if (label === '看完自动删除' && checked) {
+    ui.button('开启自动删除').props.onClick();
+    await ui.flush();
+  }
+};
 const defer = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
 (async () => {
@@ -53,10 +61,10 @@ const defer = () => { let resolve; const promise = new Promise(done => { resolve
       } });
       try {
         await ui.flush(); assert.equal(setting(ui, label).props.checked, initial);
-        const saving = setting(ui, label).props.onChange({ target: { checked: !initial } }); await ui.flush();
+        await changeSetting(ui, label, !initial);
         assert.equal(submitted[key], !initial); assert.equal(persisted[key], initial, 'pending save must keep the persisted setting');
         assert.equal(ui.find(node => node.type === 'fieldset' && node.props.className?.includes('settings-preferences')).props.disabled, true);
-        pending.resolve({ success: true }); await saving; await ui.flush();
+        pending.resolve({ success: true }); await ui.flush();
         assert.equal(persisted[key], !initial); assert.equal(setting(ui, label).props.checked, !initial);
         assert.ok(visible(ui, '已自动保存'));
       } finally { pending.resolve({ success: false }); ui.unmount(); }
@@ -68,7 +76,7 @@ const defer = () => { let resolve; const promise = new Promise(done => { resolve
         persisted = { ...next }; return { success: true };
       } });
       try {
-        await ui.flush(); await setting(ui, label).props.onChange({ target: { checked: !initial } }); await ui.flush();
+        await ui.flush(); await changeSetting(ui, label, !initial);
         assert.equal(persisted[key], initial, 'failed save must keep the persisted setting');
         assert.equal(setting(ui, label).props.checked, !initial, 'keep the unsaved value available for retry');
         assert.ok(ui.find(node => node.props.role === 'alert' && text(node).includes('设置写入失败')));
