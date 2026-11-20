@@ -69,8 +69,9 @@ function restoredEntry(format, configs, entryType) {
       installAppUpdate: async () => { installs++; return { success: true }; },
       downloadAppUpdate: async () => { downloads++; return { success: true }; } });
     await ui.flush();
-    assert.ok(ui.button('重启并安装'), 'install error should keep the install button');
-    await ui.button('重启并安装').props.onClick(); assert.equal(installs, 1); assert.equal(downloads, 0);
+    assert.ok(ui.button('立即重启更新'), 'install error should keep the install button');
+    assert.equal(installs, 0);
+    await ui.button('立即重启更新').props.onClick(); assert.equal(installs, 1); assert.equal(downloads, 0);
     assert.ok(ui.text().includes('安装失败')); ui.unmount();
   });
   await check('sequel matching preserves year suffixes and accepts explicit and modest bracket seasons', () => {

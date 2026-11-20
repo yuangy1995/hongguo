@@ -44,7 +44,7 @@ export default function AppUpdateNotice({ playbackActive: initialPlaybackActive 
       currentState.current = next;
       setState(next);
       if (next.retryWhenIdle) retryInstallWhenIdle();
-      if (previousStatus === 'installing' && next.status === 'error') setVisible(true);
+      if (next.status === 'error' && (previousStatus === 'installing' || next.downloaded === true)) setVisible(true);
     };
     const performInstall = async (request, retrying = false) => {
       actionPending.current = 'installAppUpdate';
@@ -174,7 +174,7 @@ export default function AppUpdateNotice({ playbackActive: initialPlaybackActive 
       try {
         await initialStatePromise;
         if (!active || request !== generation) return;
-        if (['checking', 'downloading', 'downloaded', 'installing'].includes(currentState.current.status)) return;
+        if (currentState.current.downloaded === true || ['checking', 'downloading', 'downloaded', 'installing'].includes(currentState.current.status)) return;
         const result = await window.electronAPI.checkAppUpdate();
         if (!active || request !== generation) return;
         enabled.current = result?.enabled === true;
