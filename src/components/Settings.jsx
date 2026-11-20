@@ -465,9 +465,9 @@ function SettingsPage({ active = true, preview = false, configNote = '', wakeReg
         </> : <>
         <div className="settings-group" hidden={section !== 'updates'}>
           <span className="settings-label">{t("检测更新")}</span>
-          <label className="proxy-switch-row"><input type="checkbox" aria-label={t("自动检测更新")} checked={settings.app_updates_enabled !== false} onChange={event => update('app_updates_enabled', event.target.checked)} /><span className="proxy-switch-text">{t("自动检测更新")}<em>{t("启动时及运行期间每 6 小时检查正式新版。更改立即生效；下载和重启安装都由你点击确认。")}</em></span></label>
+          <label className="proxy-switch-row"><input type="checkbox" aria-label={t("自动检测更新")} checked={settings.app_updates_enabled !== false} onChange={event => update('app_updates_enabled', event.target.checked)} /><span className="proxy-switch-text">{t("自动检测更新")}<em>{t("启动时及运行期间每 6 小时检查新版。支持应用内更新的版本会自动下载，并在播放和任务空闲时安装、重启。")}</em></span></label>
           <button type="button" className="btn btn-outline" disabled={settings.app_updates_enabled === false} onClick={() => window.dispatchEvent(new CustomEvent('hongguo-check-app-update'))}><RefreshCw size={15} />{t("检查更新")}</button>
-          <p className="settings-hint">{t("可重新打开已关闭的更新提醒、查看下载进度或安装已下载的新版。关闭检测后需重新开启。")}</p>
+          <p className="settings-hint">{t("可重新打开更新窗口、查看下载进度或立即重启更新。关闭后不再自动检测与下载更新。")}</p>
         </div>
         </>}
 

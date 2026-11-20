@@ -155,6 +155,7 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
   const [playbackError, setPlaybackError] = useState('');
   const [playbackVersion, setPlaybackVersion] = useState(0);
   const [playbackRequested, setPlaybackRequested] = useState(false);
+  const [mediaPlaying, setMediaPlaying] = useState(false);
   const [compatCache, setCompatCache] = useState({ files: 0, bytes: 0 });
   const [mergeAsk, setMergeAsk] = useState(false);            // 合并格式选择
   const [mergeError, setMergeError] = useState('');
@@ -830,6 +831,16 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
   }
   const videoSrc = !playbackRequested || compatProgress ? '' : lastVideoSrcRef.current;
   const mediaSource = `${videoSrc}|${softwareDecode ? 'software' : 'native'}`;
+  const activePlayback = playbackActive && (mediaPlaying || autoAdvancing || !!(playbackRequested && (onlineProgress || compatProgress)));
+  useEffect(() => {
+    if (!playbackActive || !canPlay) setMediaPlaying(false);
+  }, [playbackActive, canPlay]);
+  useEffect(() => {
+    if (typeof CustomEvent === 'function') window.dispatchEvent?.(new CustomEvent('hongguo-playback-active', { detail: activePlayback }));
+  }, [activePlayback]);
+  useEffect(() => () => {
+    if (typeof CustomEvent === 'function') window.dispatchEvent?.(new CustomEvent('hongguo-playback-active', { detail: false }));
+  }, []);
   useEffect(() => {
     if (!mobile || !canPlay || !playbackActive || !videoRef.current) return;
     return bindTouchHoldSpeed(videoRef.current, changePlaybackRate, () => preferredRateRef.current);
@@ -2191,8 +2202,10 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
               const media = loadedMediaRef.current;
               if (bossHiddenRef.current || !activeRef.current || !canPlay || playbackVersion !== mediaVersion.current || !media || media.version !== mediaVersion.current || media.element !== event.currentTarget) {
                 event.currentTarget.pause();
+                setMediaPlaying(false);
                 return;
               }
+              setMediaPlaying(true);
             }}
             onRateChange={(event) => {
               const v = event.currentTarget;
@@ -2208,9 +2221,19 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
               mutedRef.current = v.muted;
               savePlaybackPreferences();
             }}
-            onEnded={() => { if (activeRef.current && canPlay && playbackVersion === mediaVersion.current && (!videoRef.current || loadedMediaRef.current?.version === mediaVersion.current)) handleEnded(); }}
-            onPause={() => persistPosition(true, false, !mobile && !loadedMediaRef.current?.closing)}
-            onPlaying={(event) => { handlePlaying(event); prepareNextEpisode(event); }}
+            onEnded={() => {
+              setMediaPlaying(false);
+              if (activeRef.current && canPlay && playbackVersion === mediaVersion.current && (!videoRef.current || loadedMediaRef.current?.version === mediaVersion.current)) handleEnded();
+            }}
+            onPause={() => {
+              setMediaPlaying(false);
+              persistPosition(true, false, !mobile && !loadedMediaRef.current?.closing);
+            }}
+            onPlaying={(event) => {
+              if (activeRef.current && !event.currentTarget.paused) setMediaPlaying(true);
+              handlePlaying(event);
+              prepareNextEpisode(event);
+            }}
             onWaiting={() => { if (canPlay && playbackVersion === mediaVersion.current) setMediaBuffering(true); }}
             onCanPlay={() => { if (canPlay && playbackVersion === mediaVersion.current) setMediaBuffering(false); }}
             onError={(event) => {

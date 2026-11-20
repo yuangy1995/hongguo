@@ -33,7 +33,7 @@ function createUpdateInstaller({ updater, currentVersion, isEnabled, installBloc
     generation++;
     clearNativeInstall();
     nativeReadyVersion = null;
-    update({ status: 'idle', version: null, percent: 0, error: '', downloaded: false });
+    update({ status: 'idle', version: null, percent: 0, error: '', downloaded: false, retryWhenIdle: false });
     cancellationToken?.cancel();
     return { success: true, state: getState() };
   }
@@ -49,7 +49,7 @@ function createUpdateInstaller({ updater, currentVersion, isEnabled, installBloc
     if (state.downloaded && state.version === expectedVersion) return Promise.resolve({ success: true, state: getState() });
     const request = ++generation;
     operationGeneration = request;
-    update({ status: 'checking', version: expectedVersion, percent: 0, error: '', downloaded: false });
+    update({ status: 'checking', version: expectedVersion, percent: 0, error: '', downloaded: false, retryWhenIdle: false });
     operation = (async () => {
       try {
         const result = await updater.checkForUpdates();
@@ -82,7 +82,7 @@ function createUpdateInstaller({ updater, currentVersion, isEnabled, installBloc
     clearNativeInstall();
     if (!isEnabled() || state.status !== 'installing') return;
     const blocked = installBlocker();
-    if (blocked) { update({ status: 'downloaded', error: blocked }); return; }
+    if (blocked) { update({ status: 'downloaded', error: blocked, retryWhenIdle: true }); return; }
     try {
       if (updater.nativeUpdater && nativeReadyVersion !== state.version) {
         const version = state.version;
@@ -99,8 +99,8 @@ function createUpdateInstaller({ updater, currentVersion, isEnabled, installBloc
   function install() {
     if (!isEnabled() || !state.downloaded || !['downloaded', 'error'].includes(state.status)) return fail('请先完成更新下载。');
     const blocked = installBlocker();
-    if (blocked) return fail(blocked);
-    update({ status: 'installing', error: '' });
+    if (blocked) return { ...fail(blocked), retryWhenIdle: true };
+    update({ status: 'installing', error: '', retryWhenIdle: false });
     // Finish the IPC response before starting native preparation or quitting.
     setImmediate(finishInstall);
     return { success: true, state: getState() };

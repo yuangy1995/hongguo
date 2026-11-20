@@ -106,6 +106,7 @@ let appUpdater = null;
 let macUpdateSession = null;
 let updateDownloadGeneration = 0;
 let pendingUpdateOperations = 0;
+let updatePlaybackSender = null;
 let quitCleanup = null;
 let quitReady = false;
 let quitAccountReady = false;
@@ -5175,6 +5176,14 @@ function fetchAppUpdateRelease(signal) {
     headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Hongguo-Drama-Update-Check' },
   });
 }
+function appUpdateInstallBlocker() {
+  if (updatePlaybackSender && updatePlaybackSender === mainWindow?.webContents) return '正在播放视频，暂停或结束播放后将继续更新。';
+  if (pendingUpdateOperations) return '正在处理任务或保存设置，请稍后再安装更新。';
+  if (downloadRuns.size || downloadQueue.length || sourceRetryTimers.size) return '还有下载或等待重试的任务，请先在下载管理中暂停全部任务，再安装更新。';
+  if (mergeTasks.some(task => task.status === 'running') || compatPreparing.size || onlinePreparing.size) return '正在合并或准备视频，请等待完成或取消后再安装更新。';
+  if (storageError) return '本地数据保存异常，请先处理保存问题，再安装更新。';
+  return '';
+}
 function getAppUpdateInstaller() {
   if (!appUpdateInstaller && process.platform === 'darwin') {
     macUpdateSession = session.fromPartition('hongguo-mac-update', { cache: false });
@@ -5184,6 +5193,9 @@ function getAppUpdateInstaller() {
       arch: process.arch,
       tempDir: app.getPath('temp'),
       isEnabled: () => !proxyStartupFallback && getCurrentSettings().app_updates_enabled !== false,
+      installBlocker: appUpdateInstallBlocker,
+      execPath: process.execPath,
+      quitApp: () => app.quit(),
       fetchRelease: async signal => (await fetchAppUpdateRelease(signal)).data,
       downloadImage: createMacDownloadTransport(macUpdateSession),
       openPath: file => shell.openPath(file),
@@ -5201,19 +5213,16 @@ function getAppUpdateInstaller() {
       currentVersion: APP_VERSION,
       source: APP_UPDATE_SOURCE,
       isEnabled: () => !IS_PREVIEW && getCurrentSettings().app_updates_enabled !== false,
-      installBlocker: () => {
-        if (pendingUpdateOperations) return '正在处理任务或保存设置，请稍后再安装更新。';
-        if (downloadRuns.size || downloadQueue.length || sourceRetryTimers.size) return '还有下载或等待重试的任务，请先在下载管理中暂停全部任务，再安装更新。';
-        if (mergeTasks.some(task => task.status === 'running') || compatPreparing.size || onlinePreparing.size) return '正在合并或准备视频，请等待完成或取消后再安装更新。';
-        if (storageError) return '本地数据保存异常，请先处理保存问题，再安装更新。';
-        return '';
-      },
+      installBlocker: appUpdateInstallBlocker,
       emit: state => sendToRenderer('app-update-state', state),
     });
   }
   return appUpdateInstaller;
 }
 ipcMain.handle('get-app-update-state', () => appUpdateState());
+ipcMain.handle('set-app-update-playback-active', (event, active) => {
+  updatePlaybackSender = active === true ? event.sender : null;
+});
 ipcMain.handle('download-app-update', async () => {
   const support = appUpdateSupport();
   if (!support.supported) return { success: false, error: support.reason };

@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
 const { appUpdateSource } = require('./app-update');
-const { createMacUpdateDownloader } = require('./mac-update-download');
+const { createMacUpdateDownloader, resolveMacAppPath } = require('./mac-update-download');
 
 const source = appUpdateSource();
 const version = '1.0.1';
@@ -94,4 +94,73 @@ test('discards a cancelled partial image and permits retry', async t => {
   assert.equal(updater.getState().status, 'idle');
   assert.deepEqual(await readdir(tempDir), []);
   assert.equal((await updater.download(version)).success, true);
+});
+
+test('resolves macOS app bundle paths safely', () => {
+  assert.equal(resolveMacAppPath('/Applications/红果短剧.app/Contents/MacOS/红果短剧'), '/Applications/红果短剧.app');
+  assert.equal(resolveMacAppPath('/Users/test/App/Custom.app/Contents/MacOS/Electron'), '/Users/test/App/Custom.app');
+  assert.equal(resolveMacAppPath('/usr/local/bin/node'), null);
+  assert.equal(resolveMacAppPath(''), null);
+});
+
+test('self-replaces writable macOS app bundle and quits without opening DMG', async t => {
+  const execPath = '/Applications/红果短剧.app/Contents/MacOS/红果短剧';
+  const stagedPath = '/tmp/staged/红果短剧.app';
+  const applied = [];
+  let quits = 0, blocker = '还有下载任务未完成';
+  const { updater, opened, states } = await fixture(t, {
+    execPath,
+    installBlocker: () => blocker,
+    canSelfReplace: async target => target === '/Applications/红果短剧.app',
+    stageAppFromDmg: async (_file, _dir, expectedVersion, expectedArch) => {
+      assert.equal(expectedVersion, version);
+      assert.equal(expectedArch, 'arm64');
+      return stagedPath;
+    },
+    applyAndRelaunch: payload => applied.push(payload),
+    quitApp: () => { quits++; },
+  });
+  assert.equal((await updater.download(version)).success, true);
+  const blockedResult = await updater.install();
+  assert.equal(blockedResult.success, false);
+  assert.equal(blockedResult.error, blocker);
+  assert.equal(applied.length, 0);
+  assert.equal(quits, 0);
+
+  blocker = '';
+  const installed = await updater.install();
+  assert.equal(installed.success, true);
+  assert.equal(installed.state.status, 'installing');
+  assert.equal(opened.length, 0);
+  assert.equal(applied.length, 1);
+  assert.equal(applied[0].targetAppPath, '/Applications/红果短剧.app');
+  assert.equal(applied[0].stagedApp, stagedPath);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(quits, 1);
+  assert.ok(states.some(state => state.status === 'installing'));
+});
+
+test('falls back to opening DMG on staging errors and rejects invalid bundles', async t => {
+  const execPath = '/Applications/红果短剧.app/Contents/MacOS/红果短剧';
+  const fallback = await fixture(t, {
+    execPath,
+    canSelfReplace: async () => true,
+    stageAppFromDmg: async () => { throw new Error('hdiutil busy'); },
+  });
+  assert.equal((await fallback.updater.download(version)).success, true);
+  const fallbackResult = await fallback.updater.install();
+  assert.equal(fallbackResult.success, true);
+  assert.equal(fallbackResult.state.fallbackManual, true);
+  assert.equal(fallback.opened.length, 1);
+
+  const tampered = await fixture(t, {
+    execPath,
+    canSelfReplace: async () => true,
+    stageAppFromDmg: async () => { throw Object.assign(new Error('bad signature'), { invalidBundle: true }); },
+  });
+  assert.equal((await tampered.updater.download(version)).success, true);
+  const tamperedResult = await tampered.updater.install();
+  assert.equal(tamperedResult.success, false);
+  assert.equal(tampered.opened.length, 0);
+  assert.equal(tampered.updater.getState().status, 'idle');
 });

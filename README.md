@@ -2,6 +2,12 @@
 
 本项目基于 [jackotom/hongguo-drama](https://github.com/jackotom/hongguo-drama) 修改。感谢原作者 jackotom 和原项目贡献者。
 
+## 1.0.3 更新内容
+
+- 优化应用内更新。支持的版本可自动下载新版，在播放和任务空闲时安装并重启。
+
+[1.0.3 更新说明](docs/release-notes/1.0.3.md)
+
 ## 1.0.2 更新内容
 
 - 调整发现、搜索、播放器、观看记录、下载管理和设置的桌面布局。
