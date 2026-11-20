@@ -13,6 +13,14 @@
 
 需要发新版本时，由维护者手动合并上游改动并检查本项目的功能，再通过 GitHub Actions 的「发布桌面版」启动四平台发行。
 
+## 1.0.3 正式发行
+
+1.0.3 已于 2026-11-20 20:57:52（Asia/Shanghai）公开并设为 Latest。标签 `v1.0.3` 对应源码 `7ec0d7281d4d2e59743dea8e2b176974ac469e54`，20 份附件及匿名下载入口已核对。见 [发布页](https://github.com/yuangy1995/hongguo/releases/tag/v1.0.3)及[四平台构建和验收](https://github.com/yuangy1995/hongguo/actions/runs/44738520421)。
+
+- 双 Mac DMG 的临时签名、架构、版本和启动通过。Apple 芯片包通过红果随机素材《侯爷临终扶庶子上位，圣旨赐下后他慌了》第 1、2 集真实下载和各约 10 秒静音播放。Intel Mac 覆盖启动。
+- Linux AppImage 在隔离资料中真实下载并静音播放《母凭子贵后被皇家宠上天3》第 69、70 集各约 10 秒，启动和软件解码资源检查通过。Windows x64 便携版在 GitHub 虚拟机真实下载《少夫人来自东北3》第 34、35 集并静音播放各约 10 秒，安装、重装及 1.80 升级检查通过，EXE 未签名。
+- 自动下载、播放暂停更新、任务结束后继续安装、安装失败后的重试和回退均做了定向验证。使用公开 Apple 芯片 DMG 通过真实下载、校验、隔离应用替换及隔离启动检查。Windows 在线更新覆盖源码回归和更新清单核对，安装升级由最终安装包验证。见 [通用源码检查](https://github.com/yuangy1995/hongguo/actions/runs/44738517271)。
+
 ## 1.0.2 正式发行
 
 1.0.2 已于 2026-11-20 18:46:33（Asia/Shanghai）公开并设为 Latest。标签 `v1.0.2` 对应源码 `8edef57556f9ebc4e0cba3e67a940e7cf1cccf09`。四平台共 20 份附件，含对应源码、更新清单和 SHA256。Mac 1.0.0 和 1.0.1 需从发布页下载安装一次，之后可在应用内下载新版 DMG。见 [1.0.2 发布页](https://github.com/yuangy1995/hongguo/releases/tag/v1.0.2)和[更新内容](release-notes/1.0.2.md)。
