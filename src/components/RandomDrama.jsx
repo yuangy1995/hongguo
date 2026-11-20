@@ -123,7 +123,7 @@ export default function RandomDrama({ active, refreshKey = 0, onNavigate }) {
           {selected.episode_count > 0 && <p>{t("共 ")}{t(selected.episode_count)}{t(" 集")}</p>}
           {selected.tags?.length > 0 && <p className="random-drama-tags">{selected.tags.join(' · ')}</p>}
           <div className="random-drama-actions">
-            <button className="btn btn-primary" disabled={resolving || shaking} onClick={play}><Play size={16} />{t(resolving ? '正在打开…' : '在剧库播放')}</button>
+            <button className="btn btn-primary" disabled={resolving || shaking} onClick={play}><Play size={16} />{t(resolving ? '正在打开…' : '在播放器播放')}</button>
             <button className="btn btn-outline" disabled={resolving || shaking} onClick={draw}><RefreshCw size={15} />{t("再抽一次")}</button>
           </div>
           {resolving && <button className="drama-text-button" onClick={() => { playController.current?.abort(); setResolving(false); setPlayError('已取消加载，可以重试或再抽一部。'); }}>{t("取消加载")}</button>}

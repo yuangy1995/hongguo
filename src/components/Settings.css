@@ -402,5 +402,3 @@
 .settings-inline-save { display: flex; align-items: center; gap: 16px; }
 .settings-inline-save .proxy-switch-row { flex: 1; min-width: 0; }
 .settings-inline-save > button { flex-shrink: 0; }
-
-.settings-path code { word-break: break-all; }

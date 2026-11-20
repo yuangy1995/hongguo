@@ -236,8 +236,8 @@ function DramaFeed({ active = true, onNavigate }) {
             <h3>{selected.series_title}</h3>
             <p className="drama-feed-tags">{[selected.episode_count > 0 && t('{0} 集', [selected.episode_count]), ...(selected.tags || [])].filter(Boolean).join(' · ') || t('来自{0}片单', [sourceLabel])}</p>
             {typeof introduction === 'string' && introduction.trim() && <p className="drama-feed-intro">{introduction}</p>}
-            {mobile && <p className="drama-feed-play-note">{t("在「我的剧库」选集、播放，接着上次继续看。")}</p>}
-            <div className="drama-feed-actions"><button className="btn btn-primary" disabled={resolving} onClick={startItem}><Play size={16} />{t(resolving ? '正在打开剧库…' : '在剧库播放')}</button>
+            {mobile && <p className="drama-feed-play-note">{t("在「播放器」选集、播放，接着上次继续看。")}</p>}
+            <div className="drama-feed-actions"><button className="btn btn-primary" disabled={resolving} onClick={startItem}><Play size={16} />{t(resolving ? '正在打开播放器…' : '在播放器播放')}</button>
               {resolving && <button className="btn btn-outline" onClick={() => { playController.current?.abort(); setResolving(false); setPlayError('已取消加载，可重试本剧。'); }}>{t("取消加载")}</button>}</div>
             {playError && <p className="drama-inline-error" role="alert">{t(playError)}</p>}
           </div>

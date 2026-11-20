@@ -50,10 +50,10 @@ function describeProxy(settings) {
 
 const SETTINGS_SECTIONS = [
   ['appearance', '外观'], ['playback', '播放设置'], ['downloads', '下载设置'],
-  ['network', '来源与网络'], ['updates', '通知与更新'], ['data', '本机资料'],
+  ['network', '来源与网络'], ['updates', '通知与更新'],
 ];
 
-function SettingsPage({ active = true, preview = false, appInfo = null, wakeRegionFocus = 0 }) {
+function SettingsPage({ active = true, preview = false, configNote = '', wakeRegionFocus = 0 }) {
   useLanguage();
   const danmakuSource = useDanmakuSource();
   const [settings, setSettings] = useState(null);
@@ -266,6 +266,7 @@ function SettingsPage({ active = true, preview = false, appInfo = null, wakeRegi
           }}>{t(name)}</button>)}
       </nav>
       <div className="settings-section-content" aria-label={t(SETTINGS_SECTIONS.find(([id]) => id === section)?.[1])}>
+      {section === 'downloads' && configNote && <p className="alert alert-error" role="alert">{t(configNote)}</p>}
       <section className="settings-card settings-appearance" aria-label={t("外观设置")} hidden={section !== 'appearance'}><AppearanceSettings active={active && section === 'appearance'} /></section>
       <fieldset className="settings-card" disabled={saving} hidden={section !== 'network'} aria-label={t("网络代理")}>
         <div className="settings-group">
@@ -278,6 +279,7 @@ function SettingsPage({ active = true, preview = false, appInfo = null, wakeRegi
             <button className="btn btn-outline btn-sm" onClick={openProxyModal}>
               <Globe size={15} />{t("配置代理")}</button>
           </div>
+          {section === 'network' && settings.proxy_password_warning && <p className="alert alert-error" role="alert">{t(settings.proxy_password_warning)}</p>}
           <details className="settings-disclosure">
             <summary>{t("代理说明")}</summary>
             <p className="settings-hint">{t("手动代理用于接口、下载和应用内浏览器；跟随系统时，接口与下载读取启动时的环境代理及绕过规则，发现页等浏览器请求使用系统代理。保存后立即生效。")}</p>
@@ -412,18 +414,6 @@ function SettingsPage({ active = true, preview = false, appInfo = null, wakeRegi
           <label className="proxy-switch-row"><input type="checkbox" checked={settings.watch_updates_enabled !== false} onChange={event => update('watch_updates_enabled', event.target.checked)} /><span className="proxy-switch-text">{t("自动检查新集")}<em>{t("应用运行期间，每部剧约 6 小时检查一次；列表较多时分批检查")}</em></span></label>
           <label className="proxy-switch-row"><input type="checkbox" checked={settings.watch_sequels_enabled !== false} onChange={event => update('watch_sequels_enabled', event.target.checked)} /><span className="proxy-switch-text">{t("查找疑似新一季")}<em>{t("约每天按剧名搜索一次，仅提示同名且季数更高的剧；可能遗漏或误报")}</em></span></label>
           <label className="proxy-switch-row"><input type="checkbox" checked={settings.watch_notifications_enabled === true} onChange={event => update('watch_notifications_enabled', event.target.checked)} /><span className="proxy-switch-text">{t("发送系统通知")}<em>{t("默认关闭。开启后还需允许 macOS 通知；关闭不影响观看记录红点")}</em></span></label>
-        </div>
-
-        <div className="settings-group" hidden={section !== 'data'}>
-          <span className="settings-label">{t("配置文件位置")}</span>
-          {settings.proxy_password_warning && <p className="alert alert-error" role="alert">{t(settings.proxy_password_warning)}</p>}
-          <p className="settings-hint">{t("代理密码由本机系统安全存储加密；更换电脑后可能需要重新输入。")}</p>
-          <p className="settings-hint settings-path"><code>{t(appInfo?.dataDir || '系统配置目录')}</code></p>
-          {appInfo?.configNote
-            ? <p className="settings-hint" role="status">{t(appInfo.configNote)}</p>
-            : <p className="settings-hint">{t(appInfo?.configMode === 'portable'
-              ? '便携版：设置、下载记录与界面数据保存在程序目录的 data 文件夹；从旧版本切换时，原系统目录里的搜索历史不会自动带入。移动或备份程序时请连同该文件夹一起保留。'
-              : '设置、下载记录与界面数据保存在系统用户目录；更换电脑时可复制这个文件夹。')}</p>}
         </div>
 
         {preview ? <>

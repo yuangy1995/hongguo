@@ -15,6 +15,7 @@ export default function AccountManagement({ active = true, loginDialog = false }
     catch { return 'cards'; }
   });
   const [qr, setQr] = useState(null);
+  const [secondsLeft, setSecondsLeft] = useState(0);
   const [loading, setLoading] = useState(true);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [busy, setBusy] = useState(loginDialog);
@@ -26,6 +27,7 @@ export default function AccountManagement({ active = true, loginDialog = false }
   const generation = useRef(0);
   const pollTimer = useRef(null);
   const qrActive = useRef(false);
+  const visibleQr = qr && (!loginDialog || secondsLeft > 0);
   const visibleRows = rows.filter(row => !query.trim() || row.series_title.includes(query.trim()));
   const showHistory = !loginDialog;
 
@@ -81,7 +83,7 @@ export default function AccountManagement({ active = true, loginDialog = false }
     setError(error);
   };
 
-  const schedulePoll = (loginId, token) => {
+  const schedulePoll = (loginId, token, expiresAt) => {
     clearTimeout(pollTimer.current);
     pollTimer.current = setTimeout(async () => {
       if (token !== generation.current) return;
@@ -97,32 +99,41 @@ export default function AccountManagement({ active = true, loginDialog = false }
           return;
         }
         if (result.status === 'cancelled') { finishLogin({ status: '扫码已取消' }); return; }
-        if (result.status === 'expired') {
-          qrActive.current = false;
-          finishLogin({ error: '二维码已过期，请重新获取。' });
+        if (result.status === 'expired' || (loginDialog && Date.now() >= expiresAt)) {
+          if (loginDialog) void beginLogin();
+          else {
+            qrActive.current = false;
+            finishLogin({ error: '二维码已过期，请重新获取。' });
+          }
           return;
         }
         setStatus('等待手机确认扫码登录…');
-        schedulePoll(loginId, token);
+        schedulePoll(loginId, token, expiresAt);
       } catch (failure) {
         if (token === generation.current) {
           finishLogin({ error: failure.message || '扫码登录未完成，请重试' });
         }
       }
-    }, 1000);
+    }, loginDialog ? Math.max(0, Math.min(1000, expiresAt - Date.now())) : 1000);
   };
 
   const beginLogin = async () => {
     const token = ++generation.current;
+    clearTimeout(pollTimer.current);
     qrActive.current = true;
+    setQr(null);
     setBusy(true); setError(''); setStatus('正在获取红果登录二维码…');
     try {
       const result = await window.electronAPI.startAccountLogin?.();
       if (token !== generation.current) return;
       if (!result?.success) throw new Error(result?.error || '二维码获取失败');
-      setQr({ id: result.loginId, image: result.image });
-      setStatus(`请用手机红果 App 扫码，并在手机上确认登录。二维码约 ${result.expiresIn} 秒有效。`);
-      schedulePoll(result.loginId, token);
+      const now = Date.now();
+      const expiresAt = result.expiresAt ?? now + result.expiresIn * 1000;
+      if (loginDialog && (!Number.isFinite(expiresAt) || expiresAt <= now)) throw new Error('二维码获取失败，请重试');
+      setQr({ id: result.loginId, image: result.image, expiresAt });
+      if (loginDialog) setSecondsLeft(Math.ceil((expiresAt - now) / 1000));
+      setStatus(loginDialog ? '等待手机确认扫码登录…' : `请用手机红果 App 扫码，并在手机上确认登录。二维码约 ${result.expiresIn} 秒有效。`);
+      schedulePoll(result.loginId, token, expiresAt);
     } catch (failure) {
       if (token === generation.current) {
         qrActive.current = false;
@@ -194,6 +205,17 @@ export default function AccountManagement({ active = true, loginDialog = false }
       if (loginDialog && qrActive.current) void window.electronAPI.cancelAccountLogin?.().catch(() => {});
     };
   }, [loginDialog]);
+  useEffect(() => {
+    if (!loginDialog || !qr) return;
+    let timer;
+    const update = () => {
+      const remaining = qr.expiresAt - Date.now();
+      setSecondsLeft(Math.max(0, Math.ceil(remaining / 1000)));
+      if (remaining > 0) timer = setTimeout(update, remaining % 1000 || 1000);
+    };
+    update();
+    return () => clearTimeout(timer);
+  }, [loginDialog, qr]);
 
   if (loading && !loginDialog) return <div className="account-page"><p role="status">{t("正在读取红果账号…")}</p></div>;
 
@@ -211,7 +233,7 @@ export default function AccountManagement({ active = true, loginDialog = false }
       <User size={22} />
       <h2>{t("红果账号")}</h2>
     </div>}
-    <section className={account ? 'account-content' : 'account-card'} data-signed-in={!!account} aria-label={t("红果账号状态")}>
+    <section className={account ? 'account-content' : loginDialog ? 'account-login-panel' : 'account-card'} data-signed-in={!!account} aria-label={t("红果账号状态")}>
       {account ? <>
         <header className="account-profile">
           <div className="account-identity">
@@ -267,10 +289,16 @@ export default function AccountManagement({ active = true, loginDialog = false }
         </>}
       </> : <>
         <div className="account-login-copy">
-          <span className="account-avatar" aria-hidden="true"><User size={22} /></span>
+          {!loginDialog && <span className="account-avatar" aria-hidden="true"><User size={22} /></span>}
           <h3>{t("扫码登录")}</h3>
+          {loginDialog && visibleQr && <p>{t("手机红果 App → 我的 → 扫一扫")}</p>}
         </div>
-        {qr && <div className="account-qr"><img src={qr.image} alt={t("红果登录二维码")} /><span>{t("手机红果 App → 我的 → 扫一扫")}</span></div>}
+        {visibleQr && <div className="account-qr">
+          <img src={qr.image} alt={t("红果登录二维码")} />
+          {loginDialog ? <time dateTime={`PT${secondsLeft}S`}>{t("有效期剩余 {0} 秒", [secondsLeft])}</time>
+            : <span>{t("手机红果 App → 我的 → 扫一扫")}</span>}
+        </div>}
+        {loginDialog && feedback}
         <div className="account-page-actions">
           {qr ? <button className="btn btn-outline" type="button" onClick={cancelLogin}>{t("取消扫码")}</button>
             : <button className="btn btn-primary" type="button" disabled={busy} onClick={beginLogin}>{t(busy ? '正在获取二维码…' : '获取登录二维码')}</button>}
@@ -289,7 +317,7 @@ export default function AccountManagement({ active = true, loginDialog = false }
             finally { if (loginDialog) setBusy(false); }
           }}>{t("使用官网登录")}</button>
         </div>
-        {feedback}
+        {!loginDialog && feedback}
       </>}
     </section>
   </div>;

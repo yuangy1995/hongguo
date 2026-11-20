@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 from urllib.parse import quote
 import zipfile
 
@@ -102,11 +103,19 @@ def release():
         '--jq', f'.[]|select(.tag_name=="{tag}")'], text=True).strip()
     return json.loads(result) if result else None
 
+def wait_for_release(draft, *, complete=False):
+    for _ in range(8):
+        info = release()
+        if info and info['draft'] is draft and (not complete or len(info['assets']) >= len(checksums)):
+            return info
+        time.sleep(2)
+    raise RuntimeError(f'GitHub 尚未返回 {tag} 的完整发布状态，请重试发布任务。')
+
 data = release()
 if data is None:
     subprocess.run(['gh', 'release', 'create', tag, '-R', repo, '--draft', '--target', sha,
                     '--title', f'红果短剧桌面版 {version}', '--notes-file', f'docs/release-notes/{version}.md'], check=True)
-    data = release()
+    data = wait_for_release(True)
 def verify(data, draft):
     assert data['draft'] is draft and data['target_commitish']==sha and not data['prerelease']
     remote = {a['name']: a for a in data['assets']}
@@ -131,9 +140,9 @@ if data['draft']:
     if missing:
         subprocess.run(['gh', 'release', 'upload', tag, '-R', repo, *missing], check=True)
 
-    verify(release(), True)
+    verify(wait_for_release(True, complete=True), True)
     subprocess.run(['gh', 'release', 'edit', tag, '-R', repo, '--draft=false', '--latest'], check=True)
-verify(release(), False)
+verify(wait_for_release(False, complete=True), False)
 latest = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/releases/latest'], text=True))
 assert latest['tag_name'] == tag
 

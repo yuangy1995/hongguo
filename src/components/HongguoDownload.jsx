@@ -450,7 +450,7 @@ function HongguoDownload({ onNavigate, active = true }) {
               <div className="batch-action-row">
                 <button className="btn btn-outline" onClick={handlePlay}
                   disabled={openingPlayer || !firstPlayable}
-                  title={t(firstPlayable ? '在我的剧库播放，未下载的分集会在线播放' : '当前剧集没有可播放的分集')}>
+                  title={t(firstPlayable ? '在播放器播放，未下载的分集会在线播放' : '当前剧集没有可播放的分集')}>
                   {openingPlayer ? <RefreshCw size={16} className="spin" /> : <Play size={16} />}
                   <span>{t(openingPlayer ? '正在打开…' : '立即播放')}</span>
                 </button>

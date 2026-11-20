@@ -433,7 +433,7 @@ function createAccountService({
       if (attempt !== loginGeneration) throw new Error('扫码已取消，请重新获取二维码');
       const qr = parseQr(payload);
       login = { id: randomUUID(), token: qr.token, jar, expiresAt: now() + qr.expiresIn * 1000 };
-      return { success: true, loginId: login.id, image: qr.image, expiresIn: qr.expiresIn };
+      return { success: true, loginId: login.id, image: qr.image, expiresIn: qr.expiresIn, expiresAt: login.expiresAt };
     },
 
     async pollLogin(loginId) {

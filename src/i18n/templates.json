@@ -2,6 +2,7 @@
   "共 {0} 条观看记录": "{0} watch history entries",
   "已读取 APP 记录；{0}": "App history loaded; {0}",
   "请用手机红果 App 扫码，并在手机上确认登录。二维码约 {0} 秒有效。": "Scan with the Hongguo phone app and confirm sign-in. QR code expires in about {0} seconds.",
+  "有效期剩余 {0} 秒": "Expires in {0}s",
   "{0} 部": "{0} dramas",
   "继续观看 {0} 第{1}集": "Continue {0}, episode {1}",
   " / 共 {0} 集": " / {0} episodes",

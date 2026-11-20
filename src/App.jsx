@@ -21,7 +21,7 @@ const MENU = [
   { id: 'browse', label: '发现短剧', icon: Home },
   { id: 'feed', label: '热播推荐', icon: Film },
   { id: 'download', label: '搜索与下载', icon: Search },
-  { id: 'player', label: '我的剧库', icon: Play },
+  { id: 'player', label: '播放器', icon: Play },
   { id: 'history', label: '观看记录', icon: Clock },
   { id: 'calendar', label: '收藏与上新', icon: Clock },
   { id: 'manager', label: '下载管理', icon: Download },
@@ -164,7 +164,7 @@ export default function App({ platformPages = {} }) {
         return <DownloadManager active={page === id} onNavigate={navigate} />;
       case 'settings':
         if (platformPages.settings) return React.createElement(platformPages.settings, { active: page === id, appInfo });
-        return <><SettingsPage active={page === id} preview={appInfo?.preview} appInfo={appInfo} wakeRegionFocus={wakeRegionFocus} />
+        return <><SettingsPage active={page === id} preview={appInfo?.preview} configNote={appInfo?.configNote} wakeRegionFocus={wakeRegionFocus} />
           {!mobile && layout === 'portrait' && page === id && <AccountSidebar onCheckpoint={captureAccountCheckpoint} />}</>;
       case 'download':
       default:
@@ -285,7 +285,7 @@ export default function App({ platformPages = {} }) {
         {mobile && <nav className="mobile-navigation" aria-label={t("手机主导航")}>
           {MENU.filter(item => ['browse','download','player','history'].includes(item.id)).map(item => {
             const Icon = item.icon;
-            return <button key={item.id} aria-current={page === item.id ? 'page' : undefined} onClick={() => navigate(item.id)}><Icon size={21} /><span>{t(({ browse: '发现', download: '搜索', player: '剧库', history: '记录' })[item.id])}</span></button>;
+            return <button key={item.id} aria-current={page === item.id ? 'page' : undefined} onClick={() => navigate(item.id)}><Icon size={21} /><span>{t(({ browse: '发现', download: '搜索', player: '播放器', history: '记录' })[item.id])}</span></button>;
           })}
           <button aria-expanded={moreOpen} onClick={() => setMoreOpen(value => !value)}><Settings size={21} /><span>{t("更多")}</span></button>
         </nav>}

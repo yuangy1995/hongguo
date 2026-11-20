@@ -22,7 +22,7 @@
 
 ## 下载
 
-Apple 芯片 Mac、Intel Mac、Windows x64 和 Linux x64 的 1.0.0 安装包见 [本项目发布页](https://github.com/yuangy1995/hongguo/releases)。
+Apple 芯片 Mac、Intel Mac、Windows x64 和 Linux x64 的最新安装包见 [本项目发布页](https://github.com/yuangy1995/hongguo/releases/latest)。
 
 **Android 手机 APK／Android TV 版**由 [N3urda/hongguoTV](https://github.com/N3urda/hongguoTV) 独立维护。
 

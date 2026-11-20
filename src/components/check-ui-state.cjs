@@ -18,7 +18,7 @@ function compile(file) {
   transformed.set(file, code);
   return code;
 }
-async function mount(file, api, props = {}, storage = null, exportName = 'default') {
+async function mount(file, api, props = {}, storage = null, exportName = 'default', now) {
   const slots = [], effects = [], cleanups = [], cache = new Map();
   const timers = new Map();
   let timerId = 0;
@@ -64,6 +64,7 @@ async function mount(file, api, props = {}, storage = null, exportName = 'defaul
   });
   class ResizeObserver { observe() {} unobserve() {} disconnect() {} }
   const shared = { window, document, localStorage, navigator: window.navigator, console, crypto: require('node:crypto').webcrypto, Event, CustomEvent, URL, URLSearchParams, TextEncoder, TextDecoder, AbortController, queueMicrotask, structuredClone, ResizeObserver, setTimeout: (fn, delay) => { const id = ++timerId; timers.set(id, { fn, delay }); return id; }, clearTimeout: id => timers.delete(id), setInterval: () => 1, clearInterval() {}, requestAnimationFrame: fn => { const id = ++timerId; timers.set(id, { fn, delay: 16 }); return id; }, cancelAnimationFrame: id => timers.delete(id) };
+  if (now) shared.Date = class extends Date { static now() { return now(); } };
   const loadModule = (resolved) => {
     if (cache.has(resolved)) return cache.get(resolved).exports;
     const module = { exports: {} };
@@ -405,19 +406,19 @@ async function mount(file, api, props = {}, storage = null, exportName = 'defaul
     assert.equal(requests.at(-1).source, 'xifan'); assert.equal(requests.at(-1).category, 'real-drama');
     lateList.resolve({ success: true, results: [{ series_id: '654321', series_title: '过期的红果榜单', rank: 2 }] }); await ui.flush();
     assert.ok(!ui.text().includes('过期的红果榜单'));
-    ui.button('在剧库播放').props.onClick(); await ui.flush();
+    ui.button('在播放器播放').props.onClick(); await ui.flush();
     source().props.onChange({ target: { value: custom } }); await ui.flush();
     latePlay.resolve(ok(detail('xifan:drama:7'))); await ui.flush();
     assert.equal(played.length, 0, 'switching sources must prevent a pending resolve opening the old player');
     assert.ok(ui.text().includes('自定义真实短剧'));
-    assert.equal(ui.button('在剧库播放').props.disabled, false, 'switching source resets playback loading');
+    assert.equal(ui.button('在播放器播放').props.disabled, false, 'switching source resets playback loading');
     assert.equal(requests.at(-1).source, custom);
-    await ui.button('在剧库播放').props.onClick(); await ui.flush();
+    await ui.button('在播放器播放').props.onClick(); await ui.flush();
     assert.equal(resolved.at(-1), `${custom}:8`, 'the new source ID must reach episode resolution');
     assert.equal(played.length, 1);
     assert.equal(played[0].seriesId, `${custom}:8`);
     assert.equal(played[0].vidIndex, 2, 'the new source must open its first unlocked episode');
-    assert.equal(ui.button('在剧库播放').props.disabled, false);
+    assert.equal(ui.button('在播放器播放').props.disabled, false);
     assert.equal(ui.find(n => n.props.role === 'alert'), undefined, 'successful playback must not leave an error');
     source().props.onChange({ target: { value: 'hongguo' } }); await ui.flush();
     assert.ok(ui.text().includes('榜单第 2 名'), 'returning to Hongguo preserves real ranking metadata');
@@ -484,7 +485,7 @@ async function mount(file, api, props = {}, storage = null, exportName = 'defaul
     webFirst.resolve(list('7000002', '官网缓存片单')); await ui.flush(); assert.ok(ui.text().includes('官网缓存片单'));
     responses.app = appRefresh.promise; route().props.onChange({ target: { value: 'app' } }); await ui.flush();
     assert.ok(ui.text().includes('App缓存片单')); assert.ok(!ui.text().includes('官网缓存片单'));
-    const opening = ui.button('在剧库播放').props.onClick(); await ui.flush();
+    const opening = ui.button('在播放器播放').props.onClick(); await ui.flush();
     responses.web = webRefresh.promise; route().props.onChange({ target: { value: 'web' } }); await ui.flush();
     assert.ok(ui.text().includes('官网缓存片单')); assert.ok(!ui.text().includes('App缓存片单'));
     appRefresh.resolve(list('7000003', '过期App结果')); oldPlay.resolve(ok(detail('7000001'))); await opening; await ui.flush();
@@ -607,14 +608,14 @@ async function mount(file, api, props = {}, storage = null, exportName = 'defaul
     });
     try {
       await ui.flush();
-      const opening = ui.button('在剧库播放').props.onClick(); await ui.flush();
+      const opening = ui.button('在播放器播放').props.onClick(); await ui.flush();
       ui.dispatchEvent(new Event('custom-sources-changed')); await ui.flush();
       assert.equal(registryLoads, 2, 'source event must reach the real registry store');
       pending.resolve(ok(detail('1000001'))); await opening; await ui.flush();
       assert.equal(played.length, 0, 'a resolve from before the source revision must not open the player');
       slow = false;
-      assert.equal(ui.button('在剧库播放').props.disabled, false);
-      await ui.button('在剧库播放').props.onClick(); await ui.flush();
+      assert.equal(ui.button('在播放器播放').props.disabled, false);
+      await ui.button('在播放器播放').props.onClick(); await ui.flush();
       assert.equal(played.length, 1, 'playback must work again with the new source revision');
     } finally { ui.unmount(); }
   });
@@ -713,6 +714,68 @@ async function mount(file, api, props = {}, storage = null, exportName = 'defaul
     ui.unmount();
     assert.equal(cancels, 1);
     deferredQr.resolve({ success: true, loginId: 'closed', image: 'fixture' });
+  });
+  await test('account login dialog counts down from the server deadline and refreshes without an expiry warning', async () => {
+    let clock = 100000, starts = 0;
+    const ui = await mount('AccountManagement', {
+      startAccountLogin: async () => ({ success: true, loginId: String(++starts), image: `fixture-${starts}`, expiresIn: 180, expiresAt: clock + 30000 }),
+      pollAccountLogin: async () => ({ success: true, status: 'pending' }),
+      cancelAccountLogin: async () => ({ success: true }),
+    }, { loginDialog: true }, null, 'default', () => clock);
+    ui.advanceTimers(0, true); await ui.flush();
+    assert.match(ui.text(), /有效期剩余 30 秒/);
+    for (const remaining of [29, 28]) {
+      clock += 1000;
+      ui.advanceTimers(1000); await ui.flush();
+      assert.match(ui.text(), new RegExp(`有效期剩余 ${remaining} 秒`));
+    }
+    clock += 28000;
+    ui.advanceTimers(28000); await ui.flush();
+    assert.equal(starts, 2);
+    assert.equal(ui.find(node => node.type === 'img').props.src, 'fixture-2');
+    assert.match(ui.text(), /有效期剩余 30 秒/);
+    assert.equal(ui.find(node => node.props.role === 'alert'), undefined);
+    await ui.button('取消扫码').props.onClick(); await ui.flush();
+    clock += 30000;
+    ui.advanceTimers(30000); await ui.flush();
+    assert.equal(starts, 2, 'Cancel must stop automatic replacements');
+    ui.unmount();
+  });
+  await test('account login dialog refreshes early server expiry and offers retry if the request fails', async () => {
+    let starts = 0;
+    const ui = await mount('AccountManagement', {
+      startAccountLogin: async () => ++starts === 2 ? { success: false, error: '二维码获取失败，请重试' }
+        : { success: true, loginId: String(starts), image: `fixture-${starts}`, expiresIn: 30 },
+      pollAccountLogin: async id => ({ success: true, status: id === '1' ? 'expired' : 'pending' }),
+    }, { loginDialog: true });
+    ui.advanceTimers(0, true); await ui.flush();
+    ui.advanceTimers(1000); await ui.flush();
+    assert.equal(starts, 2);
+    assert.match(ui.text(), /二维码获取失败，请重试/);
+    assert.doesNotMatch(ui.text(), /二维码已过期/);
+    await ui.button('获取登录二维码').props.onClick(); await ui.flush();
+    assert.equal(ui.find(node => node.type === 'img').props.src, 'fixture-3');
+    ui.unmount();
+  });
+  await test('account login dialog lets an in-flight confirmation finish when the countdown ends', async () => {
+    let clock = 100000, starts = 0;
+    const confirmation = deferred();
+    const ui = await mount('AccountManagement', {
+      startAccountLogin: async () => ({ success: true, loginId: String(++starts), image: 'fixture', expiresIn: 2 }),
+      pollAccountLogin: () => confirmation.promise,
+    }, { loginDialog: true }, null, 'default', () => clock);
+    ui.advanceTimers(0, true); await ui.flush();
+    clock += 1000;
+    ui.advanceTimers(1000); await ui.flush();
+    clock += 1000;
+    ui.advanceTimers(1000); await ui.flush();
+    assert.equal(ui.find(node => node.type === 'img'), undefined);
+    assert.equal(starts, 1);
+    confirmation.resolve({ success: true, status: 'signed-in', account: { nickname: '测试账号' } });
+    await ui.flush();
+    assert.match(ui.text(), /登录成功/);
+    assert.equal(starts, 1);
+    ui.unmount();
   });
   await test('account refresh displays imported progress feedback beside the account toolbar', async () => {
     let requested;
@@ -1738,7 +1801,7 @@ async function mount(file, api, props = {}, storage = null, exportName = 'defaul
     await ui.flush(); ui.button('设置').props.onClick(); ui.render();
     assert.ok(ui.find(n => n.props['data-page'] === 'browse')?.props.hidden, 'browse must remain mounted but hidden');
     assert.equal(ui.find(n => n.props['data-page'] === 'settings')?.props.hidden, false);
-    ui.button('我的剧库').props.onClick(); ui.render(); ui.button('发现短剧').props.onClick(); ui.render();
+    ui.button('播放器').props.onClick(); ui.render(); ui.button('发现短剧').props.onClick(); ui.render();
     const player = ui.find(n => n.props['data-page'] === 'player');
     assert.ok(player?.props.hidden, 'visited player must be retained');
     assert.equal(player.children[0]?.props.active, false, 'hidden player must receive inactive state');
@@ -1754,7 +1817,7 @@ async function mount(file, api, props = {}, storage = null, exportName = 'defaul
     assert.equal(target.seriesId, 'A'); assert.equal(target.vidIndex, 2);
     ui.button('下载管理').props.onClick(); ui.render();
     assert.equal(player().props.target, target, 'background navigation must not reset playback initialization');
-    ui.button('我的剧库').props.onClick(); ui.render();
+    ui.button('播放器').props.onClick(); ui.render();
     assert.equal(player().props.target, target, 'returning must keep the same playback target');
     ui.unmount();
   });

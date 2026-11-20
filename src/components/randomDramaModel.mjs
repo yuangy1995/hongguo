@@ -73,6 +73,6 @@ export async function playRecommendedDrama(api, item, { signal, resume = true } 
   const savedIndex = Number(saved?.vid_index);
   const target = savedIndex > 0 ? playable.find(episode => episode.vid_index === savedIndex) : null;
   const episode = target || first;
-  const playback = await waitForRequest(api.playSeries({ seriesId: String(item.series_id), vidIndex: episode.vid_index, resume: !!target }), { signal, message: '打开剧库超时，请重试' });
-  if (!playback?.success) throw new Error(playback?.error || '打开剧库失败，请重试');
+  const playback = await waitForRequest(api.playSeries({ seriesId: String(item.series_id), vidIndex: episode.vid_index, resume: !!target }), { signal, message: '打开播放器超时，请重试' });
+  if (!playback?.success) throw new Error(playback?.error || '打开播放器失败，请重试');
 }

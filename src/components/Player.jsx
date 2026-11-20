@@ -1816,7 +1816,7 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
     return (
       <div className="player-container">
         <div className="player-header duplicate-page-title">
-          <div className="player-title"><Play size={22} /><h2>{t("我的剧库")}</h2></div>
+          <div className="player-title"><Play size={22} /><h2>{t("播放器")}</h2></div>
         </div>
         <div className="player-empty">
           <Film size={40} />
@@ -2009,7 +2009,7 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
             <input
               type="text"
               className="input-field"
-              aria-label={t("在我的剧库搜索")}
+              aria-label={t("在播放器搜索")}
               placeholder={t("搜索剧名…")}
               value={pickerQuery}
               onChange={(e) => setPickerQuery(e.target.value)}
