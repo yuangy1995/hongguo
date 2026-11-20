@@ -59,6 +59,23 @@ function fmtBytes(bytes) {
 }
 
 const PAGE_SIZE = 100;
+const SERIES_PAGE_SIZE = 24;
+const STATUS_MODAL_TITLES = {
+  active: '进行中任务',
+  retry: '等待重试任务',
+  done: '已完成任务',
+  fail: '失败/停止任务',
+};
+const EPISODE_STATUS_TEXT = {
+  completed: '已下载',
+  downloading: '下载中',
+  pending: '等待中',
+  retrying: '等待重试',
+  failed: '失败',
+  stopped: '已停止',
+  missing: '未下载',
+  locked: '未解锁',
+};
 
 function DownloadManager({ onNavigate, active = true }) {
   const mobile = window.electronAPI?.platform === 'android';
@@ -79,16 +96,35 @@ function DownloadManager({ onNavigate, active = true }) {
   const [seriesFilter, setSeriesFilter] = useState('');
   const [orderVersion, setOrderVersion] = useState(0);
   const [loadError, setLoadError] = useState('');
+  const [statusModal, setStatusModal] = useState(null);
+  const [statusModalPage, setStatusModalPage] = useState(1);
+  const [seriesModalKey, setSeriesModalKey] = useState(null);
+  const [seriesModalFilter, setSeriesModalFilter] = useState('all');
+  const [seriesModalPage, setSeriesModalPage] = useState(1);
+  const [seriesDetail, setSeriesDetail] = useState(null);
+  const [seriesDetailLoading, setSeriesDetailLoading] = useState(false);
+  const [downloadingEpisodes, setDownloadingEpisodes] = useState(() => new Set());
   const toastTimerRef = useRef(null);
   const moreActionsRef = useRef(null);
   const usageNoticeRef = useRef(null);
   const mergeRequestRef = useRef(false);
   const mergeDialogGenerationRef = useRef(0);
+  const seriesDetailReqRef = useRef(0);
   const activeRef = useRef(active);
   activeRef.current = active;
   const requests = useRef({ tasks: 0, queue: 0, series: 0, merges: 0 });
   const taskIndex = useRef(new Map());
   const downloadedSeries = useRef(new Set());
+
+  useEffect(() => {
+    if (!active) {
+      seriesDetailReqRef.current += 1;
+      setStatusModal(null);
+      setSeriesModalKey(null);
+      setSeriesDetail(null);
+      setSeriesDetailLoading(false);
+    }
+  }, [active]);
 
   useEffect(() => {
     const menu = moreActionsRef.current;
@@ -461,6 +497,113 @@ function DownloadManager({ onNavigate, active = true }) {
     askDelete(done, '清空已完成任务');
   };
 
+  const closeSeriesModal = useCallback(() => {
+    seriesDetailReqRef.current += 1;
+    setSeriesModalKey(null);
+    setSeriesDetail(null);
+    setSeriesDetailLoading(false);
+  }, []);
+
+  const loadSeriesDetail = useCallback(async (seriesId, key) => {
+    if (!seriesId || typeof window.electronAPI?.getSeriesEpisodes !== 'function') {
+      setSeriesDetail(null);
+      setSeriesDetailLoading(false);
+      return;
+    }
+    const request = ++seriesDetailReqRef.current;
+    setSeriesDetailLoading(true);
+    try {
+      const res = await window.electronAPI.getSeriesEpisodes(seriesId);
+      if (!activeRef.current || request !== seriesDetailReqRef.current) return;
+      if (res?.success && Array.isArray(res.data?.episodes)) {
+        setSeriesDetail({
+          key,
+          seriesId: String(seriesId),
+          cover: res.data.cover || '',
+          total: res.data.total || res.data.episodes.length,
+          episodes: res.data.episodes,
+        });
+      } else {
+        setSeriesDetail(null);
+      }
+    } catch {
+      if (activeRef.current && request === seriesDetailReqRef.current) setSeriesDetail(null);
+    } finally {
+      if (activeRef.current && request === seriesDetailReqRef.current) setSeriesDetailLoading(false);
+    }
+  }, []);
+
+  const openSeriesModal = useCallback((group) => {
+    if (!group) return;
+    setSeriesModalKey(group.key);
+    setSeriesModalFilter('all');
+    setSeriesModalPage(1);
+    setSeriesDetail(null);
+    if (group.seriesId) void loadSeriesDetail(group.seriesId, group.key);
+  }, [loadSeriesDetail]);
+
+  const openStatusModal = useCallback((status) => {
+    setStatusModal(status);
+    setStatusModalPage(1);
+  }, []);
+
+  const downloadMissingEpisode = async (seriesId, vidIndex) => {
+    if (!seriesId || typeof window.electronAPI?.downloadSingleEpisode !== 'function') return;
+    const epKey = `${seriesId}:${vidIndex}`;
+    setDownloadingEpisodes(prev => new Set(prev).add(epKey));
+    try {
+      const res = await window.electronAPI.downloadSingleEpisode(seriesId, vidIndex);
+      if (!res?.success) throw new Error(res?.error || '加入下载失败');
+      await refresh();
+      showToast(res.count > 0 ? `第 ${vidIndex} 集已加入下载队列` : `第 ${vidIndex} 集已在队列中`);
+    } catch (error) {
+      showToast(error.message || '加入下载失败', 'error');
+    } finally {
+      setDownloadingEpisodes(prev => {
+        const next = new Set(prev);
+        next.delete(epKey);
+        return next;
+      });
+    }
+  };
+
+  const downloadAllMissing = async (group, missingEpisodes) => {
+    if (!group?.seriesId || !missingEpisodes.length) return;
+    const batchKey = `${group.seriesId}:all`;
+    setDownloadingEpisodes(prev => new Set(prev).add(batchKey));
+    try {
+      const res = await window.electronAPI.hongguoDownloadBatch({
+        seriesId: group.seriesId,
+        seriesTitle: group.title,
+        episodes: missingEpisodes.map(ep => ({ vid: ep.vid, vid_index: ep.vid_index, title: ep.title })),
+      });
+      if (!res?.success) throw new Error(res?.error || '提交下载失败');
+      await refresh();
+      showToast(res.count > 0 ? `已将 ${res.count} 集加入下载队列` : '所选集数已在下载队列中');
+    } catch (error) {
+      showToast(error.message || '提交下载失败', 'error');
+    } finally {
+      setDownloadingEpisodes(prev => {
+        const next = new Set(prev);
+        next.delete(batchKey);
+        return next;
+      });
+    }
+  };
+
+  const toggleGroupSelect = (groupTasks) => {
+    const ids = groupTasks.map(task => task.id);
+    const allGroupSelected = ids.length > 0 && ids.every(id => selected.has(id));
+    setSelected(previous => {
+      const next = new Set(previous);
+      for (const id of ids) {
+        if (allGroupSelected) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+  };
+
   // Progress updates change row values, not the established series/episode order.
   const sortedIds = useMemo(() => sortTasks(tasks).map(task => task.id), [orderVersion]);
   const taskById = useMemo(() => new Map(tasks.map(task => [task.id, task])), [tasks]);
@@ -484,11 +627,55 @@ function DownloadManager({ onNavigate, active = true }) {
   const scopedIds = useMemo(() => activeFilter
     ? sortedIds.filter(id => seriesKey(taskById.get(id)) === activeFilter) : sortedIds,
   [sortedIds, taskById, activeFilter]);
+  const seriesGroups = useMemo(() => {
+    const groups = new Map();
+    for (const id of scopedIds) {
+      const task = taskById.get(id);
+      if (!task) continue;
+      const key = seriesKey(task);
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          key,
+          seriesId: task.hongguoInfo?.series_id != null ? String(task.hongguoInfo.series_id) : null,
+          title: seriesLabel(task),
+          cover: '',
+          tasks: [],
+          completed: 0,
+          downloading: 0,
+          pending: 0,
+          retrying: 0,
+          failed: 0,
+          stopped: 0,
+          receivedBytes: 0,
+          totalBytes: 0,
+          activeProgressSum: 0,
+          firstCompletedId: null,
+        };
+        groups.set(key, group);
+      }
+      group.tasks.push(task);
+      if (!group.cover && task.videoInfo?.cover) group.cover = task.videoInfo.cover;
+      if (task.status === 'completed') {
+        group.completed++;
+        if (!group.firstCompletedId) group.firstCompletedId = task.id;
+      } else if (task.status === 'downloading') {
+        group.downloading++;
+        group.activeProgressSum += Number(task.progress) || 0;
+      } else if (task.status === 'pending') group.pending++;
+      else if (isWaitingRetry(task)) group.retrying++;
+      else if (task.status === 'failed') group.failed++;
+      else if (task.status === 'stopped') group.stopped++;
+      group.receivedBytes += Number(task.receivedBytes) || 0;
+      group.totalBytes += Number(task.totalBytes) || 0;
+    }
+    return [...groups.values()];
+  }, [scopedIds, taskById]);
   const allSelected = scopedTasks.length > 0 && scopedTasks.every(task => selected.has(task.id));
   const selectAll = () => setSelected(new Set(scopedTasks.map(task => task.id)));
-  const pageCount = Math.max(1, Math.ceil(scopedIds.length / PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(seriesGroups.length / SERIES_PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
-  const visibleTasks = scopedIds.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE).map(id => taskById.get(id)).filter(Boolean);
+  const visibleGroups = seriesGroups.slice((currentPage - 1) * SERIES_PAGE_SIZE, currentPage * SERIES_PAGE_SIZE);
 
   const activeCount = scopedTasks.filter((t) => t.status === 'downloading' || t.status === 'pending').length;
   const completedCount = scopedTasks.filter((t) => t.status === 'completed').length;
@@ -498,6 +685,125 @@ function DownloadManager({ onNavigate, active = true }) {
     [scopedTasks]
   );
   const failedCount = failedTasks.length;
+
+  const statusModalTasks = useMemo(() => {
+    if (!statusModal) return [];
+    const list = scopedIds.map(id => taskById.get(id)).filter(Boolean);
+    if (statusModal === 'active') return list.filter(t => t.status === 'downloading' || t.status === 'pending');
+    if (statusModal === 'retry') return list.filter(isWaitingRetry);
+    if (statusModal === 'done') return list.filter(t => t.status === 'completed');
+    if (statusModal === 'fail') return list.filter(needsManualRetry);
+    return [];
+  }, [statusModal, scopedIds, taskById]);
+  const statusModalPageCount = Math.max(1, Math.ceil(statusModalTasks.length / PAGE_SIZE));
+  const currentStatusPage = Math.min(statusModalPage, statusModalPageCount);
+  const visibleStatusTasks = statusModalTasks.slice((currentStatusPage - 1) * PAGE_SIZE, currentStatusPage * PAGE_SIZE);
+
+  const activeSeriesGroup = useMemo(
+    () => (seriesModalKey ? seriesGroups.find(group => group.key === seriesModalKey) || null : null),
+    [seriesModalKey, seriesGroups]
+  );
+  const seriesModalEpisodes = useMemo(() => {
+    if (!activeSeriesGroup) return [];
+    const taskByIndex = new Map();
+    const extraTasks = [];
+    for (const task of activeSeriesGroup.tasks) {
+      const idx = Number(task.hongguoInfo?.vid_index);
+      if (Number.isFinite(idx) && idx > 0 && !taskByIndex.has(idx)) taskByIndex.set(idx, task);
+      else extraTasks.push(task);
+    }
+    const items = [];
+    const remoteEpisodes = seriesDetail?.key === activeSeriesGroup.key ? seriesDetail.episodes : null;
+    if (Array.isArray(remoteEpisodes) && remoteEpisodes.length > 0) {
+      const seenIndices = new Set();
+      for (const ep of remoteEpisodes) {
+        const idx = Number(ep.vid_index);
+        seenIndices.add(idx);
+        const liveTask = taskByIndex.get(idx) || null;
+        let effectiveStatus = 'missing';
+        if (liveTask) {
+          effectiveStatus = isWaitingRetry(liveTask) ? 'retrying' : liveTask.status;
+        } else if (ep.status === 'completed') {
+          effectiveStatus = 'completed';
+        } else if (ep.locked) {
+          effectiveStatus = 'locked';
+        }
+        items.push({
+          key: liveTask ? liveTask.id : `ep-${idx}`,
+          vid_index: idx,
+          vid: ep.vid,
+          title: ep.title ? `第 ${idx} 集 · ${ep.title}` : `第 ${idx} 集`,
+          effectiveStatus,
+          task: liveTask,
+          locked: ep.locked === true,
+          fileSize: liveTask ? (liveTask.totalBytes || liveTask.receivedBytes || 0) : (ep.fileSize || 0),
+          progress: liveTask ? (liveTask.progress || 0) : (ep.progress || 0),
+          error: liveTask?.error || ep.error || '',
+        });
+      }
+      for (const [idx, task] of taskByIndex.entries()) {
+        if (!seenIndices.has(idx)) extraTasks.push(task);
+      }
+    } else {
+      for (const task of activeSeriesGroup.tasks) {
+        const idx = Number(task.hongguoInfo?.vid_index) || 0;
+        items.push({
+          key: task.id,
+          vid_index: idx,
+          vid: task.hongguoInfo?.vid,
+          title: task.title || task.filename || `第 ${idx} 集`,
+          effectiveStatus: isWaitingRetry(task) ? 'retrying' : task.status,
+          task,
+          locked: false,
+          fileSize: task.totalBytes || task.receivedBytes || 0,
+          progress: task.progress || 0,
+          error: task.error || '',
+        });
+      }
+      return items;
+    }
+    for (const task of extraTasks) {
+      items.push({
+        key: task.id,
+        vid_index: Number(task.hongguoInfo?.vid_index) || 0,
+        vid: task.hongguoInfo?.vid,
+        title: task.title || task.filename,
+        effectiveStatus: isWaitingRetry(task) ? 'retrying' : task.status,
+        task,
+        locked: false,
+        fileSize: task.totalBytes || task.receivedBytes || 0,
+        progress: task.progress || 0,
+        error: task.error || '',
+      });
+    }
+    return items.sort((a, b) => (a.vid_index || 0) - (b.vid_index || 0));
+  }, [activeSeriesGroup, seriesDetail]);
+
+  const seriesModalCounts = useMemo(() => {
+    const counts = { all: seriesModalEpisodes.length, completed: 0, downloading: 0, pending: 0, missing: 0, retrying: 0, fail: 0 };
+    for (const item of seriesModalEpisodes) {
+      if (item.effectiveStatus === 'completed') counts.completed++;
+      else if (item.effectiveStatus === 'downloading') counts.downloading++;
+      else if (item.effectiveStatus === 'pending') counts.pending++;
+      else if (item.effectiveStatus === 'missing') counts.missing++;
+      else if (item.effectiveStatus === 'retrying') counts.retrying++;
+      else if (item.effectiveStatus === 'failed' || item.effectiveStatus === 'stopped') counts.fail++;
+    }
+    return counts;
+  }, [seriesModalEpisodes]);
+
+  const filteredSeriesEpisodes = useMemo(() => {
+    if (seriesModalFilter === 'all') return seriesModalEpisodes;
+    if (seriesModalFilter === 'fail') return seriesModalEpisodes.filter(item => item.effectiveStatus === 'failed' || item.effectiveStatus === 'stopped');
+    return seriesModalEpisodes.filter(item => item.effectiveStatus === seriesModalFilter);
+  }, [seriesModalEpisodes, seriesModalFilter]);
+  const seriesModalPageCount = Math.max(1, Math.ceil(filteredSeriesEpisodes.length / PAGE_SIZE));
+  const currentSeriesModalPage = Math.min(seriesModalPage, seriesModalPageCount);
+  const visibleSeriesEpisodes = filteredSeriesEpisodes.slice((currentSeriesModalPage - 1) * PAGE_SIZE, currentSeriesModalPage * PAGE_SIZE);
+  const missingUnlockedEpisodes = useMemo(
+    () => seriesModalEpisodes.filter(item => item.effectiveStatus === 'missing' && !item.locked),
+    [seriesModalEpisodes]
+  );
 
   // 与主进程 pauseAllTasks 一致；按钮始终控制所有剧，不受当前筛选影响。
   const pausableCount = useMemo(
@@ -515,7 +821,111 @@ function DownloadManager({ onNavigate, active = true }) {
     [selected, taskById]
   );
 
-  useDialogKeyboard(active && !!(confirmAsk || mergeAsk), () => { setConfirmAsk(null); closeMergeDialog(); }, '.dm-container .player-confirm');
+  const dialogSelector = confirmAsk ? '[data-dm-dialog="delete"]' : mergeAsk ? '[data-dm-dialog="merge"]'
+    : statusModal ? '.dm-status-modal' : '.dm-series-modal';
+  useDialogKeyboard(active && !!(confirmAsk || mergeAsk || statusModal || activeSeriesGroup), () => {
+    if (confirmAsk) { setConfirmAsk(null); return; }
+    if (mergeAsk) { closeMergeDialog(); return; }
+    if (statusModal) { setStatusModal(null); return; }
+    if (seriesModalKey) closeSeriesModal();
+  }, `.dm-container ${dialogSelector}`);
+
+  const renderTaskRow = (task, { showCover = true, selectable = false, episodeTitle = '' } = {}) => {
+    const isSel = selected.has(task.id);
+    const waitingRetry = isWaitingRetry(task);
+    const canStop = task.status === 'downloading' || task.status === 'pending' || waitingRetry;
+    const canRetry = task.status === 'failed' || task.status === 'stopped';
+    const pct = task.progress || 0;
+    const statusKey = waitingRetry ? 'pending' : task.status;
+    const statusLabel = waitingRetry ? '等待重试' : (task.status === 'completed' && !showCover ? '已下载' : STATUS_TEXT[task.status] || task.status);
+    return (
+      <div
+        key={task.id}
+        className={`dm-task ${isSel ? 'selected' : ''}`}
+        onClick={selectable ? () => toggleSelect(task.id) : undefined}
+      >
+        {selectable && (
+          <input
+            className="dm-task-select"
+            type="checkbox"
+            aria-label={t(`选择 ${episodeTitle || task.title || task.filename}`)}
+            checked={isSel}
+            onClick={(e) => e.stopPropagation()}
+            onChange={() => toggleSelect(task.id)}
+          />
+        )}
+        {showCover && (
+          <div className="dm-task-cover">
+            {task.videoInfo && task.videoInfo.cover ? (
+              <img src={task.videoInfo.cover} alt="" />
+            ) : (
+              <div className="cover-placeholder"><Film size={18} /></div>
+            )}
+          </div>
+        )}
+        <div className="dm-task-body">
+          <div className="dm-task-title">{episodeTitle || task.title || task.filename}</div>
+          <div className="dm-task-meta">
+            <span className={`status-tag status-${statusKey}`}>{t(statusLabel)}</span>
+            {waitingRetry && <span className="dm-size">{t("自动重试 ")}{t(task.sourceRetries)}/{t(task.sourceRetryLimit || 3)} · {t(new Date(task.retryAt).toLocaleTimeString(getLanguage(), { hour12: false }))}{t(" 后排队")}</span>}
+            {task.status === 'downloading' && task.totalBytes > 0 && (
+              <span className="dm-size">{t(fmtBytes(task.receivedBytes))} / {t(fmtBytes(task.totalBytes))}</span>
+            )}
+            {task.status === 'completed' && (task.totalBytes || task.receivedBytes) > 0 && (
+              <span className="dm-size">{t(fmtBytes(task.totalBytes || task.receivedBytes))}</span>
+            )}
+            {['failed', 'stopped'].includes(task.status) && task.error && <span className="dm-error">{t(task.error)}</span>}
+          </div>
+          {['downloading', 'completed'].includes(task.status) && task.qualityNotice && <div className="dm-quality-notice">{t(task.qualityNotice)}</div>}
+          {task.nasWarning && <div className="dm-error">{t(task.nasWarning)}</div>}
+          {task.metadataWarning && <div className="dm-error">{t(task.metadataWarning)}</div>}
+          {(task.status === 'downloading' || task.status === 'pending') && (
+            <div className="dm-progress">
+              <div className="dm-progress-bar">
+                <div className="dm-progress-fill" style={{ width: pct + '%' }}></div>
+              </div>
+              <span className="dm-pct">{t(pct)}%</span>
+            </div>
+          )}
+        </div>
+        <div className="dm-task-actions" onClick={(e) => e.stopPropagation()}>
+          {canStop && (
+            <button className="icon-btn" title={t(waitingRetry ? '停止自动重试' : '停止')} onClick={async () => {
+              try {
+                const result = await window.electronAPI.stopDownload(task.id);
+                if (!result?.success) throw new Error(result?.error || '停止失败');
+                await refresh();
+              } catch (error) { showToast(error.message || '停止失败', 'error'); }
+            }}>
+              <Square size={16} />
+            </button>
+          )}
+          {canRetry && (
+            <button className="icon-btn" title={t(waitingRetry ? '手动重试（共享冷却可能延后开始）' : '重试')} onClick={async () => {
+              try {
+                const result = await window.electronAPI.retryTask(task.id);
+                if (!result?.success) throw new Error(result?.error || '重试失败');
+              } catch (error) { showToast(error.message || '重试失败', 'error'); }
+            }}>
+              <RefreshCw size={16} />
+            </button>
+          )}
+          <button className="icon-btn" title={t("打开文件夹")} onClick={() => openTaskFolder(task.id)}>
+            <Folder size={16} />
+          </button>
+          <button
+            className="icon-btn icon-btn-danger"
+            title={t("删除任务（可选是否同时删除本地文件）")}
+            onClick={() => {
+              askDelete([task], `删除《${task.hongguoInfo && task.hongguoInfo.series_title ? task.hongguoInfo.series_title : ''}》第 ${task.hongguoInfo ? task.hongguoInfo.vid_index : ''} 集任务`);
+            }}
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   const MoreActions = mobile ? 'details' : 'div';
   const statusCounts = [
@@ -533,10 +943,17 @@ function DownloadManager({ onNavigate, active = true }) {
         </div>
         <div className="dm-stats">
           {statusCounts.map(([status, label, count, Icon]) =>
-            <span className={`dm-stat dm-stat-${status}`} data-empty={count === 0} key={status}>
+            <button
+              type="button"
+              className={`dm-stat dm-stat-${status}`}
+              data-empty={count === 0}
+              key={status}
+              onClick={() => openStatusModal(status)}
+              title={t(`查看${label}任务列表`)}
+            >
               <Icon size={14} aria-hidden="true" />
               <span>{t(label)}{' '}</span><strong>{t(count)}</strong>
-            </span>)}
+            </button>)}
         </div>
         {!mobile && <button type="button" className="btn btn-outline btn-sm" popovertarget="dm-usage-notice">
           <AlertCircle size={15} />{t("下载说明")}
@@ -758,13 +1175,13 @@ function DownloadManager({ onNavigate, active = true }) {
           <button className="btn btn-outline btn-sm" onClick={deleteSelected} disabled={selected.size === 0}
             title={t("删除所有分页中已选的任务，确认时可选择是否同时删除本地文件")}>
             <Trash2 size={15} />{t("删除已选（")}{t(selected.size)}{t("项）")}</button>
-        <span>{t("共 ")}{t(scopedIds.length)}{t(" 项 · 当前 ")}{t(scopedIds.length ? (currentPage - 1) * PAGE_SIZE + 1 : 0)}-{t(Math.min(currentPage * PAGE_SIZE, scopedIds.length))}{t(" 项")}{t(selected.size > 0 ? ` · 已选 ${selected.size} 项（跨页保留）` : '')}</span>
+        <span>{t("共 {0} 部剧 · {1} 个任务", [seriesGroups.length, scopedIds.length])}{t(selected.size > 0 ? ` · 已选 ${selected.size} 项（跨页保留）` : '')}</span>
         </div>
-        <nav className="pagination-controls" aria-label={t("下载任务分页")}>
+        {pageCount > 1 && <nav className="pagination-controls" aria-label={t("下载剧集分页")}>
           <button className="btn btn-outline btn-sm" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>{t("上一页")}</button>
           <span className="pager-status" aria-live="polite">{t("第 {0} / {1} 页", [currentPage, pageCount])}</span>
           <button className="btn btn-outline btn-sm" disabled={currentPage >= pageCount} onClick={() => setPage(currentPage + 1)}>{t("下一页")}</button>
-        </nav>
+        </nav>}
       </div>}
 
       {scopedTasks.length === 0 ? (
@@ -775,84 +1192,304 @@ function DownloadManager({ onNavigate, active = true }) {
           {onNavigate && <button className="btn btn-primary" onClick={() => onNavigate('download')}>{t("添加第一部短剧")}</button>}
         </div>
       ) : (
-        <div className="dm-list">
-          {visibleTasks.map((task) => {
-
-            const isSel = selected.has(task.id);
-            const waitingRetry = isWaitingRetry(task);
-            const canStop = task.status === 'downloading' || task.status === 'pending' || waitingRetry;
-            const canRetry = task.status === 'failed' || task.status === 'stopped';
-            const pct = task.progress || 0;
+        <div className="dm-series-grid">
+          {visibleGroups.map((group) => {
+            const groupAllSelected = group.tasks.length > 0 && group.tasks.every(task => selected.has(task.id));
+            const groupSelectedCount = group.tasks.filter(task => selected.has(task.id)).length;
+            const groupPct = group.tasks.length
+              ? Math.min(100, Math.round(((group.completed * 100) + group.activeProgressSum) / group.tasks.length))
+              : 0;
+            const failedInGroup = group.tasks.filter(needsManualRetry);
+            const activeInGroup = group.downloading + group.pending + group.retrying;
             return (
-              <div key={task.id} className={`dm-task ${isSel ? 'selected' : ''}`} onClick={() => toggleSelect(task.id)}>
-                <input className="dm-task-select" type="checkbox" aria-label={t(`选择 ${task.title || task.filename}`)} checked={isSel} onClick={(e) => e.stopPropagation()} onChange={() => toggleSelect(task.id)} />
-                <div className="dm-task-cover">
-                  {task.videoInfo && task.videoInfo.cover ? (
-                    <img src={task.videoInfo.cover} alt="" />
-                  ) : (
-                    <div className="cover-placeholder"><Film size={18} /></div>
-                  )}
-                </div>
-                <div className="dm-task-body">
-                  <div className="dm-task-title">{(task.title || task.filename)}</div>
-                  <div className="dm-task-meta">
-                    <span className={`status-tag status-${waitingRetry ? 'pending' : task.status}`}>{t(waitingRetry ? '等待重试' : STATUS_TEXT[task.status] || task.status)}</span>
-                    {waitingRetry && <span className="dm-size">{t("自动重试 ")}{t(task.sourceRetries)}/{t(task.sourceRetryLimit || 3)} · {t(new Date(task.retryAt).toLocaleTimeString(getLanguage(), { hour12: false }))}{t(" 后排队")}</span>}
-                    {task.status === 'downloading' && task.totalBytes > 0 && (
-                      <span className="dm-size">{t(fmtBytes(task.receivedBytes))} / {t(fmtBytes(task.totalBytes))}</span>
+              <article
+                key={group.key}
+                className={`dm-series-card ${groupAllSelected ? 'selected' : ''}`}
+                onClick={() => openSeriesModal(group)}
+              >
+                <div className="dm-series-top">
+                  <input
+                    className="dm-task-select dm-series-select"
+                    type="checkbox"
+                    aria-label={t('选择《{0}》', [group.title])}
+                    checked={groupAllSelected}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={() => toggleGroupSelect(group.tasks)}
+                  />
+                  <div className="dm-series-cover">
+                    {group.cover ? (
+                      <img src={group.cover} alt="" />
+                    ) : (
+                      <div className="cover-placeholder"><Film size={22} /></div>
                     )}
-                    {['failed', 'stopped'].includes(task.status) && task.error && <span className="dm-error">{t(task.error)}</span>}
                   </div>
-                  {['downloading', 'completed'].includes(task.status) && task.qualityNotice && <div className="dm-quality-notice">{t(task.qualityNotice)}</div>}
-                  {task.nasWarning && <div className="dm-error">{t(task.nasWarning)}</div>}
-                  {task.metadataWarning && <div className="dm-error">{t(task.metadataWarning)}</div>}
-                  {(task.status === 'downloading' || task.status === 'pending') && (
-                    <div className="dm-progress">
-                      <div className="dm-progress-bar">
-                        <div className="dm-progress-fill" style={{ width: pct + '%' }}></div>
-                      </div>
-                      <span className="dm-pct">{t(pct)}%</span>
+                  <div className="dm-series-info">
+                    <h3 className="dm-series-title" title={group.title}>{group.title}</h3>
+                    <div className="dm-series-sub">
+                      <span>{t("共 {0} 集任务", [group.tasks.length])}</span>
+                      {group.totalBytes > 0 && <span className="dm-size"> · {t(fmtBytes(group.totalBytes))}</span>}
+                      {groupSelectedCount > 0 && !groupAllSelected && <span> · {t("已选 {0}", [groupSelectedCount])}</span>}
                     </div>
-                  )}
+                    <div className="dm-series-chips">
+                      {group.completed > 0 && <span className="status-tag status-completed">{t("已下载")} {t(group.completed)}</span>}
+                      {group.downloading > 0 && <span className="status-tag status-downloading">{t("下载中")} {t(group.downloading)}</span>}
+                      {group.pending > 0 && <span className="status-tag status-pending">{t("等待中")} {t(group.pending)}</span>}
+                      {group.retrying > 0 && <span className="status-tag status-pending">{t("等待重试")} {t(group.retrying)}</span>}
+                      {(group.failed + group.stopped) > 0 && <span className="status-tag status-failed">{t("失败/停止")} {t(group.failed + group.stopped)}</span>}
+                    </div>
+                  </div>
                 </div>
-                <div className="dm-task-actions" onClick={(e) => e.stopPropagation()}>
-                  {canStop && (
-                    <button className="icon-btn" title={t(waitingRetry ? '停止自动重试' : '停止')} onClick={async () => {
-                      try {
-                        const result = await window.electronAPI.stopDownload(task.id);
-                        if (!result?.success) throw new Error(result?.error || '停止失败');
-                        await refresh();
-                      } catch (error) { showToast(error.message || '停止失败', 'error'); }
-                    }}>
-                      <Square size={16} />
-                    </button>
-                  )}
-                  {canRetry && (
-                    <button className="icon-btn" title={t(waitingRetry ? '手动重试（共享冷却可能延后开始）' : '重试')} onClick={async () => {
-                      try {
-                        const result = await window.electronAPI.retryTask(task.id);
-                        if (!result?.success) throw new Error(result?.error || '重试失败');
-                      } catch (error) { showToast(error.message || '重试失败', 'error'); }
-                    }}>
-                      <RefreshCw size={16} />
-                    </button>
-                  )}
-                  <button className="icon-btn" title={t("打开文件夹")} onClick={() => openTaskFolder(task.id)}>
-                    <Folder size={16} />
-                  </button>
-                  <button
-                    className="icon-btn icon-btn-danger"
-                    title={t("删除任务（可选是否同时删除本地文件）")}
-                    onClick={() => {
-                      askDelete([task], `删除《${task.hongguoInfo && task.hongguoInfo.series_title ? task.hongguoInfo.series_title : ''}》第 ${task.hongguoInfo ? task.hongguoInfo.vid_index : ''} 集任务`);
-                    }}
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                <div className="dm-series-progress">
+                  <div className="dm-progress-bar">
+                    <div className="dm-progress-fill" style={{ width: `${groupPct}%` }} />
+                  </div>
+                  <span className="dm-pct">{t(group.completed)}/{t(group.tasks.length)}</span>
                 </div>
-              </div>
+                <div className="dm-series-foot" onClick={(e) => e.stopPropagation()}>
+                  <button type="button" className="btn btn-outline btn-sm" onClick={() => openSeriesModal(group)}>
+                    {t(activeInGroup > 0 ? '查看进度与分集' : '查看各集状态')}
+                  </button>
+                  <div className="dm-series-actions">
+                    {failedInGroup.length > 0 && (
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        title={t("重试本剧失败项")}
+                        onClick={async () => {
+                          try {
+                            const res = await window.electronAPI.retryTasks(failedInGroup.map(item => item.id));
+                            await refresh();
+                            if (!res?.success) throw new Error(res?.error || '重试失败');
+                            showToast(`已重新加入队列：${res.count} 项`);
+                          } catch (error) { showToast(error.message || '重试失败', 'error'); }
+                        }}
+                      >
+                        <RefreshCw size={16} />
+                      </button>
+                    )}
+                    {group.firstCompletedId && (
+                      <button type="button" className="icon-btn" title={t("打开文件夹")} onClick={() => openTaskFolder(group.firstCompletedId)}>
+                        <Folder size={16} />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="icon-btn icon-btn-danger"
+                      title={t("删除本剧全部任务")}
+                      onClick={() => askDelete(group.tasks, `删除《${group.title}》全部任务`)}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              </article>
             );
           })}
+        </div>
+      )}
+
+      {/* 状态任务列表弹窗 */}
+      {statusModal && (
+        <div className="dm-modal-mask" onClick={() => setStatusModal(null)}>
+          <div className="dm-modal dm-status-modal" role="dialog" aria-modal="true" aria-label={t(STATUS_MODAL_TITLES[statusModal] || '任务列表')} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
+            <div className="dm-modal-head">
+              <div className="dm-modal-title">
+                <h3>{t(STATUS_MODAL_TITLES[statusModal] || '任务列表')}</h3>
+                <span className="dm-modal-count">{t(statusModalTasks.length)}</span>
+              </div>
+              <div className="dm-modal-head-actions">
+                {statusModal === 'active' && pausableCount > 0 && (
+                  <button type="button" className="btn btn-outline btn-sm" onClick={pauseAll}>
+                    <Pause size={14} />{t("全部暂停")}
+                  </button>
+                )}
+                {statusModal === 'fail' && statusModalTasks.length > 0 && (
+                  <button type="button" className="btn btn-outline btn-sm" onClick={retryAllFailed}>
+                    <Zap size={14} />{t("全部重试")}
+                  </button>
+                )}
+                {statusModal === 'done' && statusModalTasks.length > 0 && (
+                  <button type="button" className="btn btn-outline btn-sm" onClick={clearCompleted}>
+                    <Trash2 size={14} />{t("清空已完成")}
+                  </button>
+                )}
+                <button type="button" className="icon-btn" aria-label={t("关闭")} onClick={() => setStatusModal(null)}>
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+            <div className="dm-modal-body">
+              {statusModalTasks.length === 0 ? (
+                <div className="dm-modal-empty">{t("当前没有该状态的任务")}</div>
+              ) : (
+                <>
+                  {statusModalPageCount > 1 && (
+                    <div className="dm-modal-pager">
+                      <span>{t("共 {0} 项 · 当前 {1}-{2}", [statusModalTasks.length, (currentStatusPage - 1) * PAGE_SIZE + 1, Math.min(currentStatusPage * PAGE_SIZE, statusModalTasks.length)])}</span>
+                      <nav className="pagination-controls" aria-label={t("状态任务分页")}>
+                        <button type="button" className="btn btn-outline btn-sm" disabled={currentStatusPage <= 1} onClick={() => setStatusModalPage(currentStatusPage - 1)}>{t("上一页")}</button>
+                        <span className="pager-status">{t("第 {0} / {1} 页", [currentStatusPage, statusModalPageCount])}</span>
+                        <button type="button" className="btn btn-outline btn-sm" disabled={currentStatusPage >= statusModalPageCount} onClick={() => setStatusModalPage(currentStatusPage + 1)}>{t("下一页")}</button>
+                      </nav>
+                    </div>
+                  )}
+                  <div className="dm-list dm-modal-list">
+                    {visibleStatusTasks.map(task => renderTaskRow(task, { showCover: true }))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 剧集分集状态弹窗 */}
+      {activeSeriesGroup && (
+        <div className="dm-modal-mask" onClick={closeSeriesModal}>
+          <div className="dm-modal dm-series-modal" role="dialog" aria-modal="true" aria-label={activeSeriesGroup.title} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
+            <div className="dm-modal-head">
+              <div className="dm-series-modal-header">
+                <div className="dm-series-modal-cover">
+                  {(seriesDetail?.key === activeSeriesGroup.key && seriesDetail.cover) || activeSeriesGroup.cover ? (
+                    <img src={(seriesDetail?.key === activeSeriesGroup.key && seriesDetail.cover) || activeSeriesGroup.cover} alt="" />
+                  ) : (
+                    <div className="cover-placeholder"><Film size={20} /></div>
+                  )}
+                </div>
+                <div className="dm-series-modal-meta">
+                  <h3>{activeSeriesGroup.title}</h3>
+                  <p>
+                    {t("共 {0} 集", [seriesModalCounts.all])}
+                    {` · ${t("已下载")} ${seriesModalCounts.completed}`}
+                    {seriesModalCounts.downloading > 0 ? ` · ${t("下载中")} ${seriesModalCounts.downloading}` : ''}
+                    {seriesModalCounts.pending > 0 ? ` · ${t("等待中")} ${seriesModalCounts.pending}` : ''}
+                    {seriesModalCounts.missing > 0 ? ` · ${t("未下载")} ${seriesModalCounts.missing}` : ''}
+                    {seriesModalCounts.fail > 0 ? ` · ${t("失败/停止")} ${seriesModalCounts.fail}` : ''}
+                  </p>
+                </div>
+              </div>
+              <button type="button" className="icon-btn" aria-label={t("关闭")} onClick={closeSeriesModal}>
+                <X size={16} />
+              </button>
+            </div>
+            <div className="dm-series-modal-filters" role="tablist" aria-label={t("分集状态筛选")}>
+              {[
+                ['all', '全部', seriesModalCounts.all],
+                ['completed', '已下载', seriesModalCounts.completed],
+                ['downloading', '下载中', seriesModalCounts.downloading],
+                ['pending', '等待中', seriesModalCounts.pending],
+                ['missing', '未下载', seriesModalCounts.missing],
+                ...(seriesModalCounts.retrying > 0 ? [['retrying', '等待重试', seriesModalCounts.retrying]] : []),
+                ...(seriesModalCounts.fail > 0 ? [['fail', '失败/停止', seriesModalCounts.fail]] : []),
+              ].map(([key, label, count]) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={seriesModalFilter === key}
+                  className={`btn btn-sm ${seriesModalFilter === key ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={() => { setSeriesModalFilter(key); setSeriesModalPage(1); }}
+                >
+                  {t(label)} ({t(count)})
+                </button>
+              ))}
+            </div>
+            <div className="dm-series-modal-tools">
+              {activeSeriesGroup.tasks.length > 0 && (() => {
+                const groupAllSel = activeSeriesGroup.tasks.every(task => selected.has(task.id));
+                const groupSelTasks = activeSeriesGroup.tasks.filter(task => selected.has(task.id));
+                return <>
+                  <button type="button" className="btn btn-outline btn-sm" onClick={() => toggleGroupSelect(activeSeriesGroup.tasks)}>
+                    <CheckSquare size={14} />{t(groupAllSel ? '取消全选' : '全选本剧')}
+                  </button>
+                  {groupSelTasks.length > 0 && (
+                    <button type="button" className="btn btn-outline btn-sm" onClick={() => askDelete(groupSelTasks, `删除《${activeSeriesGroup.title}》选中的 ${groupSelTasks.length} 个任务`)}>
+                      <Trash2 size={14} />{t("删除已选（")}{t(groupSelTasks.length)}{t("项）")}
+                    </button>
+                  )}
+                </>;
+              })()}
+              {missingUnlockedEpisodes.length > 0 && activeSeriesGroup.seriesId && (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={downloadingEpisodes.has(`${activeSeriesGroup.seriesId}:all`)}
+                  onClick={() => downloadAllMissing(activeSeriesGroup, missingUnlockedEpisodes)}
+                >
+                  <Download size={14} />{t("下载未下载 ({0})", [missingUnlockedEpisodes.length])}
+                </button>
+              )}
+              {seriesModalCounts.fail > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-outline btn-sm"
+                  onClick={async () => {
+                    const ids = activeSeriesGroup.tasks.filter(needsManualRetry).map(task => task.id);
+                    if (!ids.length) return;
+                    try {
+                      const res = await window.electronAPI.retryTasks(ids);
+                      await refresh();
+                      if (!res?.success) throw new Error(res?.error || '重试失败');
+                      showToast(`已重新加入队列：${res.count} 项`);
+                    } catch (error) { showToast(error.message || '重试失败', 'error'); }
+                  }}
+                >
+                  <RefreshCw size={14} />{t("重试失败 ({0})", [seriesModalCounts.fail])}
+                </button>
+              )}
+              {seriesDetailLoading && <span className="dm-series-modal-loading">{t("正在读取完整分集…")}</span>}
+            </div>
+            <div className="dm-modal-body">
+              {seriesModalPageCount > 1 && (
+                <div className="dm-modal-pager">
+                  <span>{t("共 {0} 集 · 当前 {1}-{2}", [filteredSeriesEpisodes.length, (currentSeriesModalPage - 1) * PAGE_SIZE + 1, Math.min(currentSeriesModalPage * PAGE_SIZE, filteredSeriesEpisodes.length)])}</span>
+                  <nav className="pagination-controls" aria-label={t("分集分页")}>
+                    <button type="button" className="btn btn-outline btn-sm" disabled={currentSeriesModalPage <= 1} onClick={() => setSeriesModalPage(currentSeriesModalPage - 1)}>{t("上一页")}</button>
+                    <span className="pager-status">{t("第 {0} / {1} 页", [currentSeriesModalPage, seriesModalPageCount])}</span>
+                    <button type="button" className="btn btn-outline btn-sm" disabled={currentSeriesModalPage >= seriesModalPageCount} onClick={() => setSeriesModalPage(currentSeriesModalPage + 1)}>{t("下一页")}</button>
+                  </nav>
+                </div>
+              )}
+              {visibleSeriesEpisodes.length === 0 ? (
+                <div className="dm-modal-empty">{t("该状态下暂无分集")}</div>
+              ) : (
+                <div className="dm-list dm-modal-list">
+                  {visibleSeriesEpisodes.map((item) => {
+                    if (item.task) {
+                      return renderTaskRow(item.task, { showCover: false, selectable: true, episodeTitle: item.title });
+                    }
+                    const epKey = `${activeSeriesGroup.seriesId}:${item.vid_index}`;
+                    const submitting = downloadingEpisodes.has(epKey) || downloadingEpisodes.has(`${activeSeriesGroup.seriesId}:all`);
+                    return (
+                      <div key={item.key} className="dm-task dm-episode-row">
+                        <div className="dm-task-body">
+                          <div className="dm-task-title">{item.title}</div>
+                          <div className="dm-task-meta">
+                            <span className={`status-tag status-${item.effectiveStatus === 'completed' ? 'completed' : 'missing'}`}>
+                              {t(EPISODE_STATUS_TEXT[item.effectiveStatus] || item.effectiveStatus)}
+                            </span>
+                            {item.fileSize > 0 && <span className="dm-size">{t(fmtBytes(item.fileSize))}</span>}
+                          </div>
+                        </div>
+                        <div className="dm-task-actions">
+                          {item.effectiveStatus === 'missing' && !item.locked && activeSeriesGroup.seriesId && (
+                            <button
+                              type="button"
+                              className="btn btn-outline btn-sm"
+                              disabled={submitting}
+                              onClick={() => downloadMissingEpisode(activeSeriesGroup.seriesId, item.vid_index)}
+                            >
+                              <Download size={14} />{t(submitting ? '加入中…' : '下载')}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -865,7 +1502,7 @@ function DownloadManager({ onNavigate, active = true }) {
       {/* 合并格式选择 */}
       {mergeAsk && (
         <div className="player-confirm-mask" onClick={() => closeMergeDialog()}>
-          <div className="player-confirm" role="dialog" aria-modal="true" aria-label={t(confirmAsk ? confirmAsk.title : '合并导出')} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
+          <div className="player-confirm" data-dm-dialog="merge" role="dialog" aria-modal="true" aria-label={t("合并导出")} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
             <div className="player-confirm-title" style={{ color: 'var(--accent)' }}>
               <Layers size={17} />{t("合并整部剧")}</div>
             <div className="player-confirm-msg">
@@ -894,7 +1531,7 @@ function DownloadManager({ onNavigate, active = true }) {
       {/* 删除确认（可选是否连本地文件一起删） */}
       {confirmAsk && (
         <div className="player-confirm-mask" onClick={() => setConfirmAsk(null)}>
-          <div className="player-confirm" role="dialog" aria-modal="true" aria-label={t(confirmAsk ? confirmAsk.title : '合并导出')} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
+          <div className="player-confirm" data-dm-dialog="delete" role="dialog" aria-modal="true" aria-label={t(confirmAsk.title)} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
             <div className="player-confirm-title">
               <Trash2 size={17} />
               {t(confirmAsk.title)}

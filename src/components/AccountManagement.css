@@ -79,7 +79,7 @@
   position: fixed; inset: 0; margin: auto; width: min(calc(100% - 24px), 360px); max-height: calc(100% - 24px); overflow: auto;
   scrollbar-gutter: stable both-edges;
   padding: 26px clamp(16px, 5vw, 24px) 22px; border: 1px solid var(--border); border-radius: 18px;
-  color: var(--text-primary); background: var(--bg-card); box-shadow: var(--shadow-lg);
+  color: var(--text-primary); background: var(--bg-elevated); box-shadow: var(--shadow-lg);
 }
 .account-login-dialog::backdrop { background: #0a132778; }
 .account-dialog-close {

@@ -115,7 +115,7 @@
   margin-bottom: 12px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
-  background: var(--bg-card);
+  background: var(--bg-elevated);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
@@ -336,7 +336,8 @@
   max-width: 440px;
   max-height: calc(100vh - 48px);
   overflow-y: auto;
-  background: var(--bg-card);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   padding: 20px;

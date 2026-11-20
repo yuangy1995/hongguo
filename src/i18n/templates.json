@@ -176,5 +176,14 @@
   "本集取源失败（所选清晰度 {0}，未降级）：App：连接失败，请稍后重试。请重试或在官方 App 确认可播情况。": "Could not retrieve a source for this episode (selected quality: {0}; no downgrade): App: Connection failed. Try again later. Retry, or confirm playback in the official app.",
   "本集取源失败（所选清晰度 {0}，未降级）：App：匿名播放设备注册失败（连接失败），请检查网络，10 秒后重试。请重试或在官方 App 确认可播情况。": "Could not retrieve a source for this episode (selected quality: {0}; no downgrade): App: Anonymous playback device registration failed (Connection failed). Check your network and retry in 10 seconds. Retry, or confirm playback in the official app.",
   "本集取源失败（所选清晰度 {0}，未降级）：App：TLS 证书或握手失败，请稍后重试。请重试或在官方 App 确认可播情况。": "Could not retrieve a source for this episode (selected quality: {0}; no downgrade): App: TLS certificate verification or handshake failed. Try again later. Retry, or confirm playback in the official app.",
-  "本集取源失败（所选清晰度 {0}，未降级）：App：匿名播放设备注册失败（TLS 证书或握手失败），请检查网络，10 秒后重试。请重试或在官方 App 确认可播情况。": "Could not retrieve a source for this episode (selected quality: {0}; no downgrade): App: Anonymous playback device registration failed (TLS certificate verification or handshake failed). Check your network and retry in 10 seconds. Retry, or confirm playback in the official app."
+  "本集取源失败（所选清晰度 {0}，未降级）：App：匿名播放设备注册失败（TLS 证书或握手失败），请检查网络，10 秒后重试。请重试或在官方 App 确认可播情况。": "Could not retrieve a source for this episode (selected quality: {0}; no downgrade): App: Anonymous playback device registration failed (TLS certificate verification or handshake failed). Check your network and retry in 10 seconds. Retry, or confirm playback in the official app.",
+  "共 {0} 部剧 · {1} 个任务": "{0} dramas · {1} tasks",
+  "共 {0} 集任务": "{0} episode tasks",
+  "已选 {0}": "{0} selected",
+  "下载未下载 ({0})": "Download missing ({0})",
+  "共 {0} 项 · 当前 {1}-{2}": "Total {0} · Showing {1}-{2}",
+  "共 {0} 集 · 当前 {1}-{2}": "Total {0} episodes · Showing {1}-{2}",
+  "选择《{0}》": "Select {0}",
+  "删除《{0}》全部任务": "Delete all tasks for {0}",
+  "删除《{0}》选中的 {1} 个任务": "Delete {1} selected tasks for {0}"
 }

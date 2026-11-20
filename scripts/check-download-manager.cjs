@@ -41,7 +41,9 @@ function mount(api = {}, props = {}) {
   };
 }
 const task = (i, status = 'downloading') => ({ id: `t${i}`, title: `第${i}集`, status, progress: 0, startTime: i, hongguoInfo: { series_id: 'A', vid_index: i } });
+const cards = ui => ui.nodes().filter(n => /^dm-series-card(?: selected)?$/.test((n.props.className || '').trim()));
 const rows = ui => ui.nodes().filter(n => /^dm-task(?: selected)?$/.test((n.props.className || '').trim()));
+const selectGroup = ui => ui.find(n => n.type === 'input' && (n.props.className || '').includes('dm-series-select')).props.onChange();
 const runningMerge = () => ({ id: 'm', status: 'running', total: 2, done: 0, progress: 0, seriesTitle: 'A', startTime: Date.now() });
 
 (async () => {
@@ -80,6 +82,7 @@ const runningMerge = () => ({ id: 'm', status: 'running', total: 2, done: 0, pro
     assert.ok(ui.text().includes('等待重试 1'));
     assert.ok(ui.text().includes('失败/停止 0'));
     assert.equal(ui.button('重试失败').props.disabled, true);
+    cards(ui)[0].props.onClick(); await ui.flush();
     assert.ok(ui.text().includes('自动重试 1/3'));
     const guidance = ui.text();
     assert.match(guidance, /普通故障最多追加 3 次重试，分别等待 10、30、60 秒/);
@@ -108,7 +111,7 @@ const runningMerge = () => ({ id: 'm', status: 'running', total: 2, done: 0, pro
     list = [{ series_id: 'A', series_title: 'Downloaded' }];
     ui.emit('onDownloadCompleted', { id: 't1' }); ui.advance(250); await ui.flush();
     assert.ok(ui.button('合并整部剧'), 'completed downloads must appear immediately');
-    rows(ui)[0].props.onClick(); ui.render(); ui.button('删除已选').props.onClick(); ui.render();
+    selectGroup(ui); ui.render(); ui.button('删除已选').props.onClick(); ui.render();
     ui.find(n => n.props.className === 'dm-confirm-check').children.find(n => n.type === 'input').props.onChange({ target: { checked: true } }); ui.render();
     await ui.button('删除任务和文件').props.onClick(); await ui.flush();
     assert.equal(ui.button('合并整部剧'), undefined, 'last deleted episode must remove its merge option');
@@ -205,7 +208,7 @@ const runningMerge = () => ({ id: 'm', status: 'running', total: 2, done: 0, pro
     let calls = 0;
     const ui = mount({ getDownloadTasks: async () => { calls++; return [task(1)]; } });
     await ui.flush(); assert.equal(calls, 1, 'initial effects must not request duplicate snapshots');
-    ui.find(n => n.props.title?.startsWith('删除任务')).props.onClick(); ui.render(); assert.equal(ui.dialogOpen(), true);
+    ui.find(n => n.props.title === '删除本剧全部任务').props.onClick(); ui.render(); assert.equal(ui.dialogOpen(), true);
     ui.setProps({ active: false }); const before = calls; ui.advance(20000); await ui.flush();
     assert.equal(ui.intervals(), 0); assert.equal(calls, before); assert.equal(ui.dialogOpen(), false);
     const writes = ui.writes(); ui.emit('onDownloadProgress', { id: 't1', progress: 98 }); ui.advance(250); await ui.flush();
@@ -219,21 +222,26 @@ const runningMerge = () => ({ id: 'm', status: 'running', total: 2, done: 0, pro
     assert.equal(select.props.value, 'B'); assert.ok(ui.text().includes('New')); assert.ok(!ui.text().includes('Old')); ui.unmount();
   });
   await test('progress events coalesce into one task update and keep the latest value', async () => {
-    const ui = mount({ getDownloadTasks: async () => [task(1)] }); await ui.flush(); const before = ui.writes();
+    const ui = mount({ getDownloadTasks: async () => [task(1)] }); await ui.flush();
+    cards(ui)[0].props.onClick(); await ui.flush();
+    const before = ui.writes();
     for (let progress = 1; progress <= 80; progress++) ui.emit('onDownloadProgress', { id: 't1', progress });
     assert.equal(ui.writes(), before, 'progress must wait for one short batch'); ui.advance(250); await ui.flush();
     assert.equal(ui.writes() - before, 1); assert.ok(ui.text().includes('80%')); ui.unmount();
   });
   await test('select-all covers every page and clears every selection', async () => {
     const ui = mount({ getDownloadTasks: async () => Array.from({ length: 205 }, (_, i) => task(i + 1, 'completed')) }); await ui.flush();
+    assert.equal(cards(ui).length, 1, 'episodes of one drama collapse into a single card');
     const all = ui.button('全选'); assert.ok(all, 'select-all must be visible beside task counts'); all.props.onClick(); ui.render();
-    assert.ok(ui.text().includes('已选 205 项')); assert.ok(rows(ui).every(r => r.props.className.includes('selected')));
+    assert.ok(ui.text().includes('已选 205 项')); assert.ok(cards(ui).every(c => c.props.className.includes('selected')));
+    cards(ui)[0].props.onClick(); await ui.flush();
+    assert.equal(rows(ui).length, 100); assert.ok(rows(ui).every(r => r.props.className.includes('selected')));
     ui.button('下一页').props.onClick(); ui.render(); ui.button('下一页').props.onClick(); ui.render();
     assert.equal(rows(ui).length, 5); assert.ok(rows(ui).every(r => r.props.className.includes('selected')));
     ui.button('取消全选').props.onClick(); ui.render(); assert.ok(rows(ui).every(r => !r.props.className.includes('selected'))); assert.equal(ui.button('删除已选').props.disabled, true);
     rows(ui)[0].props.onClick(); ui.render(); ui.button('全选').props.onClick(); ui.render(); assert.ok(ui.text().includes('已选 205 项')); ui.unmount();
   });
-  await test('series filter scopes rows, counts, selection and batch retry', async () => {
+  await test('series filter scopes cards, counts, selection and batch retry', async () => {
     let retried = [];
     const item = (series, title, index, status) => ({
       id:`${series}-${index}`, title:`${title} 第${index}集`, status, progress:0, startTime:index,
@@ -249,12 +257,14 @@ const runningMerge = () => ({ id: 'm', status: 'running', total: 2, done: 0, pro
       retryTasks: async ids => { retried = ids; return { success:true, count:ids.length }; },
     });
     await ui.flush();
+    assert.equal(cards(ui).length, 2);
     const filter = ui.find(n => n.type === 'select' && n.props.className?.includes('dm-series-select'));
     assert.ok(filter, 'multi-series downloads must expose a series filter');
     filter.props.onChange({ target:{ value:'series:A' } }); ui.render();
-    assert.ok(ui.text().includes('长剧 A 第1集'));
-    assert.ok(!ui.text().includes('短剧 B 第1集'));
-    assert.ok(ui.text().includes('共 105 项'));
+    assert.equal(cards(ui).length, 1);
+    assert.ok(ui.text().includes('长剧 A'));
+    assert.ok(!cards(ui).some(c => JSON.stringify(c).includes('短剧 B')));
+    assert.ok(ui.text().includes('共 1 部剧 · 105 个任务'));
     assert.equal(ui.button('重试失败 (2)').props.disabled, false);
     await ui.button('重试失败 (2)').props.onClick(); await ui.flush();
     assert.deepEqual(retried.sort(), ['A-1', 'A-2']);
@@ -262,9 +272,9 @@ const runningMerge = () => ({ id: 'm', status: 'running', total: 2, done: 0, pro
     ui.setProps({}); ui.render();
     const scoped = ui.find(n => n.type === 'select' && n.props.className?.includes('dm-series-select'));
     scoped.props.onChange({ target:{ value:'series:B' } }); ui.render();
-    assert.ok(ui.text().includes('短剧 B 第1集'));
-    assert.ok(!ui.text().includes('长剧 A 第1集'));
-    assert.ok(ui.text().includes('共 2 项'));
+    assert.ok(ui.text().includes('短剧 B'));
+    assert.ok(!cards(ui).some(c => JSON.stringify(c).includes('长剧 A')));
+    assert.ok(ui.text().includes('共 1 部剧 · 2 个任务'));
     assert.equal(ui.button('重试失败 (2)').props.disabled, false);
     ui.unmount();
   });
@@ -384,29 +394,31 @@ const runningMerge = () => ({ id: 'm', status: 'running', total: 2, done: 0, pro
     assert.ok(ui.button('高质量分辨率合并'), 'late success from a closed dialog must not close the new dialog');
     ui.unmount();
   });
-  await test('task list pages at 100 while global totals and cross-page selections persist', async () => {
+  await test('task list pages at 100 inside episode modal while global totals and cross-page selections persist', async () => {
     const ui = mount({ getDownloadTasks: async () => Array.from({ length: 205 }, (_, i) => task(i + 1, 'completed')) }); await ui.flush();
-    assert.equal(rows(ui).length, 100); assert.ok(ui.text().includes('已完成 205'));
+    assert.equal(cards(ui).length, 1); assert.ok(ui.text().includes('已完成 205'));
+    cards(ui)[0].props.onClick(); await ui.flush();
+    assert.equal(rows(ui).length, 100);
     rows(ui)[0].props.onClick(); ui.render(); ui.button('下一页').props.onClick(); ui.render(); assert.equal(rows(ui).length, 100);
     rows(ui)[0].props.onClick(); ui.render(); ui.button('删除已选').props.onClick(); ui.render(); assert.ok(ui.text().includes('共 2 个任务'));
     ui.button('取消').props.onClick(); ui.render(); ui.button('下一页').props.onClick(); ui.render(); assert.equal(rows(ui).length, 5); ui.unmount();
   });
   for (const rejected of [false, true]) await test(`delete ${rejected ? 'rejection' : 'failure response'} is visible and preserves selection`, async () => {
     const ui = mount({ getDownloadTasks: async () => [task(1, 'completed')], deleteTasksWithFiles: async () => { if (rejected) throw new Error('删除失败示例'); return { success: false, error: '删除失败示例' }; } });
-    await ui.flush(); rows(ui)[0].props.onClick(); ui.render(); ui.button('删除已选').props.onClick(); ui.render();
+    await ui.flush(); selectGroup(ui); ui.render(); ui.button('删除已选').props.onClick(); ui.render();
     await assert.doesNotReject(() => ui.button('仅删除记录').props.onClick(), 'delete rejection must become visible feedback'); await ui.flush();
-    assert.ok(ui.text().includes('删除失败示例')); assert.ok(rows(ui)[0].props.className.includes('selected')); ui.unmount();
+    assert.ok(ui.text().includes('删除失败示例')); assert.ok(cards(ui)[0].props.className.includes('selected')); ui.unmount();
   });
   for (const deleteFiles of [false, true]) await test(`delete persistence failure shows actual released bytes and retained records: files=${deleteFiles}`, async () => {
     const ui = mount({ getDownloadTasks: async () => [task(1, 'completed')], deleteTasksWithFiles: async () => ({ success: false, count: 0, freed: deleteFiles ? 1024 : 0, failed: 0, error: '任务记录保存失败，原记录已保留' }) });
     try {
-      await ui.flush(); rows(ui)[0].props.onClick(); ui.render(); ui.button('删除已选').props.onClick(); ui.render();
+      await ui.flush(); selectGroup(ui); ui.render(); ui.button('删除已选').props.onClick(); ui.render();
       if (deleteFiles) { ui.find(n => n.props.className === 'dm-confirm-check').children.find(n => n.type === 'input').props.onChange({ target: { checked: true } }); ui.render(); }
       await ui.button(deleteFiles ? '删除任务和文件' : '仅删除记录').props.onClick(); await ui.flush();
       assert.match(ui.text(), /已移除 0 个任务记录/);
       assert.ok(ui.text().includes(deleteFiles ? '已释放 1.0 KB' : '已释放 0 B'));
       assert.match(ui.text(), /任务记录保存失败，原记录已保留/);
-      assert.ok(rows(ui)[0].props.className.includes('selected'));
+      assert.ok(cards(ui)[0].props.className.includes('selected'));
     } finally { ui.unmount(); }
   });
   await test('merge cancellation only acknowledges the request and exposes failure', async () => {
@@ -420,6 +432,93 @@ const runningMerge = () => ({ id: 'm', status: 'running', total: 2, done: 0, pro
     const ui = mount({ getSeriesList: async () => [{ series_id: 'A', series_title: 'A' }], mergeSeries: async () => ({ success: true, count: 2, totalBytes: 100000, totalDuration: 0 }) }); await ui.flush();
     ui.button('合并整部剧').props.onClick(); ui.render(); await ui.button('智能快速合并').props.onClick(); await ui.flush();
     assert.ok(!ui.text().includes('0 分钟')); assert.ok(ui.text().includes('开始合并 2 集')); ui.unmount();
+  });
+  await test('status pills open modal listing matching tasks', async () => {
+    const ui = mount({
+      getDownloadTasks: async () => [
+        { ...task(1, 'downloading'), title: '下载中剧集1' },
+        { ...task(2, 'pending'), title: '等待中剧集2' },
+        { ...task(3, 'completed'), title: '已完成剧集3' },
+        { ...task(4, 'failed'), title: '失败剧集4', error: '网络超时' },
+      ],
+    });
+    await ui.flush();
+    ui.button('进行中').props.onClick(); await ui.flush();
+    assert.ok(ui.text().includes('进行中任务'));
+    assert.equal(rows(ui).length, 2);
+    assert.ok(rows(ui).some(r => JSON.stringify(r).includes('下载中剧集1')));
+    assert.ok(rows(ui).some(r => JSON.stringify(r).includes('等待中剧集2')));
+    assert.ok(!rows(ui).some(r => JSON.stringify(r).includes('已完成剧集3')));
+    ui.find(n => n.type === 'button' && n.props['aria-label'] === '关闭' && typeof n.props.onClick === 'function').props.onClick(); ui.render();
+    ui.button('失败/停止').props.onClick(); await ui.flush();
+    assert.ok(ui.text().includes('失败/停止任务'));
+    assert.equal(rows(ui).length, 1);
+    assert.ok(rows(ui).some(r => JSON.stringify(r).includes('失败剧集4')));
+    assert.ok(!rows(ui).some(r => JSON.stringify(r).includes('下载中剧集1')));
+    ui.unmount();
+  });
+  await test('series card modal displays downloaded, downloading, pending, and missing episode states', async () => {
+    const queued = [];
+    const ui = mount({
+      getDownloadTasks: async () => [
+        { ...task(1, 'completed'), title: '示例剧 第1集', hongguoInfo: { series_id: 'A', series_title: '示例剧', vid_index: 1 } },
+        { ...task(2, 'downloading'), title: '示例剧 第2集', progress: 42, hongguoInfo: { series_id: 'A', series_title: '示例剧', vid_index: 2 } },
+        { ...task(3, 'pending'), title: '示例剧 第3集', hongguoInfo: { series_id: 'A', series_title: '示例剧', vid_index: 3 } },
+      ],
+      getSeriesEpisodes: async sid => ({
+        success: true,
+        data: {
+          series_id: sid,
+          series_title: '示例剧',
+          total: 4,
+          episodes: [
+            { vid: 'v1', vid_index: 1, title: '第一集', status: 'completed' },
+            { vid: 'v2', vid_index: 2, title: '第二集', status: 'downloading' },
+            { vid: 'v3', vid_index: 3, title: '第三集', status: 'pending' },
+            { vid: 'v4', vid_index: 4, title: '第四集', status: 'missing' },
+          ],
+        },
+      }),
+      downloadSingleEpisode: async (sid, vidIndex) => { queued.push([sid, vidIndex]); return { success: true, count: 1 }; },
+    });
+    await ui.flush();
+    assert.equal(cards(ui).length, 1);
+    cards(ui)[0].props.onClick(); await ui.flush();
+    assert.ok(ui.text().includes('已下载 (1)'));
+    assert.ok(ui.text().includes('下载中 (1)'));
+    assert.ok(ui.text().includes('等待中 (1)'));
+    assert.ok(ui.text().includes('未下载 (1)'));
+    ui.button('未下载 (1)').props.onClick(); ui.render();
+    assert.ok(ui.text().includes('第 4 集'));
+    await ui.find(n => n.type === 'button' && n.children?.includes('下载')).props.onClick(); await ui.flush();
+    assert.deepEqual(queued, [['A', 4]]);
+    ui.unmount();
+  });
+  await test('finishing a download submission does not refresh a closed drama', async () => {
+    const lookups = [];
+    let finish;
+    const ui = mount({
+      getDownloadTasks: async () => ['A', 'B'].map((sid, index) => ({
+        ...task(index + 1, 'completed'), title: sid,
+        hongguoInfo: { series_id: sid, series_title: sid, vid_index: 1 },
+      })),
+      getSeriesEpisodes: async sid => {
+        lookups.push(sid);
+        return { success: true, data: { episodes: [{ vid: `${sid}2`, vid_index: 2, status: 'missing' }] } };
+      },
+      downloadSingleEpisode: () => new Promise(resolve => { finish = resolve; }),
+    });
+    await ui.flush();
+    const open = title => cards(ui).find(card => JSON.stringify(card).includes(`"${title}"`)).props.onClick();
+    open('A'); await ui.flush();
+    const pending = ui.find(n => n.type === 'button' && n.children?.includes('下载')).props.onClick();
+    ui.find(n => n.type === 'button' && n.props['aria-label'] === '关闭' && typeof n.props.onClick === 'function').props.onClick(); ui.render();
+    open('B'); await ui.flush();
+    finish({ success: true, count: 1 });
+    await pending; await ui.flush();
+    assert.deepEqual(lookups, ['A', 'B']);
+    assert.ok(ui.find(n => n.props.role === 'dialog' && n.props['aria-label'] === 'B'));
+    ui.unmount();
   });
   console.log(`Download manager: ${passed} passed, ${failures} failed`); process.exitCode = failures ? 1 : 0;
 })();

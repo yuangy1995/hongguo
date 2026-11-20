@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { fitWindowBounds, getWindowScale, saveWindowZoom } = require('../src/native/window-layout');
+const { fitWindowBounds, getWindowScale, saveWindowZoom, fitCreationWindowOptions, syncWindowMinimumSize } = require('../src/native/window-layout');
 const screen = { x: 0, y: 25, width: 1440, height: 850 };
 const current = { x: 100, y: 100, width: 1100, height: 750 };
 const portrait = fitWindowBounds('portrait', current, screen);
@@ -14,6 +14,20 @@ assert(moved.height <= 700);
 const small = fitWindowBounds('portrait', current, { x: 0, y: 0, width: 800, height: 600 });
 assert(small.width < small.height && small.height <= 600);
 assert.throws(() => fitWindowBounds('invalid', current, screen), /Invalid/);
+const tinyScreen = { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 760, height: 520 } }) };
+const clampedInit = fitCreationWindowOptions({ width: 1100, height: 750, minWidth: 900, minHeight: 620 }, tinyScreen);
+assert.deepEqual({ width: clampedInit.width, height: clampedInit.height, minWidth: clampedInit.minWidth, minHeight: clampedInit.minHeight }, { width: 760, height: 520, minWidth: 760, minHeight: 520 });
+const normalInit = fitCreationWindowOptions({ width: 1100, height: 750, minWidth: 900, minHeight: 620 }, { getPrimaryDisplay: () => ({ workArea: screen }) });
+assert.deepEqual({ width: normalInit.width, height: normalInit.height, minWidth: normalInit.minWidth, minHeight: normalInit.minHeight }, { width: 1100, height: 750, minWidth: 900, minHeight: 620 });
+let syncedMin, syncedBounds;
+syncWindowMinimumSize({
+  isDestroyed: () => false, isFullScreen: () => false, isMinimized: () => false, isMaximized: () => false,
+  getBounds: () => ({ x: 0, y: 0, width: 1100, height: 750 }),
+  setMinimumSize: (w, h) => { syncedMin = [w, h]; },
+  setBounds: b => { syncedBounds = b; },
+}, { getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 760, height: 520 } }) }, 'landscape', true);
+assert.deepEqual(syncedMin, [760, 520]);
+assert.deepEqual(syncedBounds, { x: 0, y: 0, width: 760, height: 520 });
 assert.equal(getWindowScale(), 1, 'default font size is independent of window width');
 assert.equal(getWindowScale(0.8), 0.8, 'only the user preference controls zoom');
 for (const invalid of [undefined, null, '0.8', NaN, Infinity]) assert.equal(getWindowScale(invalid), 1);

@@ -67,7 +67,7 @@ const watchHistory = require('./src/native/watch-history');
 const { createAccountService, safeMessage: accountSafeMessage } = require('./src/native/account-session');
 const seriesSearch = require('./src/native/series-search');
 const { searchHongguo } = require('./src/native/hongguo-search');
-const { fitWindowBounds, getWindowScale, saveWindowZoom, restoreMainWindowBounds, rememberMainWindowBounds } = require('./src/native/window-layout');
+const { fitWindowBounds, getWindowScale, saveWindowZoom, restoreMainWindowBounds, rememberMainWindowBounds, fitCreationWindowOptions, syncWindowMinimumSize } = require('./src/native/window-layout');
 const { createEpisodePanelController } = require('./src/native/episode-panel');
 const { appUpdateSource, availableRelease } = require('./src/native/app-update');
 const { MAC_UPDATE_MODE, createMacDownloadTransport, createMacUpdateDownloader } = require('./src/native/mac-update-download');
@@ -5462,7 +5462,7 @@ ipcMain.handle('set-window-layout', async (event, mode) => {
 function createWindow() {
   windowLayout = 'landscape';
   landscapeBounds = null;
-  const options = {
+  const options = fitCreationWindowOptions({
     width: 1100,
     height: 750,
     minWidth: 900,
@@ -5482,7 +5482,7 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
     },
-  };
+  }, screen);
   mainWindow = process.platform === 'darwin' ? new BaseWindow(options) : new BrowserWindow(options);
   if (process.platform === 'darwin') {
     // Own the live view so stealth can move it to a panel without recreating the player.
@@ -5501,6 +5501,16 @@ function createWindow() {
 
   mainWindow.setMenuBarVisibility(false);
   mainWindow.on('resize', syncMainWindowScale);
+  mainWindow.on('move', () => {
+    if (!stealth.enabled && !layoutChanging) syncWindowMinimumSize(mainWindow, screen, windowLayout, false);
+  });
+  const onDisplayMetricsChanged = () => {
+    if (!stealth.enabled && !layoutChanging) syncWindowMinimumSize(mainWindow, screen, windowLayout, true);
+  };
+  screen.on?.('display-metrics-changed', onDisplayMetricsChanged);
+  mainWindow.on('closed', () => {
+    screen.removeListener?.('display-metrics-changed', onDisplayMetricsChanged);
+  });
   mainWindow.on('enter-full-screen', syncMainWindowScale);
   mainWindow.on('leave-full-screen', syncMainWindowScale);
   mainWindow.webContents.on('did-finish-load', syncMainWindowScale);

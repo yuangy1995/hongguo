@@ -28,6 +28,50 @@ const validBounds = bounds => bounds && ['x', 'y', 'width', 'height'].every(key 
   Number.isSafeInteger(bounds[key]) && Math.abs(bounds[key]) <= 2147483647)
   && bounds.width > 0 && bounds.height > 0;
 
+function resolveScreenWorkArea(screen, bounds) {
+  try {
+    const matched = validBounds(bounds) ? screen?.getDisplayMatching?.(bounds)?.workArea : null;
+    const area = matched || screen?.getPrimaryDisplay?.()?.workArea;
+    if (area && Number.isFinite(area.width) && area.width > 0 && Number.isFinite(area.height) && area.height > 0) {
+      return area;
+    }
+  } catch (_) {}
+  return null;
+}
+
+function fitCreationWindowOptions(options, screen) {
+  const area = resolveScreenWorkArea(screen, validBounds(options) ? options : null);
+  if (!area) return options;
+  const minWidth = Math.min(options.minWidth || 900, area.width);
+  const minHeight = Math.min(options.minHeight || 620, area.height);
+  const width = Math.max(minWidth, Math.min(options.width || 1100, area.width));
+  const height = Math.max(minHeight, Math.min(options.height || 750, area.height));
+  const next = { ...options, width, height, minWidth, minHeight };
+  if (Number.isSafeInteger(options.x) && Number.isSafeInteger(options.y)) {
+    next.x = Math.max(area.x, Math.min(options.x, area.x + area.width - width));
+    next.y = Math.max(area.y, Math.min(options.y, area.y + area.height - height));
+  }
+  return next;
+}
+
+function syncWindowMinimumSize(win, screen, mode = 'landscape', clampBounds = false) {
+  if (!win || win.isDestroyed?.() || win.isFullScreen?.() || win.isMinimized?.()) return;
+  const bounds = win.getBounds?.();
+  const area = resolveScreenWorkArea(screen, bounds);
+  if (!area) return;
+  const minWidth = Math.min(mode === 'portrait' ? 420 : 900, area.width);
+  const minHeight = Math.min(mode === 'portrait' ? 560 : 620, area.height);
+  win.setMinimumSize?.(minWidth, minHeight);
+  if (!clampBounds || !validBounds(bounds) || win.isMaximized?.()) return;
+  const width = Math.max(minWidth, Math.min(bounds.width, area.width));
+  const height = Math.max(minHeight, Math.min(bounds.height, area.height));
+  const x = Math.max(area.x, Math.min(bounds.x, area.x + area.width - width));
+  const y = Math.max(area.y, Math.min(bounds.y, area.y + area.height - height));
+  if (x !== bounds.x || y !== bounds.y || width !== bounds.width || height !== bounds.height) {
+    win.setBounds?.({ x, y, width, height });
+  }
+}
+
 function restoreMainWindowBounds(store, screen) {
   try {
     const saved = store.getSettings()?.main_window_state;
@@ -77,4 +121,12 @@ function rememberMainWindowBounds(win, { store, screen, isNormal }) {
   });
 }
 
-module.exports = { fitWindowBounds, getWindowScale, saveWindowZoom, restoreMainWindowBounds, rememberMainWindowBounds };
+module.exports = {
+  fitWindowBounds,
+  getWindowScale,
+  saveWindowZoom,
+  restoreMainWindowBounds,
+  rememberMainWindowBounds,
+  fitCreationWindowOptions,
+  syncWindowMinimumSize,
+};

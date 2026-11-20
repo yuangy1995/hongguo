@@ -39,14 +39,14 @@ test('folder actions surface backend failures and rejected IPC calls',async()=>{
  await ui.findTitled('打开所在文件夹','merge-actions').props.onClick();await tick();ui.render();
  assert.deepEqual(calls.at(-1),['merge','/tmp/merged.mp4']);
  assert.ok(ui.toast().children.includes('合并目录不可用'));
- await ui.findTitled('打开文件夹','dm-task-actions').props.onClick();await tick();ui.render();
+ await ui.findTitled('打开文件夹','dm-series-actions').props.onClick();await tick();ui.render();
  assert.deepEqual(calls.at(-1),['task','task-1']);
  assert.ok(ui.toast().children.includes('任务目录不可用'));
  api.showInFolder=async()=>{throw new Error('合并 IPC 失败');};
  await ui.findTitled('打开所在文件夹','merge-actions').props.onClick();await tick();ui.render();
  assert.ok(ui.toast().children.includes('合并 IPC 失败'));
  api.openFolder=async()=>{throw new Error('任务 IPC 失败');};
- await ui.findTitled('打开文件夹','dm-task-actions').props.onClick();await tick();ui.render();
+ await ui.findTitled('打开文件夹','dm-series-actions').props.onClick();await tick();ui.render();
  assert.ok(ui.toast().children.includes('任务 IPC 失败'));
 });
 

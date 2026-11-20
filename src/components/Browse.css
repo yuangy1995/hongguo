@@ -41,7 +41,7 @@
 .pager-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
 .pager-gap { color: var(--text-tertiary); }
 .browse-drawer-mask { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; }
-.browse-drawer { width: 100%; max-width: 740px; max-height: 100%; display: flex; flex-direction: column; background: var(--bg-card); }
+.browse-drawer { width: 100%; max-width: 740px; max-height: 100%; display: flex; flex-direction: column; background: var(--bg-elevated); border: 1px solid var(--border); }
 .browse-drawer-head, .browse-drawer-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0; }
 .browse-drawer-head { border-bottom: 1px solid var(--border-muted); }
 .browse-drawer-title { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight: 600; min-width: 0; }
