@@ -316,34 +316,37 @@ function HongguoDownload({ onNavigate, active = true }) {
 
   return (
     <div className="hongguo-container">
-      {/* 头部 Banner 区 */}
-      <div className="hongguo-hero">
-        <div className="hero-icon">
-          <Film size={32} />
+      <header className="search-page-heading">
+        <div className="hongguo-hero duplicate-page-title">
+          <div className="hero-icon">
+            <Film size={32} />
+          </div>
+          <div className="hero-text">
+            <h2>{t(mobile ? "找到下一部好剧" : "搜索与下载")}</h2>
+            {mobile && <p>{t("搜到就能看，也可单独查看详情、选择下载。")}</p>}
+          </div>
         </div>
-        <div className="hero-text">
-          <h2>{t("找到下一部好剧")}</h2>
-          <p>{t(mobile ? '搜到就能看，也可单独查看详情、选择下载。' : '搜一个剧名，或粘贴分享链接。选择喜欢的集数，保存到本地慢慢看。')}</p>
-        </div>
-      </div>
 
-      {/* 方式切换 */}
-      <div className="mode-tabs">
-        <button
-          className={`mode-tab ${tab === 'search' ? 'active' : ''}`}
-          onClick={() => switchTab('search')}
-        >
-          <Search size={16} />
-          <span>{t("搜索剧集")}</span>
-        </button>
-        <button
-          className={`mode-tab ${tab === 'input' ? 'active' : ''}`}
-          onClick={() => switchTab('input')}
-        >
-          <Link2 size={16} />
-          <span>{t("粘贴链接 / ID")}</span>
-        </button>
-      </div>
+        {/* 方式切换 */}
+        <div className="mode-tabs">
+          <button
+            className={`mode-tab ${tab === 'search' ? 'active' : ''}`}
+            aria-pressed={tab === 'search'}
+            onClick={() => switchTab('search')}
+          >
+            <Search size={16} />
+            <span>{t("搜索剧集")}</span>
+          </button>
+          <button
+            className={`mode-tab ${tab === 'input' ? 'active' : ''}`}
+            aria-pressed={tab === 'input'}
+            onClick={() => switchTab('input')}
+          >
+            <Link2 size={16} />
+            <span>{t("粘贴链接 / ID")}</span>
+          </button>
+        </div>
+      </header>
 
       <div hidden={tab !== 'search'}>
         <SearchPanel
@@ -355,7 +358,7 @@ function HongguoDownload({ onNavigate, active = true }) {
       </div>
       {tab === 'input' && (
         /* 解析输入卡片 */
-        <div className="hongguo-card">
+        <div className="hongguo-card search-form-card">
           <div className="card-header-title">
             <Link2 size={18} />
             <span>{t("输入短剧链接或 ID")}</span>

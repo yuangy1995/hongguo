@@ -17,12 +17,12 @@ Object.assign(updater, { netSession: updateSession, setFeedURL() {}, async check
 }, async downloadUpdate() { downloads++; updater.emit('update-downloaded', {version:'2.0.0'}); return ['/synthetic/update.zip']; } });
 const handlers = {};
 const electron = { app, session: { defaultSession: windowSession }, ipcMain: { handle: (name, fn) => { handlers[name] = fn; } }, protocol: { registerSchemesAsPrivileged() {} } };
-const context = vm.createContext({ require: name => name === 'electron' ? electron : name === 'electron-updater' ? {autoUpdater:updater} : name === './src/store' ? {setErrorHandler(){},getSettings:()=>settings} : req(name), __dirname:path.dirname(file),process: {...process, platform: 'darwin', env: {...process.env}}, Buffer,URL,AbortController,setTimeout,clearTimeout,setImmediate,console:{log(){},warn(){},error(){}} });
+const context = vm.createContext({ require: name => name === 'electron' ? electron : name === 'electron-updater' ? {autoUpdater:updater} : name === './src/store' ? {setErrorHandler(){},getSettings:()=>settings} : req(name), __dirname:path.dirname(file),process: {...process, platform: 'win32', env: {...process.env}}, Buffer,URL,AbortController,setTimeout,clearTimeout,setImmediate,console:{log(){},warn(){},error(){}} });
 vm.runInContext(fs.readFileSync(file,'utf8'),context,{filename:file});
 require('./fixtures/trusted-ipc.cjs')(context,handlers);
 const run = code => vm.runInContext(code,context);
 (async()=>{
-  run("latestAppRelease = {version:'2.0'}");
+  run("latestAppRelease = {version:'2.0.0'}");
   const result = await handlers['download-app-update']({});
   assert.equal(result.success,true, 'in-app download must initialize the updater network session');
   assert.equal(downloads,1);
@@ -79,5 +79,7 @@ const run = code => vm.runInContext(code,context);
   try {
     assert.equal((await handlers['download-app-update']({})).success, true, 'update session must retain the current proxy during save');
   } finally { releaseWindow(); await changing; }
+  run("process.platform = 'darwin'");
+  assert.equal(run('appUpdateSupport().supported'), false, 'temporarily signed Mac builds use the release page');
   console.log('PASS update proxy: applied before download, connection reset, credential boundary, direct/system switching');
 })().catch(error=>{console.error(error);process.exitCode=1});

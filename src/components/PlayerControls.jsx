@@ -1,6 +1,6 @@
 import { t, useLanguage } from '../i18n';
 import React, { useEffect, useRef, useState } from 'react';
-import { Play, Pause, Settings as SettingsIcon, PictureInPicture } from './icons';
+import { Play, Pause, Check, Settings as SettingsIcon, PictureInPicture } from './icons';
 import './PlayerControls.css';
 import { DEFAULT_SHORTCUTS, SHORTCUT_ACTIONS, formatShortcut, ignoresPlaybackShortcut, shortcutKey } from '../shortcuts';
 import { VideoEnhancementControls } from './VideoEnhancement';
@@ -12,8 +12,9 @@ const formatTime = seconds => {
   return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, '0')}`;
 };
 const Icon = ({ children }) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{t(children)}</svg>;
+const PLAYBACK_RATES = Array.from({ length: 16 }, (_, index) => (index + 1) / 4);
 
-export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAULT_SHORTCUTS, onToggleFullscreen, videoRef, stageRef, source, available, floating = false, onToggleFloating, continuing = false, autoContinue = false, rate, onRateChange, onError, pictureMode = 'fit', onPictureModeChange, portrait = false, windowFill = false, onWindowFill, seriesTitle = '', episodes = [], currentIndex, onEpisodeChange, onlineQuality = 'auto', supportsOnlineQuality = false, onQualityChange, onOpenSettings, episodesOpen = false, onOpenEpisodes, onOpenDownloads, cacheNext = false, autoNext = false, autoDelete = false, playbackSettingsBusy = false, onToggleCacheNext, onToggleAutoNext, onToggleAutoDelete, onControlsHiddenChange, decoderMode = 'auto', onDecoderChange, decoderBusy = false }) {
+export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAULT_SHORTCUTS, onToggleFullscreen, videoRef, stageRef, source, available, floating = false, onToggleFloating, continuing = false, autoContinue = false, rate, onRateChange, onError, pictureMode = 'fit', onPictureModeChange, portrait = false, windowFill = false, onWindowFill, seriesTitle = '', episodes = [], currentIndex, onEpisodeChange, cachedEpisodeIndexes, onEpisodeMenuOpen, onEpisodeDownload, onlineQuality = 'auto', supportsOnlineQuality = false, onQualityChange, onOpenSettings, episodesOpen = false, onOpenEpisodes, onOpenDownloads, cacheNext = false, autoNext = false, autoDelete = false, playbackSettingsBusy = false, onToggleCacheNext, onToggleAutoNext, onToggleAutoDelete, onControlsHiddenChange, decoderMode = 'auto', onDecoderChange, decoderBusy = false }) {
   useLanguage();
   const mobile = window.electronAPI?.platform === 'android';
   const controlsIdleMs = 1000;
@@ -25,7 +26,10 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
   const [selectionPanel, setSelectionPanel] = useState(null);
   const selectionRef = useRef(null);
   const episodeButtonRef = useRef(null);
+  const episodeClickTimer = useRef(null);
   const qualityButtonRef = useRef(null);
+  const rateButtonRef = useRef(null);
+  const rateSelectionRef = useRef(null);
   const [selectionHeight, setSelectionHeight] = useState(360);
   const danmakuPanelRef = useRef(null);
   const danmakuButtonRef = useRef(null);
@@ -36,7 +40,6 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
   const controlsRef = useRef(null);
   const menuRef = useRef(null);
   const menuButtonRef = useRef(null);
-  const speedRef = useRef(null);
   const navigationKeysRef = useRef(new Set());
   const pointerRef = useRef(null);
   const idleDeadlineRef = useRef(0);
@@ -191,7 +194,7 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
   useEffect(() => {
     if (!menuOpen) return;
     const stageDocument = stageRef.current?.ownerDocument || document;
-    speedRef.current?.focus();
+    menuRef.current?.querySelector('[role="dialog"] select')?.focus?.();
     const outside = event => { if (!menuRef.current?.contains(event.target)) setMenuOpen(false); };
     const escape = event => {
       if (event.key !== 'Escape') return;
@@ -233,7 +236,9 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
     if (!selectionPanel) return;
     const stageDocument = stageRef.current?.ownerDocument || document;
     const stageWindow = stageDocument.defaultView || window;
-    const selected = selectionRef.current?.querySelector('[aria-current="true"], [aria-pressed="true"]');
+    const container = selectionPanel === 'rate' ? rateSelectionRef : selectionRef;
+    const trigger = { episodes: episodeButtonRef, quality: qualityButtonRef, rate: rateButtonRef }[selectionPanel];
+    const selected = container.current?.querySelector('[aria-current="true"], [aria-pressed="true"]');
     selected?.focus({ preventScroll: true });
     selected?.scrollIntoView({ block: 'nearest' });
     const measure = () => {
@@ -241,12 +246,12 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
       const controls = controlsRef.current?.getBoundingClientRect?.();
       if (stage && controls) setSelectionHeight(Math.max(60, Math.min(440, controls.top - stage.top - 16)));
     };
-    const outside = event => { if (!selectionRef.current?.contains(event.target)) setSelectionPanel(null); };
+    const outside = event => { if (!container.current?.contains(event.target)) setSelectionPanel(null); };
     const escape = event => {
       if (event.key !== 'Escape') return;
       event.preventDefault(); event.stopPropagation();
       setSelectionPanel(null);
-      (selectionPanel === 'episodes' ? episodeButtonRef : qualityButtonRef).current?.focus();
+      trigger.current?.focus();
     };
     measure();
     const Observer = stageWindow.ResizeObserver;
@@ -266,8 +271,11 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
 
   const toggleSelection = panel => {
     setMenuOpen(false); setDanmakuOpen(false);
+    if (panel === 'episodes' && selectionPanel !== panel) onEpisodeMenuOpen?.();
     setSelectionPanel(open => open === panel ? null : panel);
   };
+
+  useEffect(() => () => clearTimeout(episodeClickTimer.current), [selectionPanel, seriesTitle, source]);
 
   const closeDanmaku = () => { setDanmakuOpen(false); (mobile ? menuButtonRef : danmakuButtonRef).current?.focus(); };
 
@@ -321,18 +329,35 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
           {danmakuOpen && <DanmakuSettings danmaku={danmaku} onClose={closeDanmaku} panelRef={danmakuPanelRef} maxHeight={danmakuHeight} />}
         </div>}
         <div className="player-controls-selection" data-player-menu ref={selectionRef}>
-          {!!episodes.length && <button type="button" ref={episodeButtonRef} aria-label={t("选集")} aria-haspopup="dialog" aria-expanded={episodesOpen || selectionPanel === 'episodes'}
+          {!!episodes.length && <button type="button" ref={episodeButtonRef} className="player-episodes-trigger" aria-label={t("选集")} aria-haspopup="dialog" aria-expanded={episodesOpen || selectionPanel === 'episodes'}
             onClick={() => mobile && !fullscreen && onOpenEpisodes ? onOpenEpisodes() : toggleSelection('episodes')}>{t("选集")}</button>}
-          {!mobile && onQualityChange && <button type="button" ref={qualityButtonRef} aria-label={t("清晰度")} aria-haspopup="dialog" aria-expanded={selectionPanel === 'quality'}
+          {!mobile && onQualityChange && <button type="button" ref={qualityButtonRef} className="player-quality-trigger" aria-label={t("清晰度")} aria-haspopup="dialog" aria-expanded={selectionPanel === 'quality'}
             onClick={() => toggleSelection('quality')}>{t(onlineQuality === 'compat' ? (mobile ? '兼容' : '老电脑') : onlineQuality === 'auto' ? (media.width > 0 && media.height > 0 ? `${Math.min(media.width, media.height)}P` : '自动') : onlineQuality.toUpperCase())}</button>}
           {selectionPanel === 'episodes' && <div className="player-controls-popover player-episode-popover" role="dialog" aria-label={t("选集面板")} style={{ maxHeight: selectionHeight }}>
             <div className="player-popover-heading"><strong>{t("选集")}</strong><span>{t("第 {0} 集 / 共 {1} 集", [currentIndex, episodes.length])}</span></div>
             <div className="player-episode-grid">
-              {episodes.map(episode => <button type="button" key={episode.vid_index} aria-label={t(`播放第 ${episode.vid_index} 集`)} aria-current={episode.vid_index === currentIndex ? 'true' : undefined}
-                disabled={episode.locked} title={t(episode.locked ? '来源未开放本集' : `播放第 ${episode.vid_index} 集`)}
-                onClick={() => { setSelectionPanel(null); episodeButtonRef.current?.focus(); onEpisodeChange(episode.vid_index); }}>
-                {t(episode.vid_index)}{episode.locked && <small>{t("未开放")}</small>}
-              </button>)}
+              {episodes.map(episode => {
+                const index = episode.vid_index;
+                const downloaded = episode.status === 'completed' && !!episode.fileUrl;
+                const stored = episode.locked ? '' : downloaded ? '已下载' : cachedEpisodeIndexes?.has(index) ? '已缓存' : '';
+                const label = stored ? t("播放第 {0} 集，{1}", [index, t(stored)]) : t(`播放第 ${index} 集`);
+                const canDownload = !episode.locked && episode.status !== 'completed' && !!onEpisodeDownload;
+                const play = () => { setSelectionPanel(null); episodeButtonRef.current?.focus(); onEpisodeChange(index); };
+                return <button type="button" key={index} aria-label={label} aria-current={index === currentIndex ? 'true' : undefined}
+                  disabled={episode.locked} title={episode.locked ? t("来源未开放本集") : canDownload ? t("{0} · 双击下载", [label]) : label}
+                  onClick={event => {
+                    clearTimeout(episodeClickTimer.current);
+                    if (!canDownload || !event?.detail) play();
+                    else episodeClickTimer.current = setTimeout(play, 250);
+                  }}
+                  onDoubleClick={canDownload ? () => {
+                    clearTimeout(episodeClickTimer.current);
+                    onEpisodeDownload(index);
+                  } : undefined}>
+                  {t(index)}{episode.locked && <small>{t("未开放")}</small>}
+                  {stored && <Check size={13} className="player-episode-check" aria-hidden="true" />}
+                </button>;
+              })}
             </div>
           </div>}
           {selectionPanel === 'quality' && <div className="player-controls-popover player-quality-popover" role="dialog" aria-label={t("清晰度面板")} style={{ maxHeight: selectionHeight }}>
@@ -366,8 +391,22 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
           <PictureInPicture size={18} />
         </button>
         {mobile ? <select data-player-menu className="player-controls-rate" aria-label={t("播放速度")} value={rate} onChange={event => { idleDeadlineRef.current = Date.now() + controlsIdleMs; event.currentTarget.blur(); onRateChange(Number(event.target.value)); }}>
-          {Array.from({ length: 16 }, (_, index) => (index + 1) / 4).map(value => <option key={value} value={value}>{t(value)}×</option>)}
-        </select> : <button type="button" data-player-control className="player-controls-rate" aria-label={t("增加播放速度")} title={t(`播放速度 ${rate}×，点击增加 0.25 倍，4 倍后回到 1 倍`)} onClick={() => onRateChange(rate >= 4 ? 1 : Math.min(4, rate + 0.25))}>{t(rate)}×</button>}
+          {PLAYBACK_RATES.map(value => <option key={value} value={value}>{t(value)}×</option>)}
+        </select> : <div className="player-controls-options player-rate-options" data-player-menu ref={rateSelectionRef}>
+          <button type="button" ref={rateButtonRef} className="player-controls-rate"
+            aria-label={t("播放速度")} title={t("播放速度")} aria-haspopup="dialog"
+            aria-expanded={selectionPanel === 'rate'} onClick={() => toggleSelection('rate')}>{t(rate)}×</button>
+          {selectionPanel === 'rate' && <div className="player-controls-popover player-rate-popover" role="dialog" aria-label={t("播放速度")} style={{ maxHeight: selectionHeight }}>
+            <div className="player-popover-heading"><strong>{t("播放速度")}</strong></div>
+            <div className="player-rate-grid">
+              {PLAYBACK_RATES.map(value => <button type="button" key={value} aria-pressed={rate === value} onClick={() => {
+                if (rate !== value) onRateChange(value);
+                setSelectionPanel(null);
+                rateButtonRef.current?.focus();
+              }}>{t(value)}×</button>)}
+            </div>
+          </div>}
+        </div>}
         <div className="player-controls-options" data-player-menu ref={menuRef}>
           <button type="button" ref={menuButtonRef} aria-label={t("更多播放选项")} title={t("更多播放选项")} aria-haspopup="dialog" aria-expanded={menuOpen} onClick={() => { setDanmakuOpen(false); setSelectionPanel(null); setMenuOpen(open => !open); }}>
             <Icon><circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" /></Icon>
@@ -389,9 +428,6 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
               {onToggleAutoNext && <button type="button" aria-pressed={autoNext} onClick={onToggleAutoNext}>{t("连播 · ")}{t(autoNext ? '开' : '关')}</button>}
               {onToggleAutoDelete && <button type="button" aria-pressed={autoDelete} disabled={playbackSettingsBusy} onClick={onToggleAutoDelete}>{t("看完自动删 · ")}{t(autoDelete ? '开' : '关')}</button>}
             </>}
-            {!mobile && <label>{t("播放速度")}<select ref={speedRef} aria-label={t("播放速度")} value={rate} onChange={event => onRateChange(Number(event.target.value))}>
-              {Array.from({ length: 16 }, (_, index) => (index + 1) / 4).map(value => <option key={value} value={value}>{t(value)}×</option>)}
-            </select></label>}
             <label className="player-picture-mode">{t("画面模式")}<select aria-label={t("画面模式")} aria-describedby="picture-mode-hint" value={pictureMode} onChange={event => onPictureModeChange(event.target.value)}>
               <option value="fit">{t("适应窗口")}</option>
               <option value="width">{t("保持宽度")}</option>

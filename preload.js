@@ -26,17 +26,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('stealth-state', listener);
   },
   // 应用信息 / 官网链接
-  checkAnnouncements: options => ipcRenderer.invoke('check-announcements', options),
-  getCurrentAnnouncement: () => ipcRenderer.invoke('get-current-announcement'),
-  acknowledgeAnnouncement: payload => ipcRenderer.invoke('acknowledge-announcement', payload),
-  dismissAnnouncement: payload => ipcRenderer.invoke('dismiss-announcement', payload),
-  getAnnouncementPreferences: () => ipcRenderer.invoke('get-announcement-preferences'),
-  setAnnouncementPreferences: patch => ipcRenderer.invoke('set-announcement-preferences', patch),
-  onAnnouncementPreferences: cb => {
-    const listener = (_event, preferences) => cb(preferences);
-    ipcRenderer.on('announcement-preferences-changed', listener);
-    return () => ipcRenderer.removeListener('announcement-preferences-changed', listener);
-  },
   checkAppUpdate: () => ipcRenderer.invoke('check-app-update'),
   openAppUpdate: () => ipcRenderer.invoke('open-app-update'),
   getAppUpdateState: () => ipcRenderer.invoke('get-app-update-state'),
@@ -72,6 +61,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   searchSeries: (keyword, options) => ipcRenderer.invoke('search-series', keyword, options),
   searchSeriesMore: (keyword, options) => ipcRenderer.invoke('search-series-more', keyword, options),
   findSeriesSequels: (seriesId, options) => ipcRenderer.invoke('find-series-sequels', seriesId, options),
+  findSeriesSeasons: (seriesId, options) => ipcRenderer.invoke('find-series-seasons', seriesId, options),
   searchResolve: (seriesId) => ipcRenderer.invoke('search-resolve', seriesId),
   searchWindowShow: (visible, sourceUrl) => ipcRenderer.invoke('search-window-show', visible, sourceUrl),
   getSeriesList: (options) => ipcRenderer.invoke('get-series-list', options),
@@ -159,7 +149,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('watch-history-progress', listener);
   },
 
-  // 红果账号（网页扫码，只读同步 APP 观看记录）
+  // 红果账号和云端观看记录
   getAccountStatus: () => ipcRenderer.invoke('get-account-status'),
   openAccountWebLogin: () => ipcRenderer.invoke('open-account-web-login'),
   startAccountLogin: () => ipcRenderer.invoke('start-account-login'),
@@ -167,11 +157,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
   cancelAccountLogin: (loginId) => ipcRenderer.invoke('cancel-account-login', loginId),
   logoutAccount: () => ipcRenderer.invoke('logout-account'),
   getAccountHistory: (options) => ipcRenderer.invoke('get-account-history', options),
-  playAccountHistory: (seriesId) => ipcRenderer.invoke('play-account-history', seriesId),
+  syncAccountProgress: options => ipcRenderer.invoke('sync-account-progress', options),
+  onCaptureAccountCheckpoint: cb => {
+    const listener = async (_event, id) => {
+      try { await cb(); }
+      finally { await ipcRenderer.invoke('account-sync-checkpoint-ready', id).catch(() => {}); }
+    };
+    ipcRenderer.on('capture-account-sync-checkpoint', listener);
+    return () => ipcRenderer.removeListener('capture-account-sync-checkpoint', listener);
+  },
+  testAccountProgressSync: () => ipcRenderer.invoke('test-account-progress-sync'),
+  playAccountHistory: (seriesId, options) => ipcRenderer.invoke('play-account-history', seriesId, options),
   onAccountUpdated: (cb) => {
     const listener = (_event, data) => cb(data);
     ipcRenderer.on('account-updated', listener);
     return () => ipcRenderer.removeListener('account-updated', listener);
+  },
+  onAccountProgressSyncStatus: cb => {
+    const listener = (_event, data) => cb(data);
+    ipcRenderer.on('account-progress-sync-status', listener);
+    return () => ipcRenderer.removeListener('account-progress-sync-status', listener);
   },
 
   // 一键合并

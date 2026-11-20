@@ -55,6 +55,7 @@ function mount({ local = false, localIndexes = [], localQuality, saved = null, t
   };
   // useCallback returns the callback, unlike useMemo.
   react.useCallback = (fn, deps) => react.useMemo(() => fn, deps);
+  react.useLayoutEffect = react.useEffect;
   const episodes = Array.from({ length: episodeCount }, (_, i) => i + 1).map(n => {
     const isLocal = local || localIndexes.includes(n);
     return { vid_index: n, vid: `v${n}`, locked: lockedIndexes.includes(n), status: isLocal ? 'completed' : 'missing',
@@ -132,14 +133,9 @@ function mount({ local = false, localIndexes = [], localQuality, saved = null, t
     isFloating: () => floating,
     pictureInPictureExits: () => pipExits,
     episode: n => {
-      const before = new Set(timers.keys());
-      find(x => x.props['aria-label'] === `第 ${n} 集`).props.onClick();
-      for (const [id, timer] of [...timers]) {
-        if (!before.has(id) && timer.delay === 250) {
-          timers.delete(id);
-          timer.fn();
-        }
-      }
+      const panel = find(x => x.props['aria-label'] === `第 ${n} 集`);
+      if (panel) panel.props.onClick();
+      else find(x => x.props.onEpisodeChange)?.props.onEpisodeChange(n);
       render();
     },
     error: code => find(n => n.type === 'video').props.onError({ currentTarget: Object.assign(media, { error: { code } }) }),
@@ -152,6 +148,14 @@ if (require.main === module) (async () => {
   let failures = 0;
   const fixedPlayback = () => ({ storage: new Map([['hongguo:online-quality', '1080p']]), localQuality: '1080p' });
   const test = async (name, fn) => { if (process.argv[2] && !name.includes(process.argv[2])) return; try { await fn(); console.log(`PASS ${name}`); } catch (e) { failures++; console.error(`FAIL ${name}: ${e.stack}`); } };
+  await test('pause requests immediate sync with the current desktop checkpoint', async () => {
+    const ui = mount({ local: true }); await ui.flush(); ui.metadata();
+    ui.media.currentTime = 24.5;
+    ui.find(n => n.type === 'video').props.onPause();
+    assert.equal(ui.saves.at(-1)[2], 24.5);
+    assert.equal(ui.saves.at(-1)[3].syncOnPause, true);
+    ui.unmount();
+  });
   await test('removed history stays removed through hidden player unload and new playback can record again', async () => {
     for (const resume of [false, true]) {
       const ui = mount({ local: true }); await ui.flush(); ui.metadata();

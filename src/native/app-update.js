@@ -1,4 +1,16 @@
-const RELEASES_URL = 'https://github.com/jackotom/hongguo-drama/releases';
+const { updateFeed } = require('../../package.json');
+
+function appUpdateSource() {
+  const feed = updateFeed;
+  const repository = `${feed.owner}/${feed.repo}`;
+  return {
+    feed,
+    releasesUrl: `https://github.com/${repository}/releases`,
+    latestApiUrl: `https://api.github.com/repos/${repository}/releases/latest`,
+  };
+}
+
+const desktopSource = appUpdateSource();
 
 function versionParts(value) {
   const match = /^v?(\d+)\.(\d+)(?:\.(\d+))?$/.exec(String(value || ''));
@@ -7,17 +19,17 @@ function versionParts(value) {
   return parts.every(Number.isSafeInteger) ? parts : null;
 }
 
-function availableRelease(data, currentVersion) {
+function availableRelease(data, currentVersion, source = desktopSource) {
   if (!data || data.draft || data.prerelease) return null;
   const next = versionParts(data.tag_name), current = versionParts(currentVersion);
   if (!next || !current) return null;
   const difference = next.findIndex((part, i) => part !== current[i]);
   if (difference < 0 || next[difference] < current[difference]) return null;
   return {
-    version: data.tag_name.replace(/^v/, '').replace(/^(\d+\.\d+)\.0$/, '$1'),
+    version: next.join('.'),
     // Never open a remote-provided URL; only this project's release page.
-    url: `${RELEASES_URL}/tag/${encodeURIComponent(data.tag_name)}`,
+    url: `${source.releasesUrl}/tag/${encodeURIComponent(data.tag_name)}`,
   };
 }
 
-module.exports = { availableRelease };
+module.exports = { appUpdateSource, availableRelease };

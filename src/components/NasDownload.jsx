@@ -1,9 +1,9 @@
 import { t, useLanguage } from '../i18n';
 import React, { useEffect, useId, useRef, useState } from 'react';
-import { Download } from './icons';
+import { ChevronDown, Download } from './icons';
 import './NasDownload.css';
 
-export default function NasDownload({ seriesId, quality = 'auto', disabled = false }) {
+export default function NasDownload({ seriesId, quality = 'auto', disabled = false, compact = false }) {
   useLanguage();
   const descriptionId = useId();
   const [submitting, setSubmitting] = useState(false);
@@ -74,7 +74,7 @@ export default function NasDownload({ seriesId, quality = 'auto', disabled = fal
   };
 
   if (!seriesId) return null;
-  return <div className="nas-download">
+  return <div className={`nas-download${compact ? ' nas-download-compact' : ''}`}>
     <button type="button" className="btn btn-outline" onClick={submit} disabled={disabled || submitting}
       aria-describedby={descriptionId} aria-label={t("下载到 NAS")}>
       <Download size={15} />
@@ -82,9 +82,10 @@ export default function NasDownload({ seriesId, quality = 'auto', disabled = fal
     </button>
     <label className="nas-download-description"><input type="checkbox" checked={createFolder} disabled={disabled || submitting}
       onChange={event => setCreateFolder(event.target.checked)} />{t(" 自动创建剧名文件夹")}</label>
-    <div id={descriptionId} className="nas-download-description">
+    {compact && <button type="button" className="btn btn-outline" popovertarget={descriptionId} data-player-menu>{t("NAS 说明")}<ChevronDown size={14} /></button>}
+    <div id={descriptionId} className={`nas-download-description${compact ? ' nas-download-help desktop-popover' : ''}`} popover={compact ? 'auto' : undefined}>
       <p>{t("保存整剧封面、简介和 tvshow.nfo，不再新建分集 NFO。已有视频安全复用，缺失资料补齐。")}</p>
-      <p>{t("先挂载 NAS，再选择保存位置；已建好本剧文件夹时可取消自动创建。也可在设置中将 NAS 设为普通下载目录并开启整剧资料，无需每次使用本按钮。")}</p>
+      <p>{t(compact ? "先挂载 NAS，再选择保存位置。已有剧名文件夹时可取消自动创建。" : "先挂载 NAS，再选择保存位置；已建好本剧文件夹时可取消自动创建。也可在设置中将 NAS 设为普通下载目录并开启整剧资料，无需每次使用本按钮。")}</p>
     </div>
     {feedback?.kind === 'success' && <p className="nas-download-success" role="status">{t(feedback.message)}</p>}
     {feedback?.kind === 'error' && <p className="nas-download-error" role="alert">{t(feedback.message)}</p>}

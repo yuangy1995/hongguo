@@ -249,11 +249,15 @@ function signedMetadataRequest(apiPath, values = {}, payload = null) {
     return { url, headers, body };
 }
 
-// Account reads use the registered device identity plus the website login cookie.
-function signedAccountRequest(apiPath, values = {}, identity) {
-    if (!['/reading/user/info/v1/', '/reading/bookapi/read_history/list/v1/', '/reading/bookapi/read_progress/list/v1/', '/reading/bookapi/multi-detail/v1/'].includes(apiPath)) {
+// Account requests use the registered device identity plus the website login cookie.
+function signedAccountRequest(apiPath, values = {}, identity, payload) {
+    const allowed = payload === undefined
+        ? ['/reading/user/info/v1/', '/reading/bookapi/read_history/list/v1/', '/reading/bookapi/read_progress/list/v1/', '/reading/bookapi/multi-detail/v1/']
+        : ['/reading/bookapi/read_history/update/v', '/reading/bookapi/read_progress/upload/v'];
+    if (!allowed.includes(apiPath)) {
         throw new Error('不支持的账号接口');
     }
+    const body = payload === undefined ? null : Buffer.from(JSON.stringify(payload));
     if (![identity?.device_id, identity?.iid].every(value => typeof value === 'string' && /^\d{1,30}$/.test(value) && /[1-9]/.test(value))
         || typeof identity?.cdid !== 'string' || !/^[a-f0-9-]{36}$/i.test(identity.cdid)) {
         throw new Error('账号设备身份无效');
@@ -266,7 +270,7 @@ function signedAccountRequest(apiPath, values = {}, identity) {
         requestTicket = ticketBase + n;
         query = pythonUrlEncode({ ...values, ...device, ts: String(khronos), _rticket: String(requestTicket) });
         url = `https://api5-normal-sinfonlinea.fqnovel.com${apiPath}?${query}`;
-        if (branchOf(url, null, khronos) === 0) break;
+        if (branchOf(url, body, khronos) === 0) break;
         if (n === 127) throw new Error('无法生成账号请求签名');
     }
     const headers = {
@@ -274,11 +278,12 @@ function signedAccountRequest(apiPath, values = {}, identity) {
         'x-ss-req-ticket': String(requestTicket), 'x-tt-request-tag': 't=0;n=0', 'sdk-version': '2',
         'passport-sdk-version': '50561', 'x-xs-from-web': '0', 'x-khronos': String(khronos),
         'x-ladon': be32(khronos).toString('base64'), 'x-argus': le32(khronos).toString('base64'),
-        'x-gorgon': xGorgon(query, null, khronos, Math.floor(Math.random() * 65536)),
+        'x-gorgon': xGorgon(query, body, khronos, Math.floor(Math.random() * 65536)),
         'x-helios': helios(khronos),
-        'x-medusa': buildMedusa(url, null, khronos, device), 'x-tt-dt': '',
+        'x-medusa': buildMedusa(url, body, khronos, device), 'x-tt-dt': '',
     };
-    return { url, headers };
+    if (body) { headers['Content-Type'] = 'application/json; charset=utf-8'; headers['x-ss-stub'] = md5(body); }
+    return { url, headers, body };
 }
 
 function parseFallback(value) {

@@ -100,7 +100,7 @@ export default function SequelFinder({ seriesId, active = true, timeoutMs = 2500
       {open && <button type="button" className="btn btn-outline btn-sm" onClick={close}>{t("收起")}</button>}
     </div>
     {open && <div id="sequel-finder-results" className="sequel-finder-results">
-      <p>{t("可能的续作，请核对剧名")}</p>
+      {!!results.length && <p>{t("可能的续作，请核对剧名")}</p>}
       {loading && <p role="status">{t(results.length ? '已找到本地记录，正在补充查询…' : '正在查找下一季…')}</p>}
       {error && <p className="sequel-finder-error" role="alert">{t(error)}</p>}
       {partial && <p role="status">{t("部分查询未完成，可稍后重试。")}</p>}

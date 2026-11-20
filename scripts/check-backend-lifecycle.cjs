@@ -62,6 +62,39 @@ const checks = [
     h.windows[0].emit('close', { preventDefault() { throw new Error('approved quit must close'); } });
     assert.equal(h.state.quits, 1, 'approved close must not request quit recursively');
   }],
+  ['signed-in window close and app quit capture the renderer checkpoint before syncing', async () => {
+    for (const mode of ['close', 'quit']) {
+      const h = fixture('win32');
+      h.context.createWindow();
+      h.run("process.platform = 'darwin'");
+      const win = h.windows[0];
+      win.webContents.isDestroyed = () => false;
+      win.webContents.mainFrame = { url: require('node:url').pathToFileURL(path.resolve(__dirname, '../dist-react/index.html')).href };
+      let checkpoint;
+      const order = [];
+      win.webContents.send = (channel, id) => { if (channel === 'capture-account-sync-checkpoint') checkpoint = id; };
+      win.close = () => order.push('close');
+      let finishSync;
+      const sync = new Promise(resolve => { finishSync = resolve; });
+      h.context.testSync = async () => { order.push('sync'); return sync; };
+      h.run('accountController.isSignedIn = () => true; accountController.flushProgress = testSync');
+      let prevented = 0;
+      const repeat = () => (mode === 'close' ? win : h.app).emit(mode === 'close' ? 'close' : 'before-quit', {
+        preventDefault: () => { prevented++; },
+      });
+      repeat(); repeat();
+      assert.equal(prevented, 2);
+      assert.ok(checkpoint);
+      assert.deepEqual(order, []);
+      await h.handlers['account-sync-checkpoint-ready']({ sender: win.webContents, senderFrame: win.webContents.mainFrame }, checkpoint);
+      await flush();
+      assert.deepEqual(order, ['sync']);
+      assert.equal(h.state.quits, 0);
+      finishSync({ success: true }); await flush();
+      if (mode === 'close') assert.deepEqual(order, ['sync', 'close']);
+      else assert.equal(h.state.quits, 1);
+    }
+  }],
   ['repeat merge chooses a new filename and preserves existing collections', async () => {
     const h = fixture('darwin', { mergeRunner: { runMerge: async ({ task }) => {
       fs.writeFileSync(task.output, 'merged fixture'); task.totalDuration = 20; task.hasAudio = false; task.status = 'completed';

@@ -1,0 +1,127 @@
+name: 发布桌面版
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 完整发行版本号，例如 1.0.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: desktop-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  source:
+    if: github.repository == 'yuangy1995/hongguo' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: 核对版本与发布说明
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          test "$REQUESTED_VERSION" = "$(node -p 'require("./package.json").version')"
+          [[ "$REQUESTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test -s "docs/release-notes/$REQUESTED_VERSION.md"
+
+  mac:
+    needs: source
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    env:
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci --no-audit --no-fund
+      - name: 准备对应的媒体工具和源码
+        run: python3 scripts/restore-release-mac-media.py "$ARCH" "$RUNNER_TEMP/hongguo-media"
+      - name: 构建并检查最终 DMG
+        run: |
+          npm run build:react
+          npx electron-builder --config build/electron-builder-mac.cjs --mac dmg "--$ARCH" --publish never
+          version="$(node -p 'require("./package.json").version')"
+          dmg="$PWD/dist/hongguo-downloader-$version-mac-$ARCH.dmg"
+          hdiutil verify "$dmg"
+          mkdir -p dist/mac-release
+          mount="$(mktemp -d)"
+          tested="$(mktemp -d)"
+          hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$mount"
+          trap 'hdiutil detach "$mount"' EXIT
+          app="$mount/红果短剧.app"
+          codesign --verify --deep --strict "$app"
+          codesign -dv "$app" 2>&1 | grep -F 'Signature=adhoc'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$version"
+          if [ "$ARCH" = x64 ]; then expected=x86_64; else expected=arm64; fi
+          test "$(lipo "$app/Contents/MacOS/红果短剧" -archs)" = "$expected"
+          ditto "$app" "$tested/红果短剧.app"
+          hdiutil detach "$mount"
+          trap - EXIT
+          node scripts/verify-mac-release.cjs "$tested/红果短剧.app" dist/mac-release/mac-result.json
+          cp "$dmg" "$RUNNER_TEMP/hongguo-media/"*source.tar.gz dist/mac-release/
+          printf '%s\n' "$GITHUB_SHA" > dist/mac-release/SOURCE-SHA.txt
+          cd dist/mac-release
+          shasum -a 256 ./*.dmg ./*source.tar.gz > MACOS-SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-release-${{ matrix.arch }}
+          path: dist/mac-release/
+          if-no-files-found: error
+
+  windows:
+    needs: source
+    uses: ./.github/workflows/windows.yml
+    with:
+      source_sha: ${{ github.sha }}
+
+  linux:
+    needs: source
+    uses: ./.github/workflows/linux.yml
+    with:
+      source_sha: ${{ github.sha }}
+
+  publish:
+    needs: [mac, windows, linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: 'mac-release-*'
+          path: release-inputs
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-release-candidate
+          path: release-inputs/windows-release-candidate
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-appimage-candidate
+          path: release-inputs/linux-appimage-candidate
+      - name: 汇总、核对并发布
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/publish-desktop-release.py release-inputs

@@ -14,13 +14,34 @@ const { mount } = require('./check-player-resume.cjs');
     assert.equal(ui.media.paused, false, 'explicit episode selection still starts');
     ui.unmount();
   }
+  for (const saved of [null, { vid_index: 2, currentTime: 28 }]) {
+    const ui = mount({ props: { target: null }, apiOverrides: {
+      getSeriesList: async () => [{ series_id: 'A' }, { series_id: 'B' }],
+      getSeriesEpisodes: async series_id => ({ success: true, data: {
+        series_id, series_title: series_id,
+        episodes: [1, 2].map(vid_index => ({
+          vid_index, vid: `${series_id}-${vid_index}`, status: saved ? 'completed' : 'missing',
+          fileUrl: saved ? `file:///${series_id}-${vid_index}.mp4` : undefined,
+        })),
+      } }),
+      getPlaybackPosition: async seriesId => seriesId === 'B' ? saved : null,
+    } });
+    await ui.flush();
+    ui.find(node => node.props.onSwitch).props.onSwitch('B', false);
+    await ui.flush();
+    ui.metadata();
+    assert.equal(ui.find(node => node.props.onEpisodeChange).props.currentIndex, saved?.vid_index || 1);
+    assert.equal(ui.media.currentTime, saved?.currentTime || 0);
+    assert.equal(ui.media.paused, false, 'explicit season selection autoplays');
+    ui.unmount();
+  }
   const ui = mount({ props: { target: null, onNavigate() {} } }); await ui.flush();
   const panel = () => ui.find(n => n.props.id === 'player-management');
   assert.equal(panel().props.hidden, false, 'download actions remain visible below episode selection');
   assert.ok(ui.button('下载未完成集')); assert.ok(ui.button('合并导出全集'));
   let scrolled;
   panel().props.ref.current = { scrollIntoView: options => { scrolled = options; } };
-  ui.button('下载管理').props.onClick();
+  ui.button('下载工具').props.onClick();
   for (const timer of ui.timers.values()) if (timer.delay === 0) timer.fn();
   assert.equal(scrolled?.block, 'center', 'download shortcut scrolls to this page download tools');
 

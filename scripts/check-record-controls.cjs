@@ -119,7 +119,7 @@ test('watch filters require completion evidence and retain resume, removal, coun
     { series_id: 'done', series_title: '已到片尾', vid_index: 2, total: 2, completed: true },
     { series_id: 'partial', series_title: '末集未完', vid_index: 2, total: 2, completed: false },
     { series_id: 'legacy', series_title: '旧记录', vid_index: 2, total: 2 },
-  ].map(row => ({ ...row, currentTime: 30, updatedAt: Date.now() }));
+  ].map((row, index) => ({ ...row, currentTime: 30, updatedAt: 1000 - index }));
   h.window.electronAPI = {
     getWatchHistory: async () => ({ success: true, results: rows }),
     onWatchHistoryUpdated: fn => { updated = fn; return () => {}; },

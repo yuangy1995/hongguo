@@ -214,7 +214,9 @@ const findIn = (node, predicate) => predicate(node) ? node : node?.children?.map
   assert.ok(!text(priorityRow('1000213')).includes('旧剧第四季'), 'group hints are not duplicated on children');
   assert.ok(findIn(priorityRow('1000211'), node => node?.props?.className === 'history-dot'), 'a rewatched low season retains its new-episode dot');
   assert.ok(!findIn(priorityRow('1000213'), node => node?.props?.className === 'history-dot'), 'an external sequel dot moves to the chronological head');
-  assert.match(text(priorityUi.find(node => node.props.className === 'history-container')), /最近观看时间/);
+  assert.ok(findIn(priorityRow('1000211'), node => node?.props?.className === 'history-time'));
+  const related = findIn(priorityRow('1000211'), node => node?.type === 'details' && node.props.className === 'history-related');
+  assert.ok(related && !related.props.open, 'sequel hints stay accessible in a collapsed group');
   assert.ok(!text(priorityUi.find(node => node.props.className === 'history-container')).includes('有更新的组优先显示'));
   priorityUi.find(node => node.type === 'input').props.onChange({ target: { checked: true } });
   await priorityUi.flush();
@@ -321,7 +323,7 @@ const findIn = (node, predicate) => predicate(node) ? node : node?.children?.map
   similarUi.find(node => node.type === 'input').props.onChange({ target: { checked: true } });
   await similarUi.flush();
   assert.ok(button(similarUi, '全部 2'), 'fuzzy matches must remain visible when low seasons are hidden');
-  assert.ok(similarUi.find(node => node.type === 'span' && text(node) === '疑似同剧（仅提示）'));
+  assert.ok(similarUi.find(node => node.type === 'summary' && text(node).startsWith('疑似同剧（仅提示）')));
   assert.ok(similarUi.find(node => node.type === 'button' && text(node) === 'AAA2BBB'), 'the suspected title must be available for inspection');
   await button(similarUi, 'AAA2BBB').props.onClick();
   await similarUi.flush();
@@ -421,7 +423,7 @@ const findIn = (node, predicate) => predicate(node) ? node : node?.children?.map
   await updateUi.flush();
   const historyRow = id => updateUi.find(node => node.type === 'li' && node.props.key === id);
   const hasDot = row => !!findIn(row, node => node?.props?.className === 'history-dot');
-  const hasHints = row => !!findIn(row, node => node?.props?.className === 'history-sequels');
+  const hasHints = row => !!findIn(row, node => node?.props?.className === 'history-related');
   assert.equal(hasDot(historyRow('1000101')), false, 'hidden internal sequel candidates must not leave a child dot');
   assert.equal(hasDot(historyRow('1000102')), false);
   assert.equal(hasDot(historyRow('1000103')), false, 'a seen external sequel must not inherit an internal candidate dot');
@@ -429,7 +431,6 @@ const findIn = (node, predicate) => predicate(node) ? node : node?.children?.map
   assert.equal(hasHints(historyRow('1000102')), false);
   assert.equal(hasHints(historyRow('1000103')), true, 'the group head retains deduplicated external suggestions');
   assert.ok(findIn(historyRow('1000103'), node => node?.type === 'button' && text(node) === fuzzy.series_title));
-  assert.match(text(updateUi.find(node => node.props.className === 'history-container')), /批量检测范围.*不.*清除.*红点/);
   assert.deepEqual(updateUi.acknowledgements, [], 'display grouping must never write acknowledgements');
 
   groupedPlayback['1000101'].seenSequelIds = [];
@@ -442,6 +443,12 @@ const findIn = (node, predicate) => predicate(node) ? node : node?.children?.map
   assert.equal(hasDot(historyRow('1000101')), false, 'external sequel updates belong to the group head');
   assert.equal(hasDot(historyRow('1000102')), true, 'real new episodes must retain the child dot');
   assert.equal(hasDot(historyRow('1000103')), true, 'an unread external sequel from a child must surface on the head');
+  updateUi.find(node => node.props['aria-label'] === '批量检测范围').props.onChange({ target: { value: 'latest' } });
+  await updateUi.flush();
+  assert.ok(historyRow('1000101'), 'changing the detection scope must not hide existing history');
+  assert.ok(hasDot(historyRow('1000102')) && hasDot(historyRow('1000103')), 'changing the detection scope must not clear update indicators');
+  updateUi.find(node => node.props['aria-label'] === '批量检测范围').props.onChange({ target: { value: 'skip-completed-low' } });
+  await updateUi.flush();
   button(updateUi, '未看完 1').props.onClick();
   await updateUi.flush();
   assert.equal(historyRow('1000103'), undefined, 'the progress filter can hide the original group head');

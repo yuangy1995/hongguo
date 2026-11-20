@@ -46,6 +46,38 @@
 .browse-drawer-head { border-bottom: 1px solid var(--border-muted); }
 .browse-drawer-title { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight: 600; min-width: 0; }
 .browse-drawer-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browse-drawer-mask.browse-loading-mask { padding: 16px; }
+.browse-drawer.browse-drawer-loading {
+  max-width: 360px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg);
+}
+.browse-drawer-loading .browse-drawer-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 14px;
+  border: 0;
+}
+.browse-loading-cover {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--bg-inset);
+  color: var(--text-secondary);
+}
+.browse-loading-cover img { width: 100%; height: 100%; object-fit: cover; }
+.browse-loading-copy strong { display: block; font-size: 14px; overflow-wrap: anywhere; }
+.browse-loading-copy p { display: flex; align-items: center; gap: 7px; margin: 4px 0 0; font-size: 12px; color: var(--text-secondary); }
+.browse-loading-copy svg { flex-shrink: 0; color: var(--accent-text); }
+.browse-drawer-loading .icon-btn { align-self: start; }
+@media (prefers-reduced-motion: reduce) {
+  .browse-loading-copy .spin { animation: none; }
+}
 .browse-drawer-body { overflow: auto; display: flex; flex-direction: column; gap: 22px; }
 .browse-drawer-info { display: flex; gap: 20px; }
 .browse-drawer-cover { width: 100px; height: 134px; border-radius: 9px; object-fit: cover; flex-shrink: 0; }

@@ -48,7 +48,7 @@ const runningMerge = () => ({ id: 'm', status: 'running', total: 2, done: 0, pro
   let failures = 0, passed = 0;
   const test = async (name, fn) => { if (process.argv[2] && !new RegExp(process.argv[2]).test(name)) return; try { await fn(); passed++; } catch (error) { failures++; console.error(`FAIL ${name}: ${error.stack}`); } };
   await test('more menu dismisses outside, focus exit, Escape, window blur, actions and page exit', async () => {
-    const ui = mount(); await ui.flush();
+    const ui = mount({ platform: 'android' }); await ui.flush();
     for (const [scope, name] of [['document', 'pointerdown'], ['document', 'focusin'], ['window', 'blur']]) {
       ui.moreActions.open = true;
       if (scope === 'document') {

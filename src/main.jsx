@@ -4,6 +4,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import './index.css';
+import './desktop-mist.css';
 import { initializePosterSize } from './theme';
 
 import { initializeLanguage } from './i18n';

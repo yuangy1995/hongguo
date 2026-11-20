@@ -173,7 +173,7 @@ test('下载进度不结束请求，取消后忽略晚到进度', async () => {
   context.__nativeProgress(requestId,100,1000);assert.equal(changes.length,1);
 });
 
-test('手机播放器常用倍速直接选择，选集复用底部面板；桌面保留原操作', async () => {
+test('手机播放器直接选择倍速和选集，桌面从按钮打开倍速菜单', async () => {
   const React = require('react');
   const { renderToStaticMarkup } = require('react-dom/server');
   const result = await esbuild.build({ ...buildOptions, entryPoints: [path.join(__dirname, '../../src/components/PlayerControls.jsx')],
@@ -194,7 +194,8 @@ test('手机播放器常用倍速直接选择，选集复用底部面板；桌�
   assert.doesNotMatch(mobile, /增加播放速度/);
   context.window.electronAPI.platform = 'darwin';
   const desktop = renderToStaticMarkup(React.createElement(context.module.exports.default, props));
-  assert.match(desktop, /增加播放速度/);
+  assert.match(desktop, /<button[^>]*aria-label="播放速度"[^>]*aria-haspopup="dialog"/);
+  assert.doesNotMatch(desktop, /<select[^>]*aria-label="播放速度"/);
 });
 
 test('共享MP4重建：前置索引调整媒体偏移，尾置索引保留原偏移', () => {

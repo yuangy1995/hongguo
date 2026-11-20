@@ -13,10 +13,9 @@ import { initializeTheme } from './theme';
 import useStealthWindow from './components/useStealthWindow';
 import './components/StealthWindow.css';
 import AppUpdateNotice from './components/AppUpdateNotice';
-import AnnouncementNotice from './components/AnnouncementNotice';
 import DramaFeed from './components/DramaFeed';
 import ReleaseCalendar from './components/ReleaseCalendar';
-import AccountManagement from './components/AccountManagement';
+import AccountManagement, { AccountSidebar } from './components/AccountManagement';
 
 const MENU = [
   { id: 'browse', label: '发现短剧', icon: Home },
@@ -58,6 +57,9 @@ export default function App({ platformPages = {} }) {
   const [storageError, setStorageError] = useState('');
   const [appInfo, setAppInfo] = useState(null); // { version, brand, appName }
   const [playerMounted, setPlayerMounted] = useState(false);
+  const accountCheckpoint = useRef(null);
+  const captureAccountCheckpoint = useCallback((freeze = false) => accountCheckpoint.current?.(freeze), []);
+  useEffect(() => window.electronAPI.onCaptureAccountCheckpoint?.(() => captureAccountCheckpoint(true)), [captureAccountCheckpoint]);
   const floatingPlayer = useRef(false);
   const setFloatingPlayer = useCallback(value => { floatingPlayer.current = value; }, []);
   const [playerTarget, setPlayerTarget] = useState(null); // 浏览页点播 -> 播放页选中
@@ -128,7 +130,7 @@ export default function App({ platformPages = {} }) {
       case 'browse':
         return <Browse active={page === id} onNavigate={navigate} />;
       case 'player':
-        return playerMounted ? <Player portrait={layout === 'portrait'} episodesOpen={episodesOpen} setEpisodesOpen={setEpisodesOpen} actionsHidden={actionsHidden || (borderless && layout === 'portrait')} active={page === id} target={playerTarget} onSeriesSelected={rememberPlayerSeries} onFloatingChange={setFloatingPlayer} onNavigate={navigate} /> : null;
+        return playerMounted ? <Player portrait={layout === 'portrait'} episodesOpen={episodesOpen} setEpisodesOpen={setEpisodesOpen} actionsHidden={actionsHidden || (borderless && layout === 'portrait')} active={page === id} target={playerTarget} onSeriesSelected={rememberPlayerSeries} onFloatingChange={setFloatingPlayer} onNavigate={navigate} accountCheckpointRef={accountCheckpoint} /> : null;
       case 'feed':
         return page === 'feed' ? <DramaFeed onNavigate={navigate} /> : null;
       case 'calendar':
@@ -157,12 +159,13 @@ export default function App({ platformPages = {} }) {
       case 'history':
         return <WatchHistory active={page === id} onNavigate={navigate} />;
       case 'account':
-        return <AccountManagement active={page === id} />;
+        return mobile ? <AccountManagement active={page === id} /> : null;
       case 'manager':
         return <DownloadManager active={page === id} onNavigate={navigate} />;
       case 'settings':
         if (platformPages.settings) return React.createElement(platformPages.settings, { active: page === id, appInfo });
-        return <SettingsPage active={page === id} preview={appInfo?.preview} appInfo={appInfo} wakeRegionFocus={wakeRegionFocus} />;
+        return <><SettingsPage active={page === id} preview={appInfo?.preview} appInfo={appInfo} wakeRegionFocus={wakeRegionFocus} />
+          {!mobile && layout === 'portrait' && page === id && <AccountSidebar onCheckpoint={captureAccountCheckpoint} />}</>;
       case 'download':
       default:
         return <HongguoDownload active={page === id} onNavigate={navigate} />;
@@ -189,18 +192,19 @@ export default function App({ platformPages = {} }) {
 
   const isMac = appInfo?.platform === 'darwin' || (!appInfo?.platform && /Mac/.test(navigator.platform));
   const currentPage = MENU.find((item) => item.id === page);
+  const versionLabel = appInfo?.version;
 
   return (
-    <div className={`app-layout ${mobile ? 'platform-android' : ''} ${stealthMode ? 'stealth-mode' : ''} ${isMac ? 'platform-mac' : ''} layout-${layout} ${page === 'player' ? 'player-focused' : ''} ${borderless && page === 'player' && layout === 'portrait' ? 'player-borderless' : ''}`}>
+    <div className={`app-layout ${mobile ? 'platform-android' : 'desktop-mist'} ${stealthMode ? 'stealth-mode' : ''} ${isMac ? 'platform-mac' : ''} layout-${layout} ${page === 'player' ? 'player-focused' : ''} ${borderless && page === 'player' && layout === 'portrait' ? 'player-borderless' : ''}`}>
       <aside className="sidebar" aria-label={t("主导航")}>
         <div className="sidebar-window-drag" aria-hidden="true" />
-        <div className="sidebar-brand">
+        {mobile && <div className="sidebar-brand">
           <div className="logo"><Play size={21} /></div>
           <div><div className="brand-text">{t(appInfo?.appName || '红果短剧')}</div><div className="brand-sub">{t(appInfo?.preview ? '独立体验 · 本机保存' : '每一集，都值得期待')}</div></div>
-        </div>
+        </div>}
         <nav className="sidebar-menu">
           <div className="sidebar-group-label">{t("内容")}</div>
-          {MENU.filter((item) => item.id !== 'settings').map((item) => {
+          {MENU.filter((item) => item.id !== 'settings' && (mobile || item.id !== 'account')).map((item) => {
             const Icon = item.icon;
             return (
               <button key={item.id} className={`sidebar-item ${page === item.id ? 'active' : ''}`}
@@ -215,18 +219,17 @@ export default function App({ platformPages = {} }) {
             aria-current={page === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}>
             <Settings size={19} /><span>{t("设置")}</span>
           </button>
-          <div className="footer-note"><span>{t(appInfo?.preview ? '功能预览' : '红果短剧')}</span><span>{t(appInfo?.version ? `v${appInfo.version.replace(/^(\d+\.\d+)\.0$/, '$1')}` : '')}</span></div>
+          {!mobile && layout !== 'portrait' && <AccountSidebar onCheckpoint={captureAccountCheckpoint} />}
+          <div className="footer-note"><span>{t(appInfo?.appName || '红果短剧')}</span><span>{versionLabel ? `v${versionLabel}` : ''}</span></div>
         </div>
       </aside>
       <div className="main-wrapper">
         <header className="window-toolbar">
           {mobile ? <><button className="mobile-back btn btn-outline btn-sm" aria-label={t("返回上一页")} onClick={() => window.appBack?.()}>{t("返回")}</button><h1 className="toolbar-location">{t(currentPage?.label)}</h1></> : <span className="toolbar-location">{t(currentPage?.label)}</span>}
-          {page === 'player' && layout === 'portrait' && <PageMenu items={MENU} page={page} onNavigate={navigate} />}
+          {page === 'player' && layout === 'portrait' && <PageMenu items={mobile ? MENU : MENU.filter(item => item.id !== 'account')} page={page} onNavigate={navigate} />}
           <div className="toolbar-actions">
             <span className="toolbar-caption">{t(appInfo?.preview ? '功能预览' : '红果短剧')}</span>
             {!mobile && page === 'player' && <button className="btn btn-outline btn-sm" onClick={() => { setEpisodesOpen(false); toggleStealth(true); }} title={t("小窗置顶播放并在支持的系统上跨虚拟桌面可见；鼠标移开时暂停隐藏，移回继续；Esc 退出")}>{t("小窗模式")}</button>}
-            {!mobile && page === 'player' && layout === 'portrait' && <button className="btn btn-outline btn-sm portrait-episodes-toggle" aria-expanded={episodesOpen}
-              aria-controls="player-episode-panel" onClick={() => setEpisodesOpen(open => !open)}>{t(episodesOpen ? '收起选集' : '选集')}</button>}
             {page === 'player' && <button className="btn btn-outline btn-sm player-actions-toggle" aria-pressed={actionsHidden || borderless && layout === 'portrait'}
               onClick={() => {
                 if (borderless && layout === 'portrait') { setBorderless(false); setActionsHidden(false); }
@@ -261,7 +264,6 @@ export default function App({ platformPages = {} }) {
           })}
         </nav>
         {!mobile && !appInfo?.preview && <AppUpdateNotice />}
-        {!mobile && !appInfo?.preview && <AnnouncementNotice />}
         {stealthMode && <div className="stealth-toolbar"><span>{t("移开暂停隐藏 · 移回继续")}</span><div className="stealth-toolbar-actions">
           <button className="btn btn-outline btn-sm" disabled={wakeSettingsOpening} onClick={async () => {
             if (wakeSettingsOpening) return;
@@ -278,7 +280,8 @@ export default function App({ platformPages = {} }) {
         </div></div>}
         {stealthError && <div className="app-storage-error" role="alert">{t(stealthError)}</div>}
         {storageError && <div className="app-storage-error" role="alert"><span>{t(storageError)}</span><button className="btn btn-outline btn-sm" onClick={() => setStorageError('')}>{t("关闭提示")}</button></div>}
-        {visited.map((id) => <main className="main-content" data-page={id} hidden={page !== id} key={id}>{t(renderPage(id))}</main>)}
+        {visited.map((id) => <main className="main-content" data-page={id} hidden={page !== id}
+          aria-label={!mobile && page === id ? t(currentPage?.label) : undefined} key={id}>{t(renderPage(id))}</main>)}
         {mobile && <nav className="mobile-navigation" aria-label={t("手机主导航")}>
           {MENU.filter(item => ['browse','download','player','history'].includes(item.id)).map(item => {
             const Icon = item.icon;

@@ -6,8 +6,9 @@ const target = path.join(__dirname, '../src/native/app-update-installer.js');
 assert.ok(fs.existsSync(target), 'application update installer must exist');
 const { createUpdateInstaller } = require(target);
 const { MacUpdater } = require('electron-updater/out/MacUpdater');
+const { appUpdateSource } = require('../src/native/app-update');
 
-function fixture() {
+function fixture(platform = 'win32') {
   const updater = new EventEmitter();
   let enabled = true, blocker = '', checks = 0, downloads = 0, installs = 0;
   let finishCheck, finishDownload;
@@ -20,13 +21,16 @@ function fixture() {
   }; }); };
   updater.quitAndInstall = () => { installs++; };
   const events = [];
-  const controller = createUpdateInstaller({ updater, currentVersion: '1.80.0', isEnabled: () => enabled, installBlocker: () => blocker, emit: state => events.push(state) });
+  const controller = createUpdateInstaller({ updater, currentVersion: '1.80.0', source: appUpdateSource(platform),
+    isEnabled: () => enabled, installBlocker: () => blocker, emit: state => events.push(state) });
   return { updater, controller, events, token, checked: version => finishCheck(version), downloaded: error => finishDownload(error), counts: () => ({ checks, downloads, installs }), enable: value => { enabled = value; }, block: value => { blocker = value; } };
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 function macFixture() {
-  const f = fixture(), native = new EventEmitter();
+  const f = fixture('darwin'), native = new EventEmitter();
+  assert.equal(f.updater.feed.provider, 'github');
+  assert.equal(`${f.updater.feed.owner}/${f.updater.feed.repo}`, 'yuangy1995/hongguo');
   let checks = 0, quits = 0;
   f.updater.nativeUpdater = native;
   f.updater.squirrelDownloadedUpdate = false;
@@ -40,7 +44,7 @@ function macFixture() {
   native.checkForUpdates = () => { checks++; };
   native.quitAndInstall = () => { quits++; };
   return { ...f, native, nativeCounts: () => ({ checks, quits }), ready: async () => {
-    const pending = f.controller.download('1.81'); f.checked(); await tick(); f.downloaded();
+    const pending = f.controller.download('1.81.0'); f.checked(); await tick(); f.downloaded();
     assert.equal((await pending).success, true);
   } };
 }
@@ -53,12 +57,10 @@ function macFixture() {
   assert.equal(f.updater.allowPrerelease, false);
   assert.equal(f.updater.disableWebInstaller, true);
   assert.equal(f.updater.disableDifferentialDownload, true);
-  assert.equal(f.updater.feed.provider, 'github');
-  assert.equal(f.updater.feed.owner, 'jackotom');
-  assert.equal(f.updater.feed.repo, 'hongguo-drama');
+  assert.deepEqual(f.updater.feed, { provider: 'github', owner: 'yuangy1995', repo: 'hongguo' });
   assert.equal(f.controller.install().success, false);
-  const first = f.controller.download('1.81');
-  const duplicate = f.controller.download('1.81');
+  const first = f.controller.download('1.81.0');
+  const duplicate = f.controller.download('1.81.0');
   assert.equal(f.counts().checks, 1);
   f.checked(); await tick();
   assert.equal(f.counts().downloads, 1);
@@ -83,12 +85,12 @@ function macFixture() {
   console.log('PASS update flow: fixed feed, explicit download/install, progress, deduplication, busy guard and native installation error');
 
   for (const version of ['1.80.0', '1.79.0', '1.82.0', '1.81.0-beta.1']) {
-    const f = fixture(), pending = f.controller.download('1.81');
+    const f = fixture(), pending = f.controller.download('1.81.0');
     f.checked(version);
     assert.equal((await pending).success, false, version);
     assert.equal(f.counts().downloads, 0);
   }
-  const failure = fixture(), pending = failure.controller.download('1.81');
+  const failure = fixture(), pending = failure.controller.download('1.81.0');
   failure.checked(); await tick(); failure.downloaded(Error('sha512 mismatch: PRIVATE_URL'));
   assert.equal((await pending).success, false);
   assert.equal(failure.controller.install().success, false);
@@ -97,14 +99,14 @@ function macFixture() {
   console.log('PASS validation: downgrade, prerelease, changed release and failed checksum cannot install');
 
   const disabled = fixture(); disabled.enable(false);
-  assert.equal((await disabled.controller.download('1.81')).success, false);
+  assert.equal((await disabled.controller.download('1.81.0')).success, false);
   assert.equal(disabled.counts().checks, 0);
-  const cancelled = fixture(), operation = cancelled.controller.download('1.81');
+  const cancelled = fixture(), operation = cancelled.controller.download('1.81.0');
   cancelled.enable(false); cancelled.controller.cancel(); cancelled.checked();
   assert.equal((await operation).success, false);
   assert.equal(cancelled.counts().downloads, 0);
   assert.equal(cancelled.controller.getState().status, 'idle');
-  const inFlight = fixture(), downloading = inFlight.controller.download('1.81');
+  const inFlight = fixture(), downloading = inFlight.controller.download('1.81.0');
   inFlight.checked(); await tick(); inFlight.enable(false); inFlight.controller.cancel();
   assert.equal(inFlight.token.cancelled, true);
   inFlight.downloaded();
@@ -113,11 +115,11 @@ function macFixture() {
   assert.equal(inFlight.controller.install().success, false);
   console.log('PASS preference: disabled, check cancellation and late download completion never install');
 
-  const manual = fixture(), oldDownload = manual.controller.download('1.81');
+  const manual = fixture(), oldDownload = manual.controller.download('1.81.0');
   manual.checked(); await tick();
   assert.equal(manual.controller.cancel()?.success, true, 'manual cancellation must return its idle state');
   assert.equal(manual.token.cancelled, true);
-  const retry = manual.controller.download('1.81');
+  const retry = manual.controller.download('1.81.0');
   manual.updater.emit('download-progress', { percent: 99 });
   manual.updater.emit('update-downloaded', { version: '1.81.0' });
   assert.equal(manual.controller.getState().status, 'idle');
@@ -134,9 +136,9 @@ function macFixture() {
   assert.equal(manual.controller.getState().status, 'downloaded');
   console.log('PASS manual cancellation: late events cannot install and queued retry completes independently');
 
-  const queued = fixture(), checking = queued.controller.download('1.81');
+  const queued = fixture(), checking = queued.controller.download('1.81.0');
   queued.controller.cancel();
-  const queuedRetry = queued.controller.download('1.81');
+  const queuedRetry = queued.controller.download('1.81.0');
   queued.controller.cancel(); queued.checked();
   assert.equal((await checking).success, false); await tick();
   assert.equal(queued.counts().checks, 1, 'cancelling a queued retry must not start it later');
@@ -179,8 +181,8 @@ function macFixture() {
 
   const syncFailure = fixture(); let syncChecks = 0;
   syncFailure.updater.checkForUpdates = () => { syncChecks++; throw Error('synchronous check failure'); };
-  assert.equal((await syncFailure.controller.download('1.81')).success, false);
-  assert.equal((await syncFailure.controller.download('1.81')).success, false);
+  assert.equal((await syncFailure.controller.download('1.81.0')).success, false);
+  assert.equal((await syncFailure.controller.download('1.81.0')).success, false);
   assert.equal(syncChecks, 2, 'synchronous check failure must release the operation before retry');
   console.log('PASS retry: synchronous updater checks cannot leave a completed operation locked');
 })().catch(error => { console.error(error); process.exitCode = 1; });

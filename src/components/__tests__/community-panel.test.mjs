@@ -37,9 +37,9 @@ const details=(episodeContent,episodeReviews={total:156,items:[{author:'fixture'
 
 test('current episode comments open directly and stale episode results stay out of the new episode',async()=>{
  const requests=[];
- const ui=harness({seriesId:'12345678',episodeId:'7500000000000000011',title:'Fixture',cover:'',trailingAction:{type:'span',props:{className:'fixture-trailing'},children:['NAS trailing']}},
+ const ui=harness({seriesId:'12345678',episodeId:'7500000000000000011',title:'Fixture',cover:''},
   (seriesId,episodeId)=>new Promise(resolve=>requests.push({seriesId,episodeId,resolve})));
- assert.ok(ui.findButton('查看公开剧评'));assert.ok(ui.findButton('收藏到本机'));assert.ok(ui.findButton('复制分享链接'));assert.ok(ui.texts().includes('NAS trailing'));
+ assert.ok(ui.findButton('查看公开剧评'));assert.ok(ui.findButton('收藏到本机'));assert.ok(ui.findButton('复制分享链接'));
  ui.findButton('当前集评论').props.onClick();ui.render();await tick();
  assert.equal(requests.length,1);assert.equal(requests[0].seriesId,'12345678');assert.equal(requests[0].episodeId,'7500000000000000011');
  ui.render({...ui.props,episodeId:'7500000000000000022'});await tick();

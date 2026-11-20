@@ -219,7 +219,7 @@ function mountHistoryNavigation() {
     acknowledgeWatchUpdates: async () => { calls.push(['ack']); return { success: true }; },
   };
   const module = { exports: {} };
-  vm.runInNewContext(source, { module, exports: module.exports, require: name => name === '../i18n' ? i18nStub : name === './historyGroups.mjs' ? require('../src/components/historyGroups.mjs') : name === 'react' ? react : {}, window: { electronAPI: api } });
+  vm.runInNewContext(source, { module, exports: module.exports, require: name => name === '../i18n' ? i18nStub : name === './historyGroups.mjs' ? require('../src/components/historyGroups.mjs') : name === 'react' ? react : {}, window: { electronAPI: api }, document: { querySelector: () => null } });
   const render = (runPassive = true) => {
     cursor = 0; tree = module.exports.default(props);
     layoutEffects.splice(0).forEach(fn => fn());

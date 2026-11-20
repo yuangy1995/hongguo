@@ -18,7 +18,7 @@ function compile(file) {
   transformed.set(file, code);
   return code;
 }
-async function mount(file, api, props = {}, storage = null) {
+async function mount(file, api, props = {}, storage = null, exportName = 'default') {
   const slots = [], effects = [], cleanups = [], cache = new Map();
   const timers = new Map();
   let timerId = 0;
@@ -85,7 +85,7 @@ async function mount(file, api, props = {}, storage = null) {
     vm.runInContext(compile(resolved), sandbox, { filename: resolved });
     return module.exports;
   };
-  const Loaded = loadModule(path.resolve(__dirname, `${file}.jsx`)).default;
+  const Loaded = loadModule(path.resolve(__dirname, `${file}.jsx`))[exportName];
   Component = (next) => Loaded(file === 'Player' ? { setEpisodesOpen() {}, ...next } : next);
   const render = () => {
     let guard = 0;
@@ -437,9 +437,9 @@ async function mount(file, api, props = {}, storage = null) {
     const route = () => ui.find(n => n.props['aria-label'] === '推荐目录线路');
     assert.ok(route(), 'Hongguo feed must expose a route selector'); assert.equal(route().props.value, 'app');
     assert.ok(calls.every(request => request.catalogChannel === 'app'));
-    assert.ok(ui.text().includes('红果 App 热播榜')); assert.ok(!ui.text().includes('榜单来自红果公开页面'));
+    assert.ok(ui.text().includes('App（快速 · 部分片单）'));
     route().props.onChange({ target: { value: 'web' } }); await ui.flush();
-    assert.equal(calls.at(-1).catalogChannel, 'web'); assert.ok(ui.text().includes('红果官网热播榜'));
+    assert.equal(calls.at(-1).catalogChannel, 'web'); assert.equal(route().props.value, 'web');
     assert.equal(storage.getItem('hongguo.feed.catalog.channel.v1'), 'web');
     assert.equal(storage.getItem('hongguo.catalog.channel.v1'), 'web');
     ui.button('真人短剧').props.onClick(); await ui.flush(); assert.equal(calls.at(-1).catalogChannel, 'web');
@@ -652,10 +652,177 @@ async function mount(file, api, props = {}, storage = null) {
       assert.equal(realCalls, callsAfterRefresh + 1, 'returning tries a new batch while retaining the last successful cards');
     } finally { ui.unmount(); }
   });
+  await test('expired account QR clears the waiting message and can be requested again', async () => {
+    let starts = 0;
+    const polled = [];
+    const ui = await mount('AccountManagement', {
+      getAccountStatus: async () => ({ success: true, signedIn: false }),
+      startAccountLogin: async () => ({ success: true, loginId: String(++starts), image: 'test-qr', expiresIn: 180 }),
+      pollAccountLogin: async id => {
+        polled.push(id);
+        return { success: true, status: polled.length === 2 ? 'expired' : 'pending' };
+      },
+    });
+    await ui.flush();
+    await ui.button('获取登录二维码').props.onClick(); await ui.flush();
+    ui.advanceTimers(1000); await ui.flush();
+    assert.match(ui.text(), /等待手机确认扫码登录/);
+    ui.advanceTimers(1000); await ui.flush();
+    assert.match(ui.text(), /二维码已过期，请重新获取/);
+    assert.doesNotMatch(ui.text(), /等待手机确认扫码登录/);
+    assert.equal(ui.find(node => node.type === 'img'), undefined);
+    ui.advanceTimers(1000); await ui.flush();
+    assert.deepEqual(polled, ['1', '1']);
+    await ui.button('获取登录二维码').props.onClick(); await ui.flush();
+    assert.doesNotMatch(ui.text(), /二维码已过期/);
+    ui.advanceTimers(1000); await ui.flush();
+    assert.deepEqual(polled, ['1', '1', '2']);
+    assert.match(ui.text(), /等待手机确认扫码登录/);
+    ui.unmount();
+  });
+  await test('account footer opens the sign-in dialog, reflects expired and signed-in states, and saves before logout', async () => {
+    let listener, status = { signedIn: false };
+    const order = [];
+    const ui = await mount('AccountManagement', {
+      getAccountStatus: async () => status,
+      onAccountUpdated: cb => { listener = cb; return () => {}; },
+      logoutAccount: async () => { order.push('logout'); return { success: true, signedIn: false, syncIncomplete: true }; },
+    }, { onCheckpoint: async () => { order.push('save'); } }, null, 'AccountSidebar');
+    await ui.flush();
+    assert.match(ui.text(), /未登录/);
+    ui.button('登录').props.onClick(); await ui.flush();
+    assert.ok(ui.find(node => node.type === 'dialog'));
+    status = { expired: true, signedIn: false }; listener(status); await ui.flush();
+    assert.match(ui.text(), /登录已失效，请重新登录/);
+    status = { signedIn: true, account: { nickname: '测试账号' } }; listener(status); await ui.flush();
+    assert.equal(ui.find(node => node.type === 'dialog'), undefined);
+    await ui.button('退出账号').props.onClick(); await ui.flush();
+    assert.deepEqual(order, ['save', 'logout']);
+    assert.match(ui.text(), /部分进度未同步，已保留本机记录/);
+    ui.unmount();
+  });
+  await test('account login dialog requests a QR automatically and cancels if closed before it arrives', async () => {
+    const deferredQr = deferred();
+    let starts = 0, cancels = 0;
+    const ui = await mount('AccountManagement', {
+      startAccountLogin: () => { starts++; return deferredQr.promise; },
+      cancelAccountLogin: async () => { cancels++; return { success: true }; },
+    }, { loginDialog: true });
+    ui.advanceTimers(0, true);
+    assert.equal(starts, 1);
+    ui.unmount();
+    assert.equal(cancels, 1);
+    deferredQr.resolve({ success: true, loginId: 'closed', image: 'fixture' });
+  });
+  await test('account refresh displays imported progress feedback beside the account toolbar', async () => {
+    let requested;
+    const ui = await mount('AccountManagement', {
+      getAccountStatus: async () => ({ success: true, signedIn: true, account: { nickname: '测试账号' }, progressTest: true }),
+      getAccountHistory: async options => {
+        requested = options;
+        return { success: true, signedIn: true, importedTestProgress: options.importTestProgress, results: [
+          { series_id: 'A', series_title: '测试短剧', vid_index: 8, total: 12, currentTime: 55 },
+        ] };
+      },
+    });
+    await ui.flush();
+    assert.equal(requested.importTestProgress, false);
+    await ui.button('刷新记录').props.onClick(); await ui.flush();
+    assert.equal(requested.importTestProgress, true);
+    assert.ok(ui.text().includes('已把云端的较新进度保存到测试版的本机记录。'));
+    assert.ok(ui.text().indexOf('已把云端') < ui.text().indexOf('测试短剧'));
+    ui.unmount();
+  });
+  await test('account history defaults to cards and remembers list view without changing search or resume', async () => {
+    const storage = memoryStorage();
+    const opened = [];
+    const api = {
+      getAccountStatus: async () => ({ success: true, signedIn: true, account: { nickname: '测试账号' } }),
+      getAccountHistory: async () => ({ success: true, signedIn: true, results: [
+        { series_id: 'A', series_title: '春日来信', vid_index: 2, total: 12, currentTime: 51 },
+        { series_id: 'B', series_title: '冬日来信', vid_index: 1, total: 6, currentTime: 73 },
+      ] }),
+      playAccountHistory: async id => { opened.push(id); return { success: true }; },
+    };
+    const ui = await mount('AccountManagement', api, {}, storage);
+    await ui.flush();
+    const results = () => ui.find(node => node.props.className === 'account-history-list');
+    assert.equal(results().props['data-view'], 'cards');
+    assert.match(ui.text(), /共 2 条观看记录/);
+    assert.match(ui.text(), /0:51/);
+    ui.find(node => node.props.type === 'search').props.onChange({ target: { value: '春日' } }); await ui.flush();
+    ui.button('列表').props.onClick(); await ui.flush();
+    assert.equal(results().props['data-view'], 'list');
+    assert.equal(results().children.length, 1);
+    assert.match(ui.text(), /共 2 条观看记录/);
+    await ui.find(node => node.props['aria-label']?.includes('继续观看 春日来信')).props.onClick();
+    assert.deepEqual(opened, ['A']);
+    ui.unmount();
+    const reopened = await mount('AccountManagement', api, {}, storage);
+    await reopened.flush();
+    assert.equal(reopened.button('列表').props['aria-pressed'], true);
+    reopened.unmount();
+  });
+  await test('entering watch history syncs immediately, manual refresh still works and cloud-only rows resume directly', async () => {
+    const opened = [], refreshes = [];
+    let syncs = 0;
+    const storage = memoryStorage();
+    const api = {
+      syncAccountProgress: async () => { syncs++; return { success: true }; },
+      getAccountHistory: async options => { refreshes.push(options.refresh); return { success: true, signedIn: true }; },
+      getWatchHistory: async () => ({ success: true, accountSignedIn: true, results: [
+        { series_id: '1000001', series_title: '手机断点', updatedAt: 900, vid_index: 2, currentTime: 51, total: 20, account: true, hasLocal: false },
+        { series_id: '1000002', series_title: '电脑断点', updatedAt: 800, vid_index: 3, currentTime: 28, total: 20 },
+      ] }),
+      playAccountHistory: async (id, options) => { opened.push([id, options.merged]); return { success: true }; },
+      acknowledgeWatchUpdates: async () => assert.fail('cloud-only rows cannot acknowledge local updates'),
+    };
+    const history = await mount('WatchHistory', api, {}, storage);
+    await history.flush();
+    assert.equal(syncs, 1);
+    history.setProps({ active: false });
+    history.setProps({ active: true }); await history.flush();
+    assert.equal(syncs, 2);
+    assert.match(history.text(), /共 2 条观看记录/);
+    assert.equal(history.find(node => node.props.className === 'history-list').props['data-view'], 'cards');
+    history.button('列表').props.onClick();
+    await history.flush();
+    assert.equal(history.find(node => node.props.className === 'history-list').props['data-view'], 'list');
+    await history.button('刷新记录').props.onClick();
+    assert.deepEqual(refreshes, [true]);
+    await history.find(node => node.props['aria-label']?.includes('继续观看 手机断点')).props.onClick();
+    assert.deepEqual(opened, [['1000001', true]]);
+    history.unmount();
+  });
+  await test('the season picker keeps found seasons while retrying a partial result', async () => {
+    const seasons = [1, 2, 3].map(season => ({ season, series_id: String(season), series_title: `测试剧第${season}季` }));
+    const slow = deferred();
+    let round = 0;
+    const ui = await mount('SeasonPicker', { findSeriesSeasons: async (id, options) => {
+      const current = seasons.find(item => item.series_id === id);
+      if (options?.localOnly) return { results: [current] };
+      if (round++ === 0) return { results: seasons, partial: true };
+      return slow.promise;
+    } }, { seriesId: '3', active: true, seriesList: [] });
+    const counts = () => ui.nodes().filter(node => node.type === 'strong').length;
+    await ui.flush();
+    assert.equal(counts(), 3);
+    ui.setProps({ seriesId: '2' });
+    await ui.flush();
+    assert.equal(counts(), 3);
+    assert.match(ui.text(), /正在查找各季/);
+    slow.resolve({ results: [seasons[1]], partial: true });
+    await ui.flush();
+    assert.equal(counts(), 3);
+    assert.match(ui.text(), /部分查询未完成/);
+    ui.unmount();
+  });
   await test('closing a loading detail ignores its late result', async () => {
     const pending = deferred();
     const ui = await mount('Browse', { getSeriesList: async () => [], browseCategories: async () => [], browseList: async () => ({ success: true, results: [{ series_id: 'A', series_title: 'A' }] }), searchResolve: () => pending.promise, getSeriesEpisodes: async () => ok(detail('A')) });
     await ui.flush(); ui.find(n => n.props.className === 'browse-card').props.onClick(); ui.render();
+    assert.ok(ui.find(n => n.props.className?.split(' ').includes('browse-drawer-loading')));
+    assert.match(ui.text(), /A正在加载分集…/);
     const close = ui.find(n => n.type === 'button' && n.props.title === '关闭');
     assert.equal(!!close.props.disabled, false, 'loading drawer must remain cancellable');
     close.props.onClick(); pending.resolve(ok(detail('A'))); await ui.flush();
@@ -672,10 +839,10 @@ async function mount(file, api, props = {}, storage = null) {
     const first = deferred(), second = deferred(), released = [], requested = [];
     const ui = await mount('Player', { getSeriesList: async () => [{ series_id: 'A' }], getSeriesEpisodes: async () => ok(detail('A')), getPlaybackPosition: async () => null, prepareOnlinePlay: p => { requested.push(p); return requested.length === 1 ? first.promise : second.promise; }, releaseOnlinePlay: async p => released.push(p) });
     await ui.flush();
-    const firstButton = ui.find(n => n.props['aria-label'] === '第 1 集'); assert.ok(firstButton, ui.text()); firstButton.props.onClick(); ui.render();
-    ui.advanceTimers(250, true); ui.render(); await ui.flush();
-    ui.find(n => n.props['aria-label'] === '第 2 集').props.onClick(); ui.render();
-    ui.advanceTimers(250, true); ui.render();
+    const controls = () => ui.find(n => n.props.onEpisodeChange);
+    assert.ok(controls(), ui.text());
+    controls().props.onEpisodeChange(1); ui.render(); await ui.flush();
+    controls().props.onEpisodeChange(2); ui.render();
     second.resolve({ success: true, url: 'hongguo-stream://new', streamId: 'new' }); await ui.flush();
     first.resolve({ success: true, url: 'hongguo-stream://old', streamId: 'old' }); await ui.flush();
     assert.equal(ui.find(n => n.type === 'video')?.props.src, 'hongguo-stream://new');
@@ -1243,7 +1410,9 @@ async function mount(file, api, props = {}, storage = null) {
     ui.find(n => n.type === 'input').props.onChange({ target: { value: '双子房客' } }); ui.render(); ui.button('搜索').props.onClick(); await ui.flush();
     const cards = ui.nodes().filter(n => n.props.className?.startsWith('search-card '));
     assert.deepEqual(cards.map(card => card.props.title), ['点击查看并下载: 双子房客', '点击查看并下载: 双子房客第三季', '点击查看并下载: 其他短剧']);
-    assert.ok(ui.text().includes('找到 2 部标题匹配短剧')); assert.ok(ui.text().includes('其他结果（排在后面）'));
+    assert.ok(ui.text().includes('标题匹配 · 2'));
+    const secondary = ui.find(n => n.type === 'details' && n.props.className === 'search-secondary');
+    assert.ok(secondary && !secondary.props.open, 'other results remain available in a collapsed group');
     assert.ok(ui.text().includes('补充搜索未完成：连接超时')); assert.ok(ui.find(n => n.props.role === 'status'));
     ui.find(n => n.type === 'input').props.onChange({ target: { value: '新的剧名' } }); ui.render();
     assert.ok(!ui.text().includes('补充搜索未完成')); ui.unmount();
@@ -1553,8 +1722,9 @@ async function mount(file, api, props = {}, storage = null) {
     const data = detail('X'); data.total = 3; data.episodes.push(episode(3)); data.episodes[1].locked = true;
     const requested = [], downloaded = [];
     const ui = await mount('Player', { getSeriesList: async () => [{ series_id: 'X' }], getSeriesEpisodes: async () => ok(data), getPlaybackPosition: async () => null, prepareOnlinePlay: async p => { requested.push(p); return { success: true, url: `hongguo-stream://${p.vidIndex}` }; }, downloadSingleEpisode: async (sid, n) => { downloaded.push(n); return { success: true, count: 1 }; } }, { target: { seriesId: 'X', vidIndex: 1, ts: 1 } });
-    await ui.flush(); const locked = ui.find(n => n.props['aria-label'] === '第 2 集'); assert.equal(locked.props.disabled, true);
-    locked.props.onClick(); await ui.flush(); assert.equal(requested.length, 1, 'handler must also guard locked');
+    await ui.flush(); const controls = ui.find(n => n.props.onEpisodeChange);
+    assert.equal(controls.props.episodes.find(episode => episode.vid_index === 2).locked, true);
+    controls.props.onEpisodeChange(2); await ui.flush(); assert.equal(requested.length, 1, 'handler must also guard locked');
     ui.find(n => n.type === 'video').props.onEnded(); await ui.flush(); assert.equal(requested.at(-1).vidIndex, 3);
     await ui.button('下载未完成集').props.onClick(); assert.deepEqual(downloaded, [1, 3]); ui.unmount();
   });

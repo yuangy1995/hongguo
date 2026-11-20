@@ -7,6 +7,7 @@ const {
   createAccountService, secureSessionStore, parseQr, parseHistory,
 } = require('./account-session');
 const { preserveLargeJsonIntegers } = require('./app-source');
+const { chooseAccountProgress, verifyAccountProgressWrite, mergeAccountWatchHistory } = require('./account-progress-sync');
 
 function webPayload(data) {
   return { status: 200, headers: {}, data: JSON.stringify({ message: 'success', data }) };
@@ -38,6 +39,179 @@ test('account history parser keeps current APP rows with display metadata', () =
   assert.equal(rows.find(row => row.series_id === '1001').series_title, '春日来信');
   assert.equal(rows.find(row => row.series_id === '1001').total, 24);
   assert.equal(rows.find(row => row.series_id === '1001').cover, 'https://p3-novel.byteimg.com/novel-pic/cover~tplv-shrink:320:0.webp');
+});
+
+test('account history keeps all distinct dramas returned by the source', () => {
+  const records = Array.from({ length: 73 }, (_, index) => ({
+    book_id_str: String(1000 + index),
+    vid: String(9000 + index),
+    vid_index: 1,
+    read_timestamp_ms: 1700000000000 + index,
+  }));
+  const newest = { ...records[0], vid_index: 3, read_timestamp_ms: 1800000000000 };
+  const results = parseHistory({ code: 0, data: { data_list: [...records, newest] } });
+  assert.equal(results.length, 73);
+  assert.equal(results[0].series_id, records[0].book_id_str);
+  assert.equal(results[0].vid_index, 3);
+});
+
+test('explicit session expiry survives restart and logout retains the downloaded history', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-history-offline-'));
+  const filePath = path.join(root, 'session.json');
+  const historyFilePath = path.join(root, 'history.json');
+  let failures = 0;
+  let status = 200;
+  try {
+    const serviceOptions = {
+      filePath, historyFilePath, local: true,
+      webRequest: async () => webPayload({ user_id_str: '42', name: '测试账号' }),
+      identityRequest: async () => ({ device_id: '7000000000000000001', iid: '7000000000000000002', cdid: '00000000-0000-4000-8000-000000000003' }),
+      accountRequest: async () => {
+        if (status !== 200) throw Object.assign(new Error(`HTTP ${status}`), { status });
+        return { code: 0, data: { data_list: [{ book_id_str: '1000001', vid: '2000002', vid_index: 2,
+          current_play_position: 23000, read_timestamp_ms: 1800000000000, book_name: '测试短剧' }] } };
+      },
+      onAccountExpired: () => { failures++; },
+    };
+    const service = createAccountService(serviceOptions);
+    await service.completeWebLogin('sessionid=fixture');
+    assert.equal((await service.refreshHistory()).results[0].currentTime, 23);
+    status = 503;
+    await assert.rejects(service.refreshHistory(), /503/);
+    assert.equal((await service.status()).signedIn, true);
+    status = 401;
+    assert.equal((await service.refreshHistory()).expired, true);
+    assert.equal(failures, 1);
+    assert.deepEqual(JSON.parse(fs.readFileSync(filePath, 'utf8')), { expired: true });
+    const reopened = createAccountService(serviceOptions);
+    assert.equal((await reopened.status()).expired, true);
+    assert.equal(reopened.localHistory().rows[0].currentTime, 23);
+    await reopened.logout();
+    assert.equal((await reopened.status()).expired, undefined);
+    const signedOut = createAccountService(serviceOptions);
+    assert.equal((await signedOut.status()).signedIn, false);
+    assert.equal(signedOut.localHistory().rows[0].currentTime, 23);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('merged history deduplicates by series and keeps the newest viewing event, including rewatches', () => {
+  const local = [
+    { series_id: '1000001', vid_index: 8, currentTime: 42, updatedAt: 200, unreadEpisodes: 2, cover: 'local.jpg' },
+    { series_id: '1000002', vid_index: 2, currentTime: 34, updatedAt: 400 },
+    { series_id: 'xifan:fixture:drama', updatedAt: 150 },
+  ];
+  const cloud = [
+    { series_id: '1000001', episode_id: '9000003', vid_index: 3, currentTime: 17, updatedAt: 300, cover: '' },
+    { series_id: '1000002', episode_id: '9000007', vid_index: 7, currentTime: 53, updatedAt: 380 },
+    { series_id: '1000003', episode_id: '9000010', vid_index: 10, currentTime: 30, duration: 30, total: 10, updatedAt: 510 },
+  ];
+  const playback = { '1000003': { accountHidden: { '99': 520 } } };
+  const merged = mergeAccountWatchHistory(local, cloud, playback, '42');
+  assert.deepEqual(merged.map(row => row.series_id), ['1000003', '1000002', '1000001', 'xifan:fixture:drama']);
+  assert.ok(merged[0].account && merged[0].completed && !merged[0].hasLocal);
+  assert.equal(merged[1], local[1]);
+  assert.deepEqual(merged[2], { ...local[0], ...cloud[0], cover: 'local.jpg', account: true, hasLocal: true, total: 0, completed: false });
+  assert.ok(!mergeAccountWatchHistory(local, cloud, playback, '99').some(row => row.series_id === '1000003'));
+  assert.equal(mergeAccountWatchHistory(local, cloud, playback, ''), local);
+});
+
+test('concurrent history refreshes share pagination and a looping page does not replace the last good snapshot', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-account-pages-'));
+  const offsets = [];
+  let repeat = false;
+  try {
+    const pages = [0, 1].map(page => Array.from({ length: 55 }, (_, index) => ({
+      book_id_str: String(1000000 + page * 55 + index), vid: String(2000000 + page * 55 + index),
+      vid_index: 1, read_timestamp_ms: 1800000000000 + index,
+    })));
+    const service = createAccountService({
+      filePath: path.join(root, 'session.json'), local: true,
+      webRequest: async () => webPayload({ user_id_str: '42', name: '测试账号' }),
+      identityRequest: async () => ({ device_id: '7000000000000000001', iid: '7000000000000000002', cdid: '00000000-0000-4000-8000-000000000003' }),
+      accountRequest: async url => {
+        const { searchParams } = new URL(url);
+        const offset = searchParams.get('offset');
+        offsets.push(offset);
+        assert.equal(searchParams.get('limit'), '0');
+        return offset === '0' || repeat
+          ? { code: 0, data: { data_list: pages[0], next_offset: Number(offset) + 55, has_more: true } }
+          : { code: 0, data: { data_list: pages[1], has_more: false } };
+      },
+    });
+    await service.completeWebLogin('sessionid=fixture');
+    const first = service.refreshHistory();
+    assert.equal(first, service.refreshHistory());
+    assert.equal((await first).results.length, 110);
+    assert.deepEqual(offsets, ['0', '55']);
+    repeat = true;
+    await assert.rejects(service.refreshHistory(), /云端观看记录未读取完整/);
+    assert.deepEqual(offsets, ['0', '55', '0', '55']);
+    assert.equal((await service.history()).results.length, 110);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('sync chooses the newer playback event even if it is a rewatch of an earlier episode', () => {
+  const local = { series_id: '1000001', episode_id: '2000001', vid_index: 1, currentTime: 11, updatedAt: 1900000000000 };
+  const cloud = { ...local, episode_id: '2000009', vid_index: 9, currentTime: 31, updatedAt: 1800000000000 };
+  assert.equal(chooseAccountProgress(local, cloud), 'upload');
+  assert.equal(chooseAccountProgress(local, { ...cloud, updatedAt: 2000000000000 }), 'download');
+  assert.equal(chooseAccountProgress(local, { ...local, currentTime: 11.5 }), 'unchanged');
+  assert.throws(() => chooseAccountProgress(local, { ...cloud, updatedAt: local.updatedAt }), /更新时间相同/);
+  assert.throws(() => verifyAccountProgressWrite({ message: 'success' }), /未确认写入/);
+  assert.throws(() => verifyAccountProgressWrite({ code: 0, data: { error_code: 100103 } }), /未确认写入/);
+});
+
+test('single progress sync checks the baseline, sends both writes and reads the exact record back', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-progress-test-'));
+  const seriesId = '7705824595416190014', episodeId = '7705826348597529625';
+  const pos = { series_id: seriesId, episode_id: episodeId, vid_index: 3, currentTime: 28.5,
+    duration: 120, total: 80, updatedAt: 1790000000000 };
+  let cloud = { series_id: seriesId, episode_id: episodeId, vid_index: 3, currentTime: 8, updatedAt: 1780000000000 };
+  let previousReadback;
+  const posts = [];
+  try {
+    const service = createAccountService({
+      filePath: path.join(root, 'session.json'), local: true,
+      webRequest: async () => webPayload({ user_id_str: '42', name: '独立测试账号' }),
+      identityRequest: async () => ({
+        device_id: '7000000000000000001', iid: '7000000000000000002', cdid: '00000000-0000-4000-8000-000000000003',
+      }),
+      accountRequest: async (url, req) => {
+        const route = new URL(url).pathname;
+        if (req.method === 'GET') {
+          const latest = previousReadback || cloud;
+          previousReadback = null;
+          return { code: 0, data: { data_list: [{
+            book_id_str: seriesId, vid: episodeId, vid_index: latest.vid_index,
+            current_play_position: latest.currentTime * 1000, read_timestamp_ms: latest.updatedAt,
+          }] } };
+        }
+        assert.equal(req.method, 'POST');
+        assert.ok(req.headers['x-ss-stub']);
+        const body = req.data.toString('utf8');
+        posts.push(route);
+        if (route.endsWith('read_history/update/v')) {
+          assert.ok(body.includes(`"book_id":${seriesId}`));
+          assert.ok(body.includes(`"vid":${episodeId}`));
+        } else {
+          assert.ok(body.includes(`"book_id":"${seriesId}"`));
+          assert.ok(body.includes('"current_play_time":28500'));
+          previousReadback = cloud;
+          cloud = pos;
+        }
+        return { code: 0 };
+      },
+    });
+    await service.completeWebLogin('sessionid=fixture');
+    await assert.rejects(service.uploadProgressForTest('99', pos, cloud), /测试账号已变更/);
+    await assert.rejects(service.uploadProgressForTest('42', pos, { ...cloud, updatedAt: 1 }), /云端进度已变更/);
+    await assert.rejects(service.uploadProgress('42', pos, cloud, { allowNew: true, shouldSend: () => false }), /本机观看进度已更新/);
+    assert.equal(posts.length, 0);
+    const result = await service.uploadProgressForTest('42', pos, cloud);
+    assert.equal(result.episode_id, episodeId);
+    assert.equal(result.currentTime, 28.5);
+    assert.deepEqual(posts, ['/reading/bookapi/read_history/update/v', '/reading/bookapi/read_progress/upload/v']);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
 test('large account episode IDs stay exact strings', () => {
@@ -82,6 +256,41 @@ test('session store refuses basic_text backend, stays compatible without the API
     const store = secureSessionStore({ filePath: file, safeStorage: basicText });
     assert.throws(() => store.save(session), /安全存储不可用/);
     assert.throws(() => store.load(), /安全存储不可用/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('Mac local login saves, restores and clears JSON without secure storage or legacy reads', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-account-local-'));
+  const filePath = path.join(root, 'account-session.json');
+  const legacy = path.join(root, 'account-session.bin');
+  const options = {
+    filePath,
+    local: true,
+    safeStorage: new Proxy({}, { get() { throw new Error('Mac account must not consult secure storage'); } }),
+    webRequest: async () => webPayload({ user_id_str: '42', name: '本地账号' }),
+  };
+  const fixture = 'sessionid=local-fixture';
+  try {
+    fs.writeFileSync(legacy, 'synthetic old session');
+    const service = createAccountService(options);
+    assert.equal((await service.status()).signedIn, false);
+    const login = await service.completeWebLogin(fixture);
+    assert.equal(login.storageWarning, '');
+    assert.equal(login.status, 'signed-in');
+    assert.ok(!JSON.stringify(login).includes(fixture));
+    assert.equal(JSON.parse(fs.readFileSync(filePath, 'utf8')).cookie, fixture);
+    if (process.platform !== 'win32') assert.equal(fs.statSync(filePath).mode & 0o777, 0o600);
+    const restored = createAccountService(options);
+    assert.equal((await restored.status()).account.nickname, '本地账号');
+    await restored.logout();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(fs.existsSync(filePath), false);
+    assert.equal(fs.readFileSync(legacy, 'utf8'), 'synthetic old session');
+    fs.writeFileSync(filePath, 'invalid-local-fixture');
+    const invalid = await createAccountService(options).status();
+    assert.equal(invalid.signedIn, false);
+    assert.match(invalid.error, /本机登录信息无效/);
+    assert.ok(!JSON.stringify(invalid).includes('invalid-local-fixture'));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 

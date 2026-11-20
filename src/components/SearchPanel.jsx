@@ -17,6 +17,8 @@ const SEARCH_SAFETY_TIMEOUT_MS = 25000;
  */
 function SearchPanel({ onSelectSeries, onViewSeries, onSwitchToInput, active = true }) {
   useLanguage();
+  const mobile = window.electronAPI?.platform === 'android';
+  const History = mobile ? 'div' : 'details';
   const [source, setSource] = useState('all');
   const { sources: mediaSources, revision: sourceRevision, loading: sourcesLoading, error: sourcesError } = useMediaSources();
   const requestVersion = useRef(0);
@@ -309,16 +311,55 @@ function SearchPanel({ onSelectSeries, onViewSeries, onSwitchToInput, active = t
   const fuzzyCount = results ? results.filter(item => item.fuzzy).length : 0;
   const otherCount = results ? results.filter(item => item.relevance > 2 && !item.fuzzy).length : 0;
 
+  const primaryResults = !mobile && matchedCount ? results.filter(item => item.relevance < 2) : results;
+  const secondaryResults = !mobile && matchedCount ? results.filter(item => item.relevance >= 2) : [];
+  const sourcePicker = <label className="source-control">{mobile && t("来源")}<select className="input-field" aria-label={t("短剧来源")} value={source} onChange={(e) => switchSource(e.target.value)}><option value="all">{t("全部来源")}</option>{mediaSources.map(({ id, label }) => <option key={id} value={id}>{id.startsWith('custom:') ? label : t(label)}</option>)}</select></label>;
+  const renderResults = items => <div className="search-grid">
+    {items.map((item) => (
+      <div className="search-card-item" key={`${item.source}:${item.series_id}`}>
+      <button
+        type="button"
+        disabled={pickingId !== ''}
+        className={`search-card ${pickingId === item.series_id ? 'picking' : ''}`}
+        onClick={() => pickingId === '' && pick(item)}
+        title={`${t(onViewSeries ? '点击播放' : '点击查看并下载')}: ${item.series_title}`}
+      >
+        <div className="search-cover">
+          {(!mobile || !item.cover) && (
+            <div className="cover-placeholder">
+              <Film size={22} />
+            </div>
+          )}
+          {item.cover && <img src={item.cover} alt={item.series_title} loading="lazy"
+            onError={mobile ? undefined : event => { event.currentTarget.hidden = true; }} />}
+        </div>
+        <div className="search-card-body">
+          <div className="search-card-title">{item.series_title}</div>
+          <div className="search-card-sub">
+            {pickingId === item.series_id ? (
+              <>
+                <RefreshCw size={13} className="spin" />{t(" 正在拉取分集…")}</>
+            ) : (
+              <><span className="badge">{mediaSourceLabel(item.source, mediaSources)}</span>{item.new_release && <span className="badge-new">{t(item.released_today ? '今日上新' : 'App 新剧')}</span>}{mobile && t(item.fuzzy ? '补搜结果 · 查看剧集' : item.relevance === 2 ? '剧情相关 · 查看剧集' : item.relevance > 2 ? '其他结果 · 查看剧集' : '查看剧集')}</>
+            )}
+          </div>
+        </div>
+      </button>
+      {onViewSeries && <button className="mobile-drama-details" disabled={pickingId !== ''} aria-label={t(`详情与下载：${item.series_title}`)} onClick={() => pick(item, true)}>{t("详情与下载")}</button>}
+      </div>
+    ))}
+  </div>;
+
   return (
-    <div className="hongguo-card">
+    <div className="hongguo-card search-form-card">
       <div className="card-header-title">
         <Search size={18} />
         <span>{t("搜索短剧")}</span>
-        <label className="source-control">{t("来源")}<select className="input-field" aria-label={t("短剧来源")} value={source} onChange={(e) => switchSource(e.target.value)}><option value="all">{t("全部来源")}</option>{mediaSources.map(({ id, label }) => <option key={id} value={id}>{id.startsWith('custom:') ? label : t(label)}</option>)}</select></label>
+        {mobile && sourcePicker}
       </div>
 
       {sourcesError && <p className="settings-hint" role="status">{t("来源列表更新失败，暂用上次列表；可在设置重新保存来源后重试。")}</p>}
-      <div className="input-group">
+      <div className="input-group search-form-row">
         <input
           type="text"
           className="input-field"
@@ -327,11 +368,12 @@ function SearchPanel({ onSelectSeries, onViewSeries, onSwitchToInput, active = t
           ref={inputRef}
           list="local-search-suggestions"
           autoComplete="off"
-          placeholder={t("输入剧名，例如：一村人养一个神")}
+          placeholder={t(mobile ? "输入剧名，例如：一村人养一个神" : "输入剧名或关键词")}
           value={keyword}
           onChange={(e) => changeKeyword(e.target.value)}
           onKeyDown={(e) => isSubmitKey(e) && doSearch()}
         />
+        {!mobile && mediaSources.length > 1 && sourcePicker}
         <button className="btn btn-primary" onClick={doSearch} disabled={loading || sourcesLoading}>
           {loading ? (
             <>
@@ -350,25 +392,26 @@ function SearchPanel({ onSelectSeries, onViewSeries, onSwitchToInput, active = t
         {suggestions.map(({ term, source: origin }) => <option key={term} value={term} label={origin} />)}
       </datalist>
       <p className="settings-hint search-suggestions-hint" id="search-suggestions-hint">{t("本机联想：匹配搜索历史和本次浏览过的真实剧名。")}</p>
-      {history.length > 0 && <div className="search-history">
-        <div className="search-history-heading"><span>{t("本机搜索历史")}</span><button type="button" className="btn-chip" onClick={clearHistory}>{t("清除历史")}</button></div>
+      {history.length > 0 && <History className="search-history" open={mobile ? undefined : results === null ? true : undefined}>
+        {!mobile && <summary>{t("本机搜索历史")}</summary>}
+        <div className="search-history-heading">{mobile && <span>{t("本机搜索历史")}</span>}<button type="button" className="btn-chip" onClick={clearHistory}>{t("清除历史")}</button></div>
         <div className="search-history-terms">{history.map((term) => <span className="search-history-term" key={term}><button type="button" className="btn-chip" title={term} onClick={() => { changeKeyword(term); inputRef.current?.focus(); }}>{term}</button><button type="button" className="search-history-remove" aria-label={t(`删除搜索历史：${term}`)} title={t("删除这条搜索历史")} onClick={() => removeHistory(term)}>×</button></span>)}</div>
-      </div>}
+      </History>}
       {historyError && <p className="search-history-error" role="alert">{t(historyError)}</p>}
-      <p className="settings-hint" style={{ marginTop: 8 }}>
+      {mobile && <p className="settings-hint" style={{ marginTop: 8 }}>
         {t(onViewSeries ? '点海报直接播放；详情与下载可单独打开。' : source === 'all' ? '同时搜索所有已启用来源，结果标明来源；选择一部即可查看全部剧集。' : '按剧名查找，选择一部即可查看全部剧集。')}
-      </p>
+      </p>}
 
-      {results === null && !loading && !error && (
+      {mobile && results === null && !loading && !error && (
         <div className="search-welcome"><Search size={36} /><h3>{t("好故事，从一个名字开始")}</h3><p>{t("输入完整剧名或关键词，发现你想看的短剧。")}</p></div>
       )}
       {error && <div className="alert alert-error" role="alert">{t(error)}</div>}
       {searchWarning && <p className="settings-hint" role="status">{t(searchWarning)}{t(" 已显示本次查到的结果。")}</p>}
 
-      {loading && (
+      {mobile && loading && (
         <div className="search-loading">
           <RefreshCw size={18} className="spin" />
-          <span>{t("正在寻找相关短剧，首次加载可能需要几秒…")}</span>
+          <span>{t(mobile ? "正在寻找相关短剧，首次加载可能需要几秒…" : "搜索中...")}</span>
         </div>
       )}
 
@@ -387,42 +430,12 @@ function SearchPanel({ onSelectSeries, onViewSeries, onSwitchToInput, active = t
 
       {results && results.length > 0 && (
         <>
-          <div className="search-count">{t("找到 ")}{t(matchedCount)}{t(" 部标题匹配短剧")}{t(contentCount ? `，另有 ${contentCount} 部剧情提到该词（排在后面）` : '')}{t(fuzzyCount ? `，另有 ${fuzzyCount} 部补搜结果` : '')}{t(otherCount ? `，另有 ${otherCount} 部来源返回的其他结果（排在后面）` : '')}</div>
-          <div className="search-grid">
-            {results.map((item) => (
-              <div className="search-card-item" key={`${item.source}:${item.series_id}`}>
-              <button
-                type="button"
-                disabled={pickingId !== ''}
-                className={`search-card ${pickingId === item.series_id ? 'picking' : ''}`}
-                onClick={() => pickingId === '' && pick(item)}
-                title={`${t(onViewSeries ? '点击播放' : '点击查看并下载')}: ${item.series_title}`}
-              >
-                <div className="search-cover">
-                  {item.cover ? (
-                    <img src={item.cover} alt={item.series_title} loading="lazy" />
-                  ) : (
-                    <div className="cover-placeholder">
-                      <Film size={22} />
-                    </div>
-                  )}
-                </div>
-                <div className="search-card-body">
-                  <div className="search-card-title">{item.series_title}</div>
-                  <div className="search-card-sub">
-                    {pickingId === item.series_id ? (
-                      <>
-                        <RefreshCw size={13} className="spin" />{t(" 正在拉取分集…")}</>
-                    ) : (
-                      <><span className="badge">{mediaSourceLabel(item.source, mediaSources)}</span>{item.new_release && <span className="badge-new">{t(item.released_today ? '今日上新' : 'App 新剧')}</span>}{t(item.fuzzy ? '补搜结果 · 查看剧集' : item.relevance === 2 ? '剧情相关 · 查看剧集' : item.relevance > 2 ? '其他结果 · 查看剧集' : '查看剧集')}</>
-                    )}
-                  </div>
-                </div>
-              </button>
-              {onViewSeries && <button className="mobile-drama-details" disabled={pickingId !== ''} aria-label={t(`详情与下载：${item.series_title}`)} onClick={() => pick(item, true)}>{t("详情与下载")}</button>}
-              </div>
-            ))}
-          </div>
+          {mobile ? <div className="search-count">{t("找到 ")}{t(matchedCount)}{t(" 部标题匹配短剧")}{t(contentCount ? `，另有 ${contentCount} 部剧情提到该词（排在后面）` : '')}{t(fuzzyCount ? `，另有 ${fuzzyCount} 部补搜结果` : '')}{t(otherCount ? `，另有 ${otherCount} 部来源返回的其他结果（排在后面）` : '')}</div> : <h3 className="search-count">{t(matchedCount ? "标题匹配" : "搜索结果")} · {primaryResults.length}</h3>}
+          {renderResults(primaryResults)}
+          {secondaryResults.length > 0 && <details className="search-secondary">
+            <summary>{t("其他结果")} · {secondaryResults.length}</summary>
+            {renderResults(secondaryResults)}
+          </details>}
           {Object.values(more).some(state => state.hasMore) && (
             <div className="search-more">
               <button type="button" className="btn btn-outline" disabled={moreLoading} onClick={loadMore}>

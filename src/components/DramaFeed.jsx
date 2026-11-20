@@ -23,6 +23,7 @@ function clockOf(timestamp) {
 // 先显示会话内上次片单，再后台更新；更新失败保留旧内容。只有“刷新片单”强制取最新。
 function DramaFeed({ active = true, onNavigate }) {
   useLanguage();
+  const mobile = window.electronAPI?.platform === 'android';
   const [source, setSource] = useState('hongguo');
   const [catalogChannel, setCatalogChannel] = useState(() => {
     try { return localStorage.getItem(CATALOG_CHANNEL_KEY) === 'web' ? 'web' : 'app'; }
@@ -190,9 +191,9 @@ function DramaFeed({ active = true, onNavigate }) {
   const upcoming = items.slice(index + 1, index + 5);
   return <section className="drama-feed" aria-label={t("热播推荐")}>
     <header className="drama-feed-header">
-      <div><h2>{t("热播推荐")}</h2><p className="page-description">{t("从热播榜和来源片单，遇见下一部故事。")}</p></div>
+      <div className="duplicate-page-title"><h2>{t("热播推荐")}</h2>{mobile && <p className="page-description">{t("从热播榜和来源片单，遇见下一部故事。")}</p>}</div>
       <div className="drama-feed-actions">
-        {!random && <label className="source-control">{t("来源")}<select className="input-field" aria-label={t("推荐来源")} value={source} onChange={event => switchFeed(event.target.value, 'hot-drama')}>
+        {!random && (mobile || mediaSources.length > 1) && <label className="source-control">{t("来源")}<select className="input-field" aria-label={t("推荐来源")} value={source} onChange={event => switchFeed(event.target.value, 'hot-drama')}>
           {mediaSources.map(({ id, label }) => <option key={id} value={id}>{id.startsWith('custom:') ? label : t(label)}</option>)}
         </select></label>}
         {ranking && !random && <label className="source-control">{t("目录线路")}<select className="input-field" aria-label={t("推荐目录线路")} value={catalogChannel} onChange={event => switchCatalogChannel(event.target.value)}><option value="app">{t("App（快速 · 部分片单）")}</option><option value="web">{t("官网（完整目录）")}</option></select></label>}
@@ -207,8 +208,8 @@ function DramaFeed({ active = true, onNavigate }) {
     </div>
     {random ? <RandomDrama active={active} refreshKey={randomRefresh} onNavigate={onNavigate} /> : <>
       {sourcesError && <p className="drama-feed-hint" role="status">{t("来源列表更新失败，暂用上次列表；可在设置重新保存来源后重试。")}</p>}
-      <div className="drama-feed-list-meta"><p>{t(ranking ? catalogChannel === 'app' ? '红果 App 热播榜' : '红果官网热播榜' : `${sourceLabel} · 来源片单`)}{t(items.length > 0 ? ` · 本次 ${items.length} 部` : '')}</p><span>{t(ranking ? '按来源榜单顺序' : '按来源目录顺序，不代表热播排名')}</span></div>
-      {ranking && catalogChannel === 'app' && <p className="drama-feed-hint" role="status">{t("快速线路只显示部分片单；需要更完整的榜单时，可在“目录线路”切换到官网。")}</p>}
+      {mobile && <div className="drama-feed-list-meta"><p>{t(ranking ? catalogChannel === 'app' ? '红果 App 热播榜' : '红果官网热播榜' : `${sourceLabel} · 来源片单`)}{t(items.length > 0 ? ` · 本次 ${items.length} 部` : '')}</p><span>{t(ranking ? '按来源榜单顺序' : '按来源目录顺序，不代表热播排名')}</span></div>}
+      {mobile && ranking && catalogChannel === 'app' && <p className="drama-feed-hint" role="status">{t("快速线路只显示部分片单；需要更完整的榜单时，可在“目录线路”切换到官网。")}</p>}
       {(loading || sourcesLoading) && items.length === 0 && <div className="drama-feed-state" role="status"><RefreshCw size={24} className="spin" /><p>{t(sourcesLoading ? '正在加载来源列表…' : '正在加载真实片单…')}</p>
         {loading && !sourcesLoading && <button className="btn btn-outline" onClick={cancelLoad}>{t("取消加载")}</button>}
       </div>}
@@ -227,7 +228,7 @@ function DramaFeed({ active = true, onNavigate }) {
         <div className="drama-feed-actions"><button className="btn btn-primary" disabled={!source} onClick={() => loadList(true)}>{t("重新加载")}</button>
           {onNavigate && <button className="btn btn-outline" onClick={() => onNavigate('download')}>{t("按剧名搜索")}</button>}</div>
       </div>}
-      {selected && <>
+      {selected && <div className="drama-feed-presentation">
         <div className="drama-feed-feature">
           <DramaPoster item={selected} />
           <div className="drama-feed-copy">
@@ -235,16 +236,16 @@ function DramaFeed({ active = true, onNavigate }) {
             <h3>{selected.series_title}</h3>
             <p className="drama-feed-tags">{[selected.episode_count > 0 && t('{0} 集', [selected.episode_count]), ...(selected.tags || [])].filter(Boolean).join(' · ') || t('来自{0}片单', [sourceLabel])}</p>
             {typeof introduction === 'string' && introduction.trim() && <p className="drama-feed-intro">{introduction}</p>}
-            <p className="drama-feed-play-note">{t("在「我的剧库」选集、播放，接着上次继续看。")}</p>
+            {mobile && <p className="drama-feed-play-note">{t("在「我的剧库」选集、播放，接着上次继续看。")}</p>}
             <div className="drama-feed-actions"><button className="btn btn-primary" disabled={resolving} onClick={startItem}><Play size={16} />{t(resolving ? '正在打开剧库…' : '在剧库播放')}</button>
               {resolving && <button className="btn btn-outline" onClick={() => { playController.current?.abort(); setResolving(false); setPlayError('已取消加载，可重试本剧。'); }}>{t("取消加载")}</button>}</div>
             {playError && <p className="drama-inline-error" role="alert">{t(playError)}</p>}
           </div>
         </div>
         <div className="drama-feed-navigation">
-          <span aria-live="polite">{t("第 {0} / {1} 部", [index + 1, items.length])}</span>
-          <div className="drama-feed-actions" role="group" aria-label={t("切换推荐短剧")}>
+          <div className="drama-feed-actions pagination-controls" role="group" aria-label={t("切换推荐短剧")}>
             <button className="btn btn-outline" disabled={index === 0 || resolving} onClick={() => selectItem(index - 1)}>{t("上一部")}</button>
+            <span className="pager-status" aria-live="polite">{t("第 {0} / {1} 部", [index + 1, items.length])}</span>
             <button className="btn btn-outline" disabled={index === items.length - 1 || resolving} onClick={() => selectItem(index + 1)}>{t("下一部")}</button>
           </div>
         </div>
@@ -253,8 +254,8 @@ function DramaFeed({ active = true, onNavigate }) {
             <DramaPoster item={item} /><span><strong>{item.series_title}</strong><small>{t(ranking && item.rank > 0 ? `榜单第 ${item.rank} 名` : `片单第 ${index + offset + 2} 部`)}</small></span>
           </button>)}
         </div></div> : <p className="drama-feed-hint">{t("已到本次片单末尾，换个来源，或摇一摇发现新故事。")}</p>}
-        <p className="drama-feed-source">{t(ranking ? `榜单来自${catalogChannel === 'app' ? '红果 App 目录' : '红果官网公开页面'}，不是账号个性化推荐。` : `片单来自${sourceLabel}当前目录，不代表热播排名；播放以来源实际可用分集为准。`)}</p>
-      </>}
+        {mobile && <p className="drama-feed-source">{t(ranking ? `榜单来自${catalogChannel === 'app' ? '红果 App 目录' : '红果官网公开页面'}，不是账号个性化推荐。` : `片单来自${sourceLabel}当前目录，不代表热播排名；播放以来源实际可用分集为准。`)}</p>}
+      </div>}
     </>}
   </section>;
 }

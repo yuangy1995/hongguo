@@ -1,8 +1,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
+const { setTimeout: delay } = require('node:timers/promises');
 const { signedAccountRequest, requestJson } = require('./app-source');
 const { getPlaybackDevice } = require('./playback-device');
+const { writeJsonAtomic } = require('./atomic-json');
+const { chooseAccountProgress, isSameAccountProgress, accountProgressBodies, verifyAccountProgressWrite } = require('./account-progress-sync');
 
 const WEB_BASE = 'https://hongguoduanju.com';
 const WEB_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
@@ -24,6 +27,10 @@ function withTimeout(promise, timeout, message) {
     promise,
     new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), timeout); }),
   ]).finally(() => clearTimeout(timer));
+}
+
+function isExpiredSession(error) {
+  return error?.status === 401 || /会话(?:已)?过期|登录(?:状态|态)?(?:已)?(?:失效|过期)|登录态未通过|账号编号无效|未登录|请(?:先|重新)登录|HTTP\s*401|(?:not logged in|session expired)/i.test(String(error?.message || ''));
 }
 
 function cleanText(value) {
@@ -92,6 +99,7 @@ function parseHistory(payload) {
   const data = responseData(payload);
   const rows = data.data_list;
   if (!Array.isArray(rows)) throw new Error('APP 观看记录格式已变化');
+  const seen = new Set();
   return rows.map(row => {
     if (row?.is_delete) return null;
     const seriesId = String(row?.book_id_str || row?.book_id || row?.series_id || '').trim();
@@ -114,8 +122,11 @@ function parseHistory(payload) {
     };
   }).filter(Boolean)
     .sort((a, b) => b.updatedAt - a.updatedAt)
-    .filter((row, index, list) => list.findIndex(item => item.series_id === row.series_id) === index)
-    .slice(0, 50);
+    .filter(row => {
+      if (seen.has(row.series_id)) return false;
+      seen.add(row.series_id);
+      return true;
+    });
 }
 
 class CookieJar {
@@ -187,6 +198,7 @@ function secureSessionStore({ filePath, safeStorage }) {
       if (!encryptionAvailable()) throw new Error('系统安全存储不可用，无法读取上次登录');
       const text = safeStorage.decryptString(fs.readFileSync(filePath));
       const value = JSON.parse(text);
+      if (value?.expired === true) return value;
       if (!value || typeof value.cookie !== 'string' || !value.cookie.trim()) throw new Error('登录态文件无效，请重新扫码');
       return value;
     },
@@ -196,34 +208,110 @@ function secureSessionStore({ filePath, safeStorage }) {
   };
 }
 
+function localSessionStore(filePath) {
+  return {
+    save(credentials) {
+      try { writeJsonAtomic(filePath, credentials); }
+      catch { throw new Error('无法保存本机登录信息，下次启动需重新登录。'); }
+    },
+    load() {
+      let text;
+      try { text = fs.readFileSync(filePath, 'utf8'); }
+      catch (error) {
+        if (error.code === 'ENOENT') return null;
+        throw new Error('无法读取本机登录信息，请检查资料目录权限后重试。');
+      }
+      let value;
+      try { value = JSON.parse(text); } catch {}
+      if (value?.expired === true) return value;
+      if (typeof value?.cookie !== 'string' || !value.cookie.trim()) {
+        throw new Error('本机登录信息无效，请重新登录。');
+      }
+      return value;
+    },
+    clear() {
+      try { fs.unlinkSync(filePath); }
+      catch (error) {
+        if (error.code !== 'ENOENT') throw new Error('无法清除本机登录信息，请检查资料目录权限后重试。');
+      }
+    },
+  };
+}
+
 function createAccountService({
-  filePath, safeStorage, webRequest = defaultWebRequest, identityRequest = getPlaybackDevice,
-  accountRequest = requestJson, now = Date.now, onAccountExpired = () => {},
+  filePath, safeStorage, local = false, webRequest = defaultWebRequest, identityRequest = getPlaybackDevice,
+  accountRequest = requestJson, now = Date.now, onAccountExpired = () => {}, historyFilePath,
 }) {
-  const sessionStore = secureSessionStore({ filePath, safeStorage });
+  const sessionStore = local ? localSessionStore(filePath) : secureSessionStore({ filePath, safeStorage });
   let credentials = null;
   let profile = null;
+  let expired = false;
   let history = [];
   let historyLoaded = false;
+  let historyRefresh = null;
   let restorePromise = null;
   let generation = 0;
+  let verifiedAt = 0;
+  let sessionVerification = null;
   let login = null;
   let loginGeneration = 0;
 
   const publicAccount = extra => ({
-    success: true, signedIn: !!profile, account: profile ? { ...profile } : null, ...extra,
+    success: true, signedIn: !!profile, ...(expired ? { expired: true } : {}), account: profile ? { ...profile } : null, ...extra,
   });
 
-  async function accountJson(targetCredentials, apiPath, params = {}) {
+  let savedHistory;
+  const historyMaxBytes = 24 * 1024 * 1024;
+  function localHistory() {
+    if (savedHistory === undefined && historyFilePath) {
+      try {
+        if (fs.statSync(historyFilePath).size <= historyMaxBytes) {
+          const stored = JSON.parse(fs.readFileSync(historyFilePath, 'utf8'));
+          if (typeof stored?.accountId === 'string' && Array.isArray(stored.rows)) {
+            savedHistory = { accountId: stored.accountId, rows: stored.rows.filter(row => typeof row?.series_title === 'string' && typeof row?.episode_id === 'string') };
+          }
+        }
+      } catch {}
+    }
+    savedHistory ??= null;
+    return savedHistory;
+  }
+
+  function cacheLocalHistory(accountId, rows) {
+    if (!historyFilePath) return;
+    const previous = localHistory();
+    if (previous?.accountId === accountId && JSON.stringify(previous.rows) === JSON.stringify(rows)) return;
+    const next = { accountId, rows };
+    try { writeJsonAtomic(historyFilePath, next, { maxBytes: historyMaxBytes }); }
+    catch { throw new Error('无法保存云端观看记录，请检查本机存储后重试。'); }
+    savedHistory = next;
+  }
+
+  function expireAccount() {
+    generation++;
+    credentials = null;
+    profile = null;
+    expired = true;
+    history = [];
+    historyLoaded = false;
+    restorePromise = Promise.resolve(publicAccount());
+    try { sessionStore.save({ expired: true }); } catch { try { sessionStore.clear(); } catch {} }
+    onAccountExpired();
+  }
+
+  async function accountJson(targetCredentials, apiPath, params = {}, payload, beforeWrite) {
     // Website authentication does not depend on anonymous App device availability.
     const identity = targetCredentials.deviceId && targetCredentials.installId && targetCredentials.cdid ? {
       device_id: targetCredentials.deviceId, iid: targetCredentials.installId, cdid: targetCredentials.cdid,
     } : await withTimeout(identityRequest(accountRequest), 10000, '账号设备初始化超时，请重试');
     if (targetCredentials !== credentials) throw new Error('账号已退出，请重新登录');
-    const signed = signedAccountRequest(apiPath, params, identity);
+    beforeWrite?.();
+    const signed = signedAccountRequest(apiPath, params, identity, payload);
     const deadline = Date.now() + 12000;
     return accountRequest(signed.url, {
-      method: 'GET', headers: { ...signed.headers, Cookie: targetCredentials.cookie },
+      method: signed.body ? 'POST' : 'GET',
+      ...(signed.body ? { data: signed.body } : {}),
+      headers: { ...signed.headers, Cookie: targetCredentials.cookie },
       preserveLargeIntegerFields: ['vid', 'video_id', 'item_id'],
     }, deadline, AbortSignal.timeout(12000));
   }
@@ -232,39 +320,48 @@ function createAccountService({
     return parsePassportProfile(await webJson('/passport/account/info/v2/', {}, new CookieJar(targetCredentials.cookie)));
   }
 
+  function verifySession(current, token) {
+    if (sessionVerification?.token === token) return sessionVerification.promise;
+    const validation = { token };
+    sessionVerification = validation;
+    validation.promise = withTimeout(verify(current), 12000, '登录态验证超时').then(nextProfile => {
+      if (token !== generation) return false;
+      if (profile?.id !== nextProfile.id) { expireAccount(); return false; }
+      profile = nextProfile;
+      verifiedAt = now();
+      return true;
+    }).catch(error => {
+      if (token === generation && isExpiredSession(error)) expireAccount();
+      return false;
+    }).finally(() => { if (sessionVerification === validation) sessionVerification = null; });
+    return validation.promise;
+  }
+
   async function restore() {
     try {
       const saved = sessionStore.load();
       if (!saved) return publicAccount();
+      if (saved.expired === true) { expired = true; return publicAccount(); }
       const token = generation;
       const cachedProfile = parseStoredProfile(saved.profile);
       if (cachedProfile) {
         credentials = saved;
         profile = cachedProfile;
-        withTimeout(verify(saved), 12000, '登录态验证超时').then(nextProfile => {
-          if (token !== generation) return;
-          profile = nextProfile;
-          try { sessionStore.save({ ...saved, profile: nextProfile }); } catch {}
-        }).catch(error => {
-          if (token !== generation) return;
-          const message = safeMessage(error);
-          if (!/会话过期|登录态未通过|账号编号无效|HTTP\s*(?:401|403)/i.test(message)) return;
-          credentials = null;
-          profile = null;
-          restorePromise = Promise.resolve(publicAccount());
-          try { sessionStore.clear(); } catch {}
-          onAccountExpired();
-        });
+        void verifySession(saved, token);
         return publicAccount();
       }
-      const nextProfile = await withTimeout(verify(saved), 12000, '登录态验证超时，请稍后重试');
+      const nextProfile = await withTimeout(verify(saved), 12000, '登录态验证超时，请稍后重试').catch(error => {
+        if (token === generation && isExpiredSession(error)) expireAccount();
+        throw error;
+      });
       if (token !== generation) return publicAccount();
       credentials = saved;
       profile = nextProfile;
+      verifiedAt = now();
       try { sessionStore.save({ ...saved, profile: nextProfile }); } catch {}
       return publicAccount();
     } catch (error) {
-      return { success: true, signedIn: false, account: null, error: safeMessage(error, '上次登录暂时无法恢复') };
+      return expired ? publicAccount() : { ...publicAccount(), error: safeMessage(error, '上次登录暂时无法恢复') };
     }
   }
 
@@ -322,7 +419,8 @@ function createAccountService({
       const nextCredentials = { cookie };
       let storageWarning = '';
       try { sessionStore.save({ ...nextCredentials, profile: nextProfile }); } catch (error) { storageWarning = safeMessage(error); }
-      credentials = nextCredentials; profile = nextProfile; history = []; historyLoaded = false;
+      credentials = nextCredentials; profile = nextProfile; expired = false; history = []; historyLoaded = false;
+      verifiedAt = now();
       generation++; restorePromise = Promise.resolve(publicAccount());
       return publicAccount({ status: 'signed-in', storageWarning });
     },
@@ -373,6 +471,8 @@ function createAccountService({
       catch (error) { storageWarning = safeMessage(error); }
       credentials = nextCredentials;
       profile = nextProfile;
+      expired = false;
+      verifiedAt = now();
       history = [];
       historyLoaded = false;
       generation++;
@@ -389,34 +489,72 @@ function createAccountService({
     },
 
     async logout() {
+      if (local) sessionStore.clear();
       loginGeneration++;
       generation++;
       credentials = null;
       profile = null;
+      expired = false;
       history = [];
       historyLoaded = false;
       login = null;
       restorePromise = Promise.resolve(publicAccount());
       let storageWarning = '';
-      try { sessionStore.clear(); } catch (error) { storageWarning = safeMessage(error); }
+      if (!local) {
+        try { sessionStore.clear(); } catch (error) { storageWarning = safeMessage(error); }
+      }
       return publicAccount({ storageWarning });
     },
 
-    async refreshHistory() {
+    refreshHistory() {
       const current = credentials;
-      if (!current || !profile) return { success: true, signedIn: false, account: null, results: [] };
+      if (!current || !profile) return Promise.resolve({ success: true, signedIn: false, account: null, results: [] });
       const token = generation;
-      const rows = parseHistory(await accountJson(current, '/reading/bookapi/read_history/list/v1/', {
-        book_type: '2', limit: '0', offset: '0', last_min_read_timestamp_ms: '0',
-        full_field: 'true', is_first_load: 'true', query_soft_deleted: 'false',
-      }));
-      if (token !== generation) return { success: true, signedIn: false, account: null, results: [] };
-      history = rows.map(row => ({
-        ...row,
-        series_title: row.series_title || `剧集 ${row.series_id}`,
-      }));
-      historyLoaded = true;
-      return publicAccount({ results: history.map(row => ({ ...row })) });
+      if (historyRefresh?.token === token) return historyRefresh.promise;
+      if (now() - verifiedAt >= 120000) void verifySession(current, token);
+      const pending = { token, promise: null };
+      historyRefresh = pending;
+      pending.promise = (async () => {
+        const combined = [];
+        const seenPages = new Set();
+        let offset = 0;
+        for (let page = 0; page < 200; page++) {
+          const raw = responseData(await accountJson(current, '/reading/bookapi/read_history/list/v1/', {
+            book_type: '2', limit: '0', offset: String(offset), last_min_read_timestamp_ms: '0',
+            full_field: 'true', is_first_load: String(page === 0), query_soft_deleted: 'false',
+          }));
+          if (token !== generation || current !== credentials) return { success: true, signedIn: false, account: null, results: [] };
+          if (!Array.isArray(raw.data_list)) throw new Error('APP 观看记录格式已变化');
+          const pageKey = JSON.stringify(raw.data_list.map(row => row?.book_id_str || row?.book_id || row?.series_id));
+          if (seenPages.has(pageKey)) break;
+          seenPages.add(pageKey);
+          combined.push(...raw.data_list);
+          if (![true, 1, '1', 'true'].includes(raw.has_more)) {
+            if (!combined.length && localHistory()?.accountId === profile.id && localHistory().rows.length) {
+              const confirmed = await verifySession(current, token);
+              if (token !== generation) return publicAccount({ results: [] });
+              if (!confirmed) throw new Error('暂时无法确认云端观看记录，请稍后重试。');
+            }
+            history = parseHistory({ data: { data_list: combined } }).map(row => ({
+              ...row, series_title: row.series_title || `剧集 ${row.series_id}`,
+            }));
+            historyLoaded = true;
+            cacheLocalHistory(profile.id, history);
+            return publicAccount({ results: history.map(row => ({ ...row })) });
+          }
+          const next = Number(raw.next_offset ?? offset + 500);
+          if (!raw.data_list.length || !Number.isSafeInteger(next) || next <= offset) break;
+          offset = next;
+        }
+        throw new Error('云端观看记录未读取完整，请稍后刷新。');
+      })().catch(error => {
+        if (token === generation && current === credentials && isExpiredSession(error)) {
+          expireAccount();
+          return publicAccount({ results: [] });
+        }
+        throw error;
+      }).finally(() => { if (historyRefresh === pending) historyRefresh = null; });
+      return pending.promise;
     },
 
     async history({ refresh = false } = {}) {
@@ -426,8 +564,71 @@ function createAccountService({
       return publicAccount({ results: history.map(row => ({ ...row })) });
     },
 
+    activeAccountId() {
+      return profile?.id || '';
+    },
+
+    cachedHistory() {
+      const saved = localHistory();
+      return profile ? (historyLoaded ? history : saved?.accountId === profile.id ? saved.rows : []) : [];
+    },
+
+    localHistory,
+
+    async uploadProgress(accountId, position, expectedCloud, { allowNew = false, retryProgress = false, shouldSend } = {}) {
+      const current = credentials;
+      const token = generation;
+      const checkAccount = () => {
+        if (!current || current !== credentials || profile?.id !== accountId || token !== generation) {
+          throw new Error(allowNew ? '红果账号已变更，请重新登录。' : '测试账号已变更，请重新开始测试。');
+        }
+      };
+      const beforeWrite = () => {
+        checkAccount();
+        if (shouldSend && !shouldSend()) throw new Error('本机观看进度已更新，将在下次同步时处理。');
+      };
+      checkAccount();
+      await this.refreshHistory();
+      beforeWrite();
+      const cloud = this.row(position.series_id);
+      const direction = chooseAccountProgress(position, cloud, { allowNew });
+      const sameBaseline = cloud && expectedCloud
+        ? cloud.updatedAt === expectedCloud.updatedAt && isSameAccountProgress(cloud, expectedCloud)
+        : !cloud && !expectedCloud;
+      const alreadyHasHistory = retryProgress && direction === 'unchanged' && cloud?.updatedAt <= position.updatedAt;
+      if ((!alreadyHasHistory && direction !== 'upload') || !sameBaseline) {
+        throw new Error('云端进度已变更，请重新查看后再同步。');
+      }
+      const { history: historyBody, progress: progressBody } = accountProgressBodies(position);
+      if (!alreadyHasHistory) verifyAccountProgressWrite(await accountJson(current, '/reading/bookapi/read_history/update/v', {}, historyBody, beforeWrite));
+      beforeWrite();
+      try {
+        verifyAccountProgressWrite(await accountJson(current, '/reading/bookapi/read_progress/upload/v', {}, progressBody, beforeWrite));
+      } catch (error) {
+        beforeWrite();
+        if (allowNew) throw error;
+        throw new Error('云端观看记录已提交，断点回写未获确认。请先在手机上刷新核对。');
+      }
+      if (allowNew) return;
+      for (const wait of [0, 1000, 3000, 7000, 15000]) {
+        if (wait) await delay(wait);
+        checkAccount();
+        try { await this.refreshHistory(); }
+        catch { continue; }
+        checkAccount();
+        const readBack = this.row(position.series_id);
+        if (isSameAccountProgress(position, readBack)) return { ...readBack };
+      }
+      checkAccount();
+      throw new Error(allowNew ? '云端进度还未更新，稍后会自动重试。' : '服务器已响应，但还未读回相同的分集和断点。请在手机上刷新核对。');
+    },
+
+    uploadProgressForTest(accountId, position, expectedCloud) {
+      return this.uploadProgress(accountId, position, expectedCloud);
+    },
+
     row(seriesId) {
-      return history.find(row => row.series_id === String(seriesId)) || null;
+      return profile ? history.find(row => row.series_id === String(seriesId)) || null : null;
     },
   };
 }

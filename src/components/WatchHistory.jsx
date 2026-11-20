@@ -1,16 +1,27 @@
 import { t, useLanguage, getLanguage } from '../i18n';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Play, RefreshCw, Clock } from './icons';
+import { AlertCircle, Play, RefreshCw, Clock, Search } from './icons';
 import './WatchHistory.css';
 import { groupHistory, historyGroupSuggestions } from './historyGroups.mjs';
 
 const PREFERENCES_KEY = 'hongguo:watch-history-preferences';
+const ACCOUNT_VIEW_KEY = 'hongguo:account-history-view';
 
 export default function WatchHistory({ active = true, onNavigate }) {
   useLanguage();
+  const mobile = window.electronAPI?.platform === 'android';
+  const Relations = mobile ? 'div' : 'details';
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
+  const [accountSignedIn, setAccountSignedIn] = useState(false);
+  const [refreshingAccount, setRefreshingAccount] = useState(false);
+  const [syncError, setSyncError] = useState('');
+  const [query, setQuery] = useState('');
+  const [view, setView] = useState(() => {
+    try { return window.localStorage.getItem(ACCOUNT_VIEW_KEY) === 'list' ? 'list' : 'cards'; }
+    catch { return 'cards'; }
+  });
   const [checkingRow, setCheckingRow] = useState('');
   const [opening, setOpening] = useState('');
   const [removing, setRemoving] = useState('');
@@ -53,7 +64,8 @@ export default function WatchHistory({ active = true, onNavigate }) {
   const listedRows = listedGroups.flat();
   const completedCount = listedRows.filter(row => row.completed === true).length;
   const visibleRows = listedGroups.map(items => items
-    .filter(row => filter === 'all' || (row.completed === true) === (filter === 'completed'))
+    .filter(row => (filter === 'all' || (row.completed === true) === (filter === 'completed'))
+      && (!accountSignedIn || row.series_title.toLowerCase().includes(query.trim().toLowerCase())))
     .sort((a, b) => b.updatedAt - a.updatedAt))
     .filter(items => items.length).sort((a, b) => b[0].updatedAt - a[0].updatedAt).flat();
 
@@ -70,6 +82,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
       if (version !== request.current) return;
       if (!result?.success) throw new Error(result?.error || '观看记录加载失败');
       setRows(result.results || []);
+      setAccountSignedIn(result.accountSignedIn === true);
       setError('');
     } catch (failure) {
       if (version === request.current) setError(failure.message || '观看记录加载失败，请重试');
@@ -81,11 +94,27 @@ export default function WatchHistory({ active = true, onNavigate }) {
     return () => { openingRequest.current++; openingRef.current = false; };
   }, [active]);
   useEffect(() => {
-    if (active) load();
+    if (active) {
+      load();
+      if (!mobile) void window.electronAPI.syncAccountProgress?.().catch(() => {});
+    }
+    else document.querySelector?.('.history-menu:popover-open')?.hidePopover?.();
     return () => { request.current++; };
-  }, [active]);
+  }, [active, mobile]);
   useEffect(() => window.electronAPI.onWatchHistoryUpdated?.(() => { if (active) load(); }), [active]);
   useEffect(() => window.electronAPI.onWatchHistoryProgress?.(data => { if (active) setProgress(data); }), [active]);
+  useEffect(() => window.electronAPI.onAccountProgressSyncStatus?.(data => setSyncError(data?.error || '')), []);
+
+  const refreshAccount = async () => {
+    setRefreshingAccount(true); setError(''); setStatus('');
+    try {
+      const result = await window.electronAPI.getAccountHistory({ refresh: true });
+      if (!result?.success) throw new Error(result?.error || '账号观看记录刷新失败，请稍后重试。');
+      await load();
+      setStatus('已刷新账号观看记录。');
+    } catch (failure) { setError(failure.message || '账号观看记录刷新失败，请稍后重试。'); }
+    finally { setRefreshingAccount(false); }
+  };
 
   const checkUpdates = async () => {
     setChecking(true); setStatus(''); setError(''); setProgress(null);
@@ -146,7 +175,9 @@ export default function WatchHistory({ active = true, onNavigate }) {
         }
         if (!result?.success) throw new Error(result?.error || '打开播放器失败');
       } else {
-        const result = await window.electronAPI.playSeries({ seriesId: row.series_id, vidIndex: row.vid_index, resume: true });
+        const result = row.account && !mobile
+          ? await window.electronAPI.playAccountHistory(row.series_id, { merged: true })
+          : await window.electronAPI.playSeries({ seriesId: row.series_id, vidIndex: row.vid_index, resume: true });
         if (!result?.success) throw new Error(result?.error || '打开播放器失败');
       }
       // An unconfirmed title match must not clear the original show's update markers.
@@ -156,6 +187,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
         ? group.filter(item => item === row || item.sequels?.some(candidate => !sequel || candidate.series_id === sequel.series_id))
         : [row];
       for (const target of acknowledgedRows) {
+        if (target.hasLocal === false) continue;
         const resumedOriginal = !sequel && target === row;
         const snapshot = { total: resumedOriginal ? row.total : 0, sequelIds: sequel ? [sequel.series_id] : (target.sequels || []).map(item => item.series_id) };
         const acknowledged = await window.electronAPI.acknowledgeWatchUpdates(target.series_id, snapshot);
@@ -177,20 +209,27 @@ export default function WatchHistory({ active = true, onNavigate }) {
 
   return <section className="history-container" aria-labelledby="history-title">
     <div className="history-header">
-      <div><h1 id="history-title">{t("观看记录")}</h1><p>{t("继续上次的故事。记录仅保存在这台电脑。")}</p></div>
+      <div className={accountSignedIn ? 'account-history-title' : 'duplicate-page-title'}>
+        <h1 id="history-title">{t("观看记录")}</h1>
+        {accountSignedIn && <span>{t("共 {0} 条观看记录", [rows.length])}</span>}
+        {mobile && <p>{t("继续上次的故事。记录仅保存在这台电脑。")}</p>}
+      </div>
       <div className="history-tools">
-        <select className="history-scope" value={scope} onChange={event => savePreferences({ ...preferences, scope: event.target.value })} disabled={checking || !!checkingRow || loading} aria-label={t("批量检测范围")}>
+        {accountSignedIn && <button className="btn btn-outline" type="button" disabled={refreshingAccount} onClick={refreshAccount}>
+          <RefreshCw size={15} className={refreshingAccount ? 'spin' : ''} />{t("刷新记录")}
+        </button>}
+        <select className="history-scope" value={scope} onChange={event => savePreferences({ ...preferences, scope: event.target.value })} disabled={checking || !!checkingRow || loading} aria-label={t("批量检测范围")} title={t("批量检测范围")}>
           <option value="all">{t("全部记录")}</option>
           <option value="latest">{t("仅最高季")}</option>
           <option value="unfinished">{t("仅未看完")}</option>
           <option value="skip-completed-low">{t("排除已看完低季")}</option>
         </select>
-        <button className="btn btn-outline" onClick={checkUpdates} disabled={checking || !!checkingRow || loading || !rows.length}>
+        <button className="btn btn-outline" onClick={checkUpdates} disabled={checking || !!checkingRow || loading || !rows.some(row => row.hasLocal !== false)}>
           <RefreshCw size={15} className={checking ? 'spin' : ''} />{t(checking ? '正在检查更新…' : '检查更新')}
         </button>
       </div>
     </div>
-    <p className="history-hint">{t("运行期间自动检查新集；同一部剧的多个季会共用一次续作搜索，已看完的低季每 24 小时检测一次。不同剧号的新一季标为“疑似续作”。批量检测范围只决定本次检查哪些记录，不会隐藏记录或清除已有红点。同组续作和疑似同剧汇总到组头，子级红点仅表示新增分集。可在设置中关闭检测或开启系统通知。")}</p>
+    {mobile && <p className="history-hint">{t("运行期间自动检查新集；同一部剧的多个季会共用一次续作搜索，已看完的低季每 24 小时检测一次。不同剧号的新一季标为“疑似续作”。批量检测范围只决定本次检查哪些记录，不会隐藏记录或清除已有红点。同组续作和疑似同剧汇总到组头，子级红点仅表示新增分集。可在设置中关闭检测或开启系统通知。")}</p>}
     <div className="history-filter-bar">
       <div className="history-filter" role="group" aria-label={t("观看进度筛选")}>
         {[
@@ -199,63 +238,93 @@ export default function WatchHistory({ active = true, onNavigate }) {
           ['completed', '已看完', completedCount],
         ].map(([value, label, count]) => <button key={value} type="button" aria-pressed={filter === value} disabled={loading} onClick={() => setFilter(value)}>{t(label)} {t(count)}</button>)}
       </div>
+      {accountSignedIn && <div className="account-history-tools">
+        <label className="account-history-search">
+          <Search size={15} aria-hidden="true" />
+          <input type="search" value={query} onChange={event => setQuery(event.target.value)} aria-label={t("搜索")} placeholder={t("输入剧名")} />
+        </label>
+        <div className="account-history-views" role="group" aria-label={t("显示方式")}>
+          {['cards', 'list'].map(mode => <button type="button" key={mode} aria-pressed={view === mode} onClick={() => {
+            setView(mode);
+            try { window.localStorage.setItem(ACCOUNT_VIEW_KEY, mode); } catch {}
+          }}>{t(mode === 'cards' ? '卡片' : '列表')}</button>)}
+        </div>
+      </div>}
       <label className="history-display-option" title={t("只调整当前列表；批量检测范围不变，也不会删除记录")}>
         <input type="checkbox" checked={hideLowSeasons} disabled={loading} onChange={event => savePreferences({ ...preferences, hideLowSeasons: event.target.checked })} />
         <span>{t("折叠同剧低季")}</span>
       </label>
     </div>
-    <p className="history-hint">{t("按最近观看时间排序，检查更新不改变观看顺序。同组提醒汇总到首个可见记录。")}{t("按当前最后一集的片尾进度判断；隐藏低季后，计数仅代表列表中的季，旧记录可能显示未看完。")}</p>
+    {mobile && <p className="history-hint">{t("按最近观看时间排序，检查更新不改变观看顺序。同组提醒汇总到首个可见记录。")}{t("按当前最后一集的片尾进度判断；隐藏低季后，计数仅代表列表中的季，旧记录可能显示未看完。")}</p>}
     {error && <div className="history-error" role="alert"><span>{t(error)}</span><button className="btn btn-outline btn-sm" onClick={load}>{t("重新加载")}</button></div>}
     {status && <p className="history-hint" role="status">{t(status)}</p>}
+    {accountSignedIn && syncError && <p className="history-hint" role="status">{t("账号进度同步未完成，将稍后重试。")}</p>}
     {checking && progress?.total > 0 && <p className="history-hint" role="status">{t("正在检查 ")}{t((progress.checked || 0) + (progress.failed || 0) + (progress.skipped || 0))} / {t(progress.total)}{t(progress.current ? `：${progress.current}` : '')}
     </p>}
     {t(loading ? <p role="status">{t("正在读取观看记录…")}</p> : !rows.length ? <div className="history-empty">
-      <Clock size={30} /><h2>{t("还没有观看记录")}</h2><p>{t("真正开始播放后，短剧和进度会出现在这里。")}</p>
+      <Clock size={30} /><h2>{t("还没有观看记录")}</h2>{mobile && <p>{t("真正开始播放后，短剧和进度会出现在这里。")}</p>}
       <button className="btn btn-primary" onClick={() => onNavigate?.('browse')}>{t("去发现短剧")}</button>
     </div> : !visibleRows.length ? <div className="history-empty" role="status">
-      <Clock size={30} /><h2>{t(emptyTitle)}</h2>
-      <button type="button" className="btn btn-outline" onClick={() => setFilter('all')}>{t("查看全部")}</button>
-    </div> : <ul className="history-list">{visibleRows.map(row => {
+      <Clock size={30} /><h2>{t(accountSignedIn && query.trim() ? '没有匹配的观看记录' : emptyTitle)}</h2>
+      <button type="button" className="btn btn-outline" onClick={() => { setFilter('all'); setQuery(''); }}>{t("查看全部")}</button>
+    </div> : <ul className="history-list" data-view={accountSignedIn ? view : 'list'}>{visibleRows.map(row => {
       const group = groupById.get(row.series_id);
       const groupHeadId = group[0].series_id;
       const isHead = visibleRows.find(item => groupById.get(item.series_id) === group) === row;
       const { sequels, similarSeries: similar, hasUnreadSequels } = suggestionsByGroup.get(group);
       const hasUpdates = row.unreadEpisodes > 0 || (isHead && hasUnreadSequels);
+      const menuId = `history-actions-${row.series_id}`;
+      const updateErrors = [
+        ["分集更新检查未完成：", row.lastEpisodeCheckError],
+        ["续作检查未完成：", row.lastSequelCheckError],
+      ].filter(([, message]) => message);
+      if (!updateErrors.length && row.lastCheckError) updateErrors.push(["更新检查未完成：", row.lastCheckError]);
       return <li className={`history-row ${!isHead ? 'history-child' : ''}`} key={row.series_id}>
       <div className="history-main">
-      <button className="history-resume" onClick={() => resume(row)} disabled={!active || !!opening || !!removing} aria-label={t(`继续观看 ${row.series_title} 第${row.vid_index}集${hasUpdates ? `，有更新${row.unreadEpisodes ? `，新增${row.unreadEpisodes}集` : '，发现疑似续作'}` : ''}`)}>
+      <button className="history-resume" onClick={() => resume(row)} disabled={!active || !!opening || !!removing} aria-label={row.vid_index > 0
+        ? t(`继续观看 ${row.series_title} 第${row.vid_index}集${hasUpdates ? `，有更新${row.unreadEpisodes ? `，新增${row.unreadEpisodes}集` : '，发现疑似续作'}` : ''}`)
+        : t('继续观看 {0}', [row.series_title])}>
         {row.cover ? <img className="history-cover" src={row.cover} alt="" loading="lazy" /> : <span className="history-cover history-cover-empty"><Play size={20} /></span>}
         <span className="history-copy">
           <span className="history-name">{hasUpdates && <span className="history-dot" role="img" aria-label={t("有更新")} />}{row.series_title}</span>
-          <span className="history-progress">{t("看到第 ")}{t(row.vid_index)}{t(" 集 / 共 ")}{t(row.total)}{t(" 集 · ")}{t(Math.floor((row.currentTime || 0) / 60))}:{t(String(Math.floor((row.currentTime || 0) % 60)).padStart(2, '0'))}</span>
-          <span className="history-time">{t("最近观看 ")}{t(new Date(row.updatedAt).toLocaleString(getLanguage(), { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' }))}{row.completed && <span className="history-completed">{t(" · 已看完")}</span>}</span>
+          <span className="history-progress">{row.vid_index > 0 && <>{t("看到第 ")}{t(row.vid_index)}{row.total > 0 && <>{t(" 集 / 共 ")}{t(row.total)}</>}{t(" 集 · ")}</>}{t(Math.floor((row.currentTime || 0) / 60))}:{t(String(Math.floor((row.currentTime || 0) % 60)).padStart(2, '0'))}</span>
+          <span className="history-time">{mobile && t("最近观看 ")}{t(new Date(row.updatedAt).toLocaleString(getLanguage(), { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' }))}{row.completed && <span className="history-completed">{t(" · 已看完")}</span>}</span>
           {t(decisions[row.series_id] === null ? <span className="history-group-state">{t("独立显示 · 手动")}</span> : group.length > 1 && group.some(item => Object.hasOwn(decisions, item.series_id)) && <span className="history-group-state">{t("手动分组")}</span>)}
           {row.unreadEpisodes > 0 && <span className="history-update">{t("新增 ")}{t(row.unreadEpisodes)}{t(" 集")}</span>}
         </span>
         <span className="history-action"><Play size={15} />{t(opening === row.series_id ? '打开中…' : '继续观看')}</span>
       </button>
       <div className="history-row-actions">
-        <div className="history-group-actions">
-        {group.length > 1 && isHead && <button className="btn btn-outline btn-sm" aria-expanded={!hideLowSeasons || !!expanded[groupHeadId]} onClick={() => { if (!hideLowSeasons) savePreferences({ ...preferences, hideLowSeasons: true }); setExpanded(value => ({ ...value, [groupHeadId]: hideLowSeasons ? !value[groupHeadId] : false })); }}>{t(!hideLowSeasons || expanded[groupHeadId] ? '折叠组' : '展开组')}</button>}
+        {group.length > 1 && isHead && <button className="btn btn-outline btn-sm history-fold" aria-expanded={!hideLowSeasons || !!expanded[groupHeadId]} onClick={() => { if (!hideLowSeasons) savePreferences({ ...preferences, hideLowSeasons: true }); setExpanded(value => ({ ...value, [groupHeadId]: hideLowSeasons ? !value[groupHeadId] : false })); }}>{t(!hideLowSeasons || expanded[groupHeadId] ? '折叠组' : '展开组')}</button>}
+        {!mobile && <button type="button" className="btn btn-outline btn-sm history-more" popovertarget={menuId}
+          aria-label={t("更多操作")} title={t("更多操作")}><span aria-hidden="true">…</span></button>}
+        <div className={mobile ? 'history-maintenance-actions' : 'desktop-popover history-menu'} id={menuId}
+          popover={mobile ? undefined : 'auto'} onClick={mobile ? undefined : event => {
+            const button = event.target.closest('button');
+            if (button && !button.disabled) event.currentTarget.hidePopover?.();
+          }}>
         {group.length > 1 && <button className="btn btn-outline btn-sm" onClick={() => decide(row.series_id, null)}>{t("独立显示")}</button>}
         {Object.hasOwn(decisions, row.series_id) && <button className="btn btn-outline btn-sm" onClick={() => decide(row.series_id, undefined)}>{t("恢复自动分组")}</button>}
-        </div>
-        <div className="history-maintenance-actions">
-        <button type="button" className="btn btn-outline btn-sm history-check" disabled={checking || !!checkingRow || !!removing || !!opening} aria-label={t(`检测《${row.series_title}》的更新`)} title={t("只检测这一条观看记录")} onClick={() => checkRow(row)}>
+        {row.hasLocal !== false && <button type="button" className="btn btn-outline btn-sm history-check" disabled={checking || !!checkingRow || !!removing || !!opening} aria-label={t(`检测《${row.series_title}》的更新`)} title={t("只检测这一条观看记录")} onClick={() => checkRow(row)}>
           <RefreshCw size={14} className={checkingRow === row.series_id ? 'spin' : ''} />{t(checkingRow === row.series_id ? '检测中…' : '检测')}
-        </button>
+        </button>}
         <button type="button" className="btn btn-outline btn-sm history-remove" disabled={!!removing || !!opening || !!checkingRow} aria-label={t(`移除观看记录《${row.series_title}》`)} title={t("仅移除观看记录，不删除视频文件")} onClick={() => remove(row)}>{t(removing === row.series_id ? '移除中…' : '移除')}</button>
         </div>
       </div>
       </div>
-      {isHead && !!sequels.length && <div className="history-sequels"><span>{t("疑似续作")}</span>{sequels.map(sequel => <button key={sequel.series_id} className="btn btn-outline btn-sm" disabled={!active || !!opening || !!removing} onClick={() => resume(sequel.origin, sequel)}>{sequel.series_title}</button>)}</div>}
-      {isHead && !!similar.length && <div className="history-sequels" title={t("名称相近，仅供核对；不会用于隐藏低季或批量归组")}>
-        <span>{t("疑似同剧（仅提示）")}</span>{similar.map(candidate => <button key={candidate.series_id} className="btn btn-outline btn-sm" disabled={!active || !!opening || !!removing} onClick={() => resume(candidate.origin, candidate)}>{candidate.series_title}</button>)}
-        {similar.filter(candidate => rows.some(item => item.series_id === candidate.series_id)).map(candidate => <button key={`group:${candidate.series_id}`} className="btn btn-outline btn-sm" onClick={() => decide(candidate.series_id, row.series_id)}>{t("确认《")}{candidate.series_title}{t("》为同剧")}</button>)}
-      </div>}
-      {row.lastEpisodeCheckError && <p className="history-check-error">{t("分集更新检查未完成：")}{t(row.lastEpisodeCheckError)}</p>}
-      {row.lastSequelCheckError && <p className="history-check-error">{t("续作检查未完成：")}{t(row.lastSequelCheckError)}</p>}
-      {!row.lastEpisodeCheckError && !row.lastSequelCheckError && row.lastCheckError && <p className="history-check-error">{t("更新检查未完成：")}{t(row.lastCheckError)}</p>}
+      {isHead && !!sequels.length && <Relations className={mobile ? "history-sequels" : "history-related"}>
+        {mobile ? <span>{t("疑似续作")}</span> : <summary>{t("疑似续作")} · {sequels.length}</summary>}
+        <div className="history-related-actions">{sequels.map(sequel => <button key={sequel.series_id} className="btn btn-outline btn-sm" disabled={!active || !!opening || !!removing} onClick={() => resume(sequel.origin, sequel)}>{sequel.series_title}</button>)}</div>
+      </Relations>}
+      {isHead && !!similar.length && <Relations className={mobile ? "history-sequels" : "history-related"} title={t("名称相近，仅供核对；不会用于隐藏低季或批量归组")}>
+        {mobile ? <span>{t("疑似同剧（仅提示）")}</span> : <summary>{t("疑似同剧（仅提示）")} · {similar.length}</summary>}
+        <div className="history-related-actions">{similar.map(candidate => <button key={candidate.series_id} className="btn btn-outline btn-sm" disabled={!active || !!opening || !!removing} onClick={() => resume(candidate.origin, candidate)}>{candidate.series_title}</button>)}
+        {similar.filter(candidate => rows.some(item => item.series_id === candidate.series_id)).map(candidate => <button key={`group:${candidate.series_id}`} className="btn btn-outline btn-sm" onClick={() => decide(candidate.series_id, row.series_id)}>{t("确认《")}{candidate.series_title}{t("》为同剧")}</button>)}</div>
+      </Relations>}
+      {!!updateErrors.length && <Relations className={mobile ? undefined : 'history-related history-check-summary'}>
+        {!mobile && <summary><AlertCircle size={14} />{t("检查未完成，可稍后重试")}</summary>}
+        {updateErrors.map(([label, message]) => <p className="history-check-error" key={label}>{t(label)}{t(message)}</p>)}
+      </Relations>}
     </li>; })}</ul>)}
   </section>;
 }

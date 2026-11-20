@@ -10,7 +10,7 @@ const reviewDate = value => {
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString(getLanguage(), { timeZone: 'Asia/Shanghai' });
 };
 
-export default function CommunityPanel({ seriesId, episodeId, title, cover, children, trailingAction }) {
+export default function CommunityPanel({ seriesId, episodeId, title, cover, compact = false }) {
   useLanguage();
   const id = String(seriesId || '');
   const panelId = useId();
@@ -68,9 +68,8 @@ export default function CommunityPanel({ seriesId, episodeId, title, cover, chil
 
   return <section className="community-panel" aria-label={t("公开剧评与本机收藏")}>
     <div className="community-heading">
-      <div><h3>{t("剧评与收藏")}</h3><p>{t("公开评论，只读。收藏仅保存在本机。")}</p></div>
+      <div><h3>{t("剧评与收藏")}</h3>{!compact && <p>{t("公开评论，只读。收藏仅保存在本机。")}</p>}</div>
       <div className="community-actions">
-        {t(children)}
         <button type="button" className="btn btn-outline" onClick={async () => {
           try {
             await navigator.clipboard.writeText(`https://hongguoduanju.com/detail?series_id=${encodeURIComponent(id)}`);
@@ -91,7 +90,6 @@ export default function CommunityPanel({ seriesId, episodeId, title, cover, chil
           if (opened && !episodeScope) setOpenedSeries('');
           else { setScope('series'); setOpenedSeries(id); }
         }}>{t(opened && !episodeScope ? '收起剧评' : '查看公开剧评')}</button>
-        {trailingAction && <div className="community-action-trailing">{t(trailingAction)}</div>}
       </div>
     </div>
     {library.error && <p className="community-error" role="alert">{t(library.error)}</p>}

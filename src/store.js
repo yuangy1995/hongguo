@@ -340,16 +340,6 @@ function saveSettings(settings, { clearProxyPassword = false } = {}) {
   }
 }
 
-function getAnnouncementState() {
-  const state = loadCache().announcement;
-  return state && typeof state === 'object' && !Array.isArray(state) ? structuredClone(state) : {};
-}
-
-function saveAnnouncementState(patch) {
-  loadCache().announcement = { ...getAnnouncementState(), ...patch };
-  flush();
-}
-
 function getTasks() {
   return loadCache().tasks;
 }
@@ -435,8 +425,6 @@ module.exports = {
   init,
   getSettings,
   saveSettings,
-  getAnnouncementState,
-  saveAnnouncementState,
   getTasks,
   saveTasks,
   getSeries,

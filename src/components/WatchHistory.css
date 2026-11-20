@@ -1,5 +1,6 @@
 .history-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 16px; }
 .history-header h1 { margin: 0 0 8px; }
+.history-header .account-history-title h1 { margin: 0; }
 .history-header p, .history-hint { color: var(--text-secondary); line-height: 1.65; }
 .history-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .history-scope { min-height: 38px; padding: 7px 30px 7px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-input); color: var(--text-primary); }

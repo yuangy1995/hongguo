@@ -25,6 +25,8 @@ function createHistoryService({
   send,
   safeErrorText,
   onNotificationClick,
+  accountHistory = () => ({ accountSignedIn: false }),
+  hideAccountHistory,
 }) {
   let refreshPromise = null;
   const itemChecks = new Map();
@@ -266,12 +268,21 @@ function createHistoryService({
 
   ipcMain.handle('remove-watch-history', async (_event, seriesId) => {
     try {
-      store.updatePlayback(map => { delete map[String(seriesId)]; });
+      store.updatePlayback(map => {
+        const sid = String(seriesId);
+        const hidden = hideAccountHistory?.(sid, map[sid]);
+        if (hidden) map[sid] = hidden;
+        else delete map[sid];
+      });
       send('watch-history-updated', { removedSeriesId: String(seriesId) });
       return { success: true };
     } catch (error) { return { success: false, error: error.message }; }
   });
-  ipcMain.handle('get-watch-history', async () => ({ success: true, results: rows() }));
+  ipcMain.handle('get-watch-history', async () => {
+    const localRows = rows();
+    const account = accountHistory(localRows);
+    return { success: true, accountSignedIn: account.accountSignedIn, results: account.results || localRows };
+  });
   ipcMain.handle('refresh-watch-history', async (_event, selected) => refresh({ force: true, scope: selected?.scope }));
   ipcMain.handle('check-watch-history-item', async (_event, seriesId) => {
     const sid = String(seriesId || '');

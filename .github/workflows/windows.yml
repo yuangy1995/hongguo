@@ -1,6 +1,17 @@
 # Hongguo Drama: desktop and Docker candidate; publication is coordinated separately.
 name: Windows x64 release candidate
 on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      build_only:
+        type: boolean
+        default: false
+      skip_playback:
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       source_sha:
@@ -164,7 +175,7 @@ jobs:
             dist/*.yml
             dist/*.blockmap
           key: ${{ steps.app-cache.outputs.cache-primary-key }}
-      - name: Verify real portable App queue and playback, fresh NSIS install, reinstall and real 1.80 upgrade
+      - name: Verify real portable App queue and playback, fresh NSIS install, reinstall and manual migration from 1.80
         if: ${{ !inputs.build_only }}
         env:
           HONGGUO_SKIP_PLAYBACK: ${{ inputs.skip_playback || false }}
@@ -182,7 +193,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist/windows-release | Out-Null
-          $version = (Get-Content package.json | ConvertFrom-Json).version -replace '^(\d+\.\d+)\.0$', '$1'
+          $version = (Get-Content package.json | ConvertFrom-Json).version
           Copy-Item "dist/红果短剧-$version-便携版.exe" "dist/windows-release/hongguo-downloader-$version-win-x64.exe"
           Compress-Archive -LiteralPath "dist/windows-release/hongguo-downloader-$version-win-x64.exe" -DestinationPath "dist/windows-release/hongguo-downloader-$version-win-x64.zip"
           Copy-Item "dist/hongguo-downloader-$version-win-x64-setup.exe" dist/windows-release/

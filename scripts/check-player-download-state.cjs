@@ -31,7 +31,7 @@ const start = async (f, props = {}) => {
   const ui = mount({ props: { target: { seriesId: 'A', vidIndex: 1, ts: 1 }, ...props }, apiOverrides: f.apiOverrides });
   ui.changed = f.changed; await ui.flush(); ui.metadata(); return ui;
 };
-const download = (ui, index = 1) => ui.find(n => n.props['aria-label'] === `第 ${index} 集`).props.onDoubleClick();
+const download = (ui, index = 1) => ui.find(n => n.props.onEpisodeDownload).props.onEpisodeDownload(index);
 const poll = async ui => { ui.changed(); await [...ui.timers.values()].find(t => t.delay === 2000).fn(); await ui.flush(); };
 const source = ui => ui.find(n => n.type === 'video').props.src;
 
@@ -78,17 +78,6 @@ function mountApp() {
     f.completed.add('A-1'); f.completed.add('B-1'); await poll(ui);
     assert.equal(source(ui), before, 'late reply must not replace the selected stream');
     assert.equal(ui.mediaCalls.play, plays); ui.unmount();
-  });
-  await test('double clicking an episode cancels the delayed single-click playback', async () => {
-    const f = fixture(), ui = await start(f);
-    const chip = ui.find(n => n.props['aria-label'] === '第 2 集');
-    chip.props.onClick();
-    const pending = chip.props.onDoubleClick();
-    assert.equal([...ui.timers.values()].some(timer => timer.delay === 250), false);
-    f.finish();
-    await pending;
-    await ui.flush();
-    ui.unmount();
   });
   for (const paused of [true, false]) await test(`download source swap retains ${paused ? 'pause' : 'play'} and second`, async () => {
     const f = fixture(), ui = await start(f); ui.media.currentTime = 37;

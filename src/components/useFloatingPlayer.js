@@ -85,6 +85,7 @@ export default function useFloatingPlayer(title, onChange, onBeforeMove) {
     try {
       child.document.title = latestTitle.current;
       child.document.documentElement.dataset.theme = document.documentElement.dataset.theme || 'light';
+      if (window.electronAPI?.platform !== 'android') child.document.documentElement.dataset.desktopPlayerPopup = '';
       for (const stylesheet of document.querySelectorAll('link[rel="stylesheet"], style')) {
         const copy = stylesheet.cloneNode(true);
         if (stylesheet.href) copy.href = stylesheet.href;

@@ -8,7 +8,6 @@ import ShortcutSettings from './ShortcutSettings';
 import StealthWakeRegion from './StealthWakeRegion.jsx';
 import CustomSources from './CustomSources';
 import BuiltinSources from './BuiltinSources';
-import AnnouncementSettings from './AnnouncementSettings';
 import { Settings, Folder, Check, Globe, X, RefreshCw, AlertCircle } from './icons';
 
 
@@ -49,10 +48,18 @@ function describeProxy(settings) {
   return { on: true, text: '接口/下载跟随启动环境，浏览器跟随系统' };
 }
 
+const SETTINGS_SECTIONS = [
+  ['appearance', '外观'], ['playback', '播放设置'], ['downloads', '下载设置'],
+  ['network', '来源与网络'], ['updates', '通知与更新'], ['data', '本机资料'],
+];
+
 function SettingsPage({ active = true, preview = false, appInfo = null, wakeRegionFocus = 0 }) {
   useLanguage();
   const danmakuSource = useDanmakuSource();
   const [settings, setSettings] = useState(null);
+  const [section, setSection] = useState('appearance');
+  const settingsPage = useRef(null);
+  useEffect(() => { if (wakeRegionFocus) setSection('playback'); }, [wakeRegionFocus]);
   const [saved, setSaved] = useState(false);
   const [proxyOpen, setProxyOpen] = useState(false);
   const [proxyDraft, setProxyDraft] = useState(null);
@@ -244,14 +251,23 @@ function SettingsPage({ active = true, preview = false, appInfo = null, wakeRegi
   const mode = proxyDraft ? proxyDraft.proxy_mode : 'system';
 
   return (
-    <div className="settings-container">
-      <div className="settings-header">
+    <div className="settings-container" ref={settingsPage}>
+      <div className="settings-header duplicate-page-title">
         <Settings size={22} />
-        <div><h2>{t("设置")}</h2><p className="page-description">{t("让下载、保存和网络连接，按你的习惯运行。")}</p></div>
+        <div><h2>{t("设置")}</h2></div>
       </div>
 
-      <section className="settings-card" aria-label={t("外观设置")}><AppearanceSettings active={active} /></section>
-      <fieldset className="settings-card" disabled={saving} aria-label={t("网络代理")}>
+      <div className="settings-layout">
+      <nav className="settings-sections" aria-label={t("设置分类")}>
+        {SETTINGS_SECTIONS.map(([id, name]) => <button type="button" key={id} aria-current={section === id ? 'page' : undefined}
+          onClick={() => {
+            setSection(id);
+            settingsPage.current?.closest('.main-content')?.scrollTo({ top: 0 });
+          }}>{t(name)}</button>)}
+      </nav>
+      <div className="settings-section-content" aria-label={t(SETTINGS_SECTIONS.find(([id]) => id === section)?.[1])}>
+      <section className="settings-card settings-appearance" aria-label={t("外观设置")} hidden={section !== 'appearance'}><AppearanceSettings active={active && section === 'appearance'} /></section>
+      <fieldset className="settings-card" disabled={saving} hidden={section !== 'network'} aria-label={t("网络代理")}>
         <div className="settings-group">
           <label className="settings-label">{t("网络代理")}</label>
           <div className="proxy-status-row">
@@ -262,12 +278,15 @@ function SettingsPage({ active = true, preview = false, appInfo = null, wakeRegi
             <button className="btn btn-outline btn-sm" onClick={openProxyModal}>
               <Globe size={15} />{t("配置代理")}</button>
           </div>
-          <p className="settings-hint">{t("手动代理用于接口、下载和应用内浏览器；跟随系统时，接口与下载读取启动时的环境代理及绕过规则，发现页等浏览器请求使用系统代理。保存后立即生效。")}</p>
+          <details className="settings-disclosure">
+            <summary>{t("代理说明")}</summary>
+            <p className="settings-hint">{t("手动代理用于接口、下载和应用内浏览器；跟随系统时，接口与下载读取启动时的环境代理及绕过规则，发现页等浏览器请求使用系统代理。保存后立即生效。")}</p>
+          </details>
         </div>
 
       </fieldset>
-      <ShortcutSettings active={active} />
-      <section className="settings-card" aria-label={t("画中画小窗设置")}>
+      <div hidden={section !== 'playback'}><ShortcutSettings active={active && section === 'playback'} /></div>
+      <section className="settings-card" aria-label={t("画中画小窗设置")} hidden={section !== 'playback'}>
         <div className="settings-group">
           <label className="settings-label" htmlFor="picture-in-picture-mode">{t("画中画小窗")}</label>
           <select id="picture-in-picture-mode" className="input-field select-field"
@@ -278,33 +297,34 @@ function SettingsPage({ active = true, preview = false, appInfo = null, wakeRegi
             <option value="native">{t("系统原生")}</option>
             <option value="custom">{t("应用自带")}</option>
           </select>
-          <p className="settings-hint" id="picture-in-picture-mode-hint">{t("选择立即自动保存。已打开的小窗不会被中断或切换，下次开启时生效。系统原生使用操作系统的画中画能力；应用自带可显示当前剧名，并支持返回主窗口。")}</p>
+          <p className="settings-hint" id="picture-in-picture-mode-hint">{t("自动保存。已打开的小窗不会被中断或切换，下次开启时生效。")}</p>
           {(pictureModeSaving || pictureModeNotice) && <p className="settings-hint" role="status">{t(pictureModeSaving ? '正在保存…' : pictureModeNotice)}</p>}
           {pictureModeError && <p className="appearance-error" role="alert">{t(pictureModeError)}</p>}
         </div>
       </section>
-      {window.electronAPI.platform !== 'android' && <section className="settings-card" aria-label={t('小窗模式')}>
-        <StealthWakeRegion active={active} focusRequest={wakeRegionFocus} />
+      {window.electronAPI.platform !== 'android' && <section className="settings-card" aria-label={t('小窗模式')} hidden={section !== 'playback'}>
+        <StealthWakeRegion active={active && section === 'playback'} focusRequest={wakeRegionFocus} />
       </section>}
-      <BuiltinSources />
-      <CustomSources active={active} />
-      <p className="settings-hint">{t("播放页顶部可开启小窗模式：窗口缩小、置顶并在支持的系统上跨虚拟桌面可见；鼠标移开时暂停隐藏，移回继续，Esc 或 Dock 可恢复主窗口。")}</p>
-      <fieldset className="settings-card" disabled={saving}>
-        <div className="settings-group">
+      <div className="settings-source-cards" hidden={section !== 'network'}>
+        <BuiltinSources />
+        <CustomSources active={active && section === 'network'} />
+      </div>
+      <fieldset className="settings-card settings-preferences" disabled={saving} hidden={section === 'appearance' || section === 'network'}>
+        <div className="settings-group" hidden={section !== 'playback'}>
           <span className="settings-label">{t("播放与缓存")}</span>
           <label className="proxy-switch-row"><input type="checkbox" checked={settings.cache_next_episode !== false} onChange={event => update('cache_next_episode', event.target.checked)} /><span className="proxy-switch-text">{t("缓存后续 2 集")}<em>{t("开始播放后最多预取接下来两集可在线播放的分集，减少连续切集等待；会使用网络流量。")}</em></span></label>
           <label className="proxy-switch-row"><input type="checkbox" checked={settings.compat_mode !== false} onChange={event => update('compat_mode', event.target.checked)} /><span className="proxy-switch-text">{t("自动兼容模式")}<em>{t("无法解码时尝试转码播放，解决部分黑屏有声问题。")}</em></span></label>
           <label className="proxy-switch-row"><input type="checkbox" checked={settings.auto_delete_watched === true} onChange={event => update('auto_delete_watched', event.target.checked)} /><span className="proxy-switch-text">{t("看完自动删除")}<em>{t("看完一集后删除该集已下载的视频、在线播放缓存和转码缓存。下载文件会永久删除；需要时可重新下载。保存后生效。")}</em></span></label>
           <label className="proxy-switch-row"><input type="checkbox" aria-label={t("优先使用红果 App 搜索")} checked={settings.search_app_enabled === true} onChange={event => update('search_app_enabled', event.target.checked)} /><span className="proxy-switch-text">{t("优先使用红果 App 搜索")}<em>{t("失败或空结果自动回退官网；关闭此项时，官网不可用仍会尝试 App 备用搜索。")}</em></span></label>
         </div>
-        <div className="settings-group">
+        <div className="settings-group" hidden={section !== 'playback'}>
           <span className="settings-label">{t("弹幕按钮设置")}</span>
           <div className="settings-inline-save">
           <label className="proxy-switch-row"><input type="checkbox" aria-label={t("显示弹幕按钮")} checked={settings.show_danmaku_controls !== false} onChange={event => update('show_danmaku_controls', event.target.checked)} /><span className="proxy-switch-text">{t("显示弹幕按钮")}<em>{t("保存后生效。关闭时隐藏弹幕及弹幕设置按钮，并停用弹幕；再次开启会恢复原有弹幕偏好。")}</em></span></label>
             <button type="button" className="btn btn-primary" aria-label={t("保存当前设置")} onClick={save}>{t(saving ? '保存中…' : saved ? '已保存' : '保存')}</button>
           </div>
         </div>
-        <div className="settings-group">
+        <div className="settings-group" hidden={section !== 'playback'}>
           <label className="settings-label" htmlFor="danmaku-source">{t("弹幕来源")}</label>
           <select id="danmaku-source" className="input-field select-field" value={danmakuSource} onChange={event => writeDanmakuSource(event.target.value)}>
             <option value="official">{t("时间轴弹幕")}</option><option value="comments">{t("本集评论（备用）")}</option>
@@ -317,7 +337,7 @@ function SettingsPage({ active = true, preview = false, appInfo = null, wakeRegi
             } catch (error) { setSaveError(error.message || '来源链接打开失败'); }
           }}>{t("弹幕实现参考 dawei233/hongguo-drama（GPL-3.0）")}</button>
         </div>
-        <div className="settings-group">
+        <div className="settings-group" hidden={section !== 'downloads'}>
           <label className="settings-label">{t("下载目录")}</label>
           <div className="folder-row">
             <input
@@ -336,7 +356,7 @@ function SettingsPage({ active = true, preview = false, appInfo = null, wakeRegi
             onChange={event => update('download_metadata', event.target.checked)} /><span className="proxy-switch-text">{t("普通下载保存整剧资料")}<em>{t("自动随视频保存封面、简介和 tvshow.nfo，不生成分集 NFO。可将下载目录设为已挂载的 NAS，程序会自动建剧名文件夹，无需再使用“下载到 NAS”。普通下载仍遵循看完自动删除设置。")}</em></span></label>
         </div>
 
-        <div className="settings-group">
+        <div className="settings-group" hidden={section !== 'downloads'}>
           <label className="settings-label">{t("文件命名规则")}</label>
           <div className="preset-row">
             {FORMAT_PRESETS.map((p) => (
@@ -359,7 +379,7 @@ function SettingsPage({ active = true, preview = false, appInfo = null, wakeRegi
           <p className="settings-hint">{t("可用变量：")}<code>{t("剧名")}</code> · <code>{t("集数")}</code>{t("（如 001）· ")}<code>{t("标题")}</code>{t("。每集保留独立集号，避免同名覆盖。")}</p>
         </div>
 
-        <div className="settings-group">
+        <div className="settings-group" hidden={section !== 'downloads'}>
           <label className="settings-label" htmlFor="default-download-quality">{t("默认下载清晰度")}</label>
           <select id="default-download-quality" className="input-field select-field"
             value={settings.download_quality || 'auto'} aria-describedby="default-download-quality-hint"
@@ -371,7 +391,7 @@ function SettingsPage({ active = true, preview = false, appInfo = null, wakeRegi
           <p className="settings-hint" id="default-download-quality-hint">{t("保存后用于新建下载任务，也可在下载时单独选择。红果片源所选清晰度不可用或下载失败时，自动尝试更低清晰度，并在下载管理中提示；已有文件不自动删除或覆盖。")}</p>
         </div>
 
-        <div className="settings-group">
+        <div className="settings-group" hidden={section !== 'downloads'}>
           <label className="settings-label">{t("最大并发下载数")}</label>
           <select
             className="input-field select-field"
@@ -387,14 +407,14 @@ function SettingsPage({ active = true, preview = false, appInfo = null, wakeRegi
         </div>
 
 
-        <div className="settings-group">
+        <div className="settings-group" hidden={section !== 'updates'}>
           <span className="settings-label">{t("追剧提醒")}</span>
           <label className="proxy-switch-row"><input type="checkbox" checked={settings.watch_updates_enabled !== false} onChange={event => update('watch_updates_enabled', event.target.checked)} /><span className="proxy-switch-text">{t("自动检查新集")}<em>{t("应用运行期间，每部剧约 6 小时检查一次；列表较多时分批检查")}</em></span></label>
           <label className="proxy-switch-row"><input type="checkbox" checked={settings.watch_sequels_enabled !== false} onChange={event => update('watch_sequels_enabled', event.target.checked)} /><span className="proxy-switch-text">{t("查找疑似新一季")}<em>{t("约每天按剧名搜索一次，仅提示同名且季数更高的剧；可能遗漏或误报")}</em></span></label>
           <label className="proxy-switch-row"><input type="checkbox" checked={settings.watch_notifications_enabled === true} onChange={event => update('watch_notifications_enabled', event.target.checked)} /><span className="proxy-switch-text">{t("发送系统通知")}<em>{t("默认关闭。开启后还需允许 macOS 通知；关闭不影响观看记录红点")}</em></span></label>
         </div>
 
-        <div className="settings-group">
+        <div className="settings-group" hidden={section !== 'data'}>
           <span className="settings-label">{t("配置文件位置")}</span>
           {settings.proxy_password_warning && <p className="alert alert-error" role="alert">{t(settings.proxy_password_warning)}</p>}
           <p className="settings-hint">{t("代理密码由本机系统安全存储加密；更换电脑后可能需要重新输入。")}</p>
@@ -407,12 +427,12 @@ function SettingsPage({ active = true, preview = false, appInfo = null, wakeRegi
         </div>
 
         {preview ? <>
-        <div className="settings-group">
+        <div className="settings-group" hidden={section !== 'updates'}>
           <span className="settings-label">{t("独立预览")}</span>
           <p className="settings-hint">{t("预览数据独立保存，不接收正式版更新，不会覆盖已安装的红果短剧。")}</p>
         </div>
         </> : <>
-        <div className="settings-group">
+        <div className="settings-group" hidden={section !== 'updates'}>
           <span className="settings-label">{t("检测更新")}</span>
           <label className="proxy-switch-row"><input type="checkbox" aria-label={t("自动检测更新")} checked={settings.app_updates_enabled !== false} onChange={event => update('app_updates_enabled', event.target.checked)} /><span className="proxy-switch-text">{t("自动检测更新")}<em>{t("启动时及运行期间每 6 小时检查正式新版。保存后生效；下载和重启安装都由你点击确认。")}</em></span></label>
           <button type="button" className="btn btn-outline" disabled={settings.app_updates_enabled === false} onClick={() => window.dispatchEvent(new CustomEvent('hongguo-check-app-update'))}><RefreshCw size={15} />{t("检查更新")}</button>
@@ -420,16 +440,17 @@ function SettingsPage({ active = true, preview = false, appInfo = null, wakeRegi
         </div>
         </>}
 
-        {!preview && <AnnouncementSettings />}
 
-        <div className="settings-footer">
+      </fieldset>
+        <div className="settings-footer" hidden={!dirty && !['playback', 'downloads', 'updates'].includes(section)}>
           {dirty && <span className="settings-hint" role="status">{t("有未保存的修改")}</span>}
           <button className="btn btn-primary" onClick={save}>
             {t(saving ? '正在保存…' : saved ? <><Check size={16} />{t(" 已保存")}</> : '保存设置')}
           </button>
         </div>
         {saveError && !proxyOpen && <p className="alert alert-error" role="alert">{t(saveError)}</p>}
-      </fieldset>
+      </div>
+      </div>
 
       {proxyOpen && proxyDraft && (
         <div className="proxy-modal-mask" onClick={() => !saving && closeProxy()}>

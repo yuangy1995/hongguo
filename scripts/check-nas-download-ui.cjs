@@ -129,6 +129,16 @@ test('NAS folder creation defaults on and can be disabled for an existing series
   ui.unmount();
 });
 
+test('compact NAS controls open instructions without reflowing the toolbar', () => {
+  const ui = mountNas({ props: { compact: true } });
+  const help = ui.nodes().find(node => node.props.popover === 'auto');
+  assert.equal(help.props.id, 'nas-description');
+  assert.ok(ui.nodes().some(node => node.props.popovertarget === help.props.id));
+  assert.equal(ui.button().props['aria-describedby'], 'nas-description');
+  assert.ok(ui.nodes().find(node => node.type === 'input' && node.props.type === 'checkbox'));
+  ui.unmount();
+});
+
 test('NAS download UI calls the bridge, reports results, and isolates series changes', async () => {
   const first = deferred();
   const ui = mountNas({ api: { downloadSeriesToNas: async (seriesId, quality) => {
@@ -230,12 +240,8 @@ test('NAS download UI calls the bridge, reports results, and isolates series cha
   assert.equal(ui.writesAfterUnmount(), 0, 'an async reply must not set state after unmount');
 
   const player = fs.readFileSync(path.join(root, 'src/components/Player.jsx'), 'utf8');
-  assert.match(player, /trailingAction=/);
   assert.match(player, /<NasDownload[^>]*quality=\{downloadQuality\}/s);
   assert.match(player, /disabled=\{qualityLoading\}/, 'Player must inherit the quality-loading disabled state');
-  const community = fs.readFileSync(path.join(root, 'src/components/CommunityPanel.jsx'), 'utf8');
-  assert.match(community, /aria-controls=\{panelId\}[^>]*>.*?<\/button>\s*\{trailingAction &&/s,
-    'NAS action must follow the public review button');
-  const communityCss = fs.readFileSync(path.join(root, 'src/components/CommunityPanel.css'), 'utf8');
-  assert.match(communityCss, /\.community-actions\s*\{[^}]*align-items:\s*flex-start/s);
+  assert.match(player, /<div className="player-footer-tools">[^]*<NasDownload/,
+    'NAS must sit in the utility row outside the review card');
 });

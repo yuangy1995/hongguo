@@ -60,6 +60,10 @@ async function clickControl(label) {
   await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point });
   delete result.stage;
 }
+const sampleNextFrame = `() => new Promise(resolve => {
+  const timer = setTimeout(() => { cancelAnimationFrame(frame); resolve(false); }, 100);
+  const frame = requestAnimationFrame(() => { clearTimeout(timer); resolve(true); });
+})`;
 async function keyHandoff(key, code, expectedSource) {
   result.stage = 'shortcut-handoff-' + key;
   await cdp('Page.bringToFront');
@@ -67,6 +71,7 @@ async function keyHandoff(key, code, expectedSource) {
   await evaluate(`(() => {
     const video = document.querySelector('video');
     const originalSource = video.currentSrc;
+    const nextFrame = ${sampleNextFrame};
     window.__keyHandoff = { key: ${JSON.stringify(key)}, trusted: false, ended: false, sourceChanged: false, nextPlaying: false, frames: 0, visibleFrames: 0, fullscreenLost: false };
     const result = window.__keyHandoff;
     const keydown = event => { if (event.key === result.key) result.trusted = event.isTrusted; };
@@ -77,7 +82,7 @@ async function keyHandoff(key, code, expectedSource) {
       const deadline = performance.now() + 8000;
       try {
         while (performance.now() < deadline) {
-          if (await window.__verificationNextFrame()) result.frames++;
+          if (await nextFrame()) result.frames++;
           const controls = getComputedStyle(document.querySelector('.player-controls'));
           if (Number(controls.opacity) > 0 || controls.pointerEvents !== 'none') result.visibleFrames++;
           if (document.fullscreenElement !== document.querySelector('.player-stage')) result.fullscreenLost = true;
@@ -151,7 +156,7 @@ async function realFootage(mediaDir, ffmpeg, ffprobe, dataFile) {
 (async () => {
   assert.equal(process.platform, 'win32');
   assert.equal(process.arch, 'x64');
-  const portable = path.join(root, `dist/${pkg.build.productName}-${pkg.version.replace(/^(\d+\.\d+)\.0$/, '$1')}-便携版.exe`);
+  const portable = path.join(root, `dist/${pkg.build.productName}-${pkg.version}-便携版.exe`);
   result.authenticode = execFileSync('pwsh.exe', ['-NoProfile', '-Command', '(Get-AuthenticodeSignature -LiteralPath $env:HONGGUO_VERIFY_EXE).Status.ToString()'], { encoding: 'utf8', env: { ...process.env, HONGGUO_VERIFY_EXE: portable } }).trim();
   assert.equal(result.authenticode, 'NotSigned');
   const exe = path.join(packaged, pkg.build.productName + '.exe');
@@ -254,7 +259,7 @@ async function realFootage(mediaDir, ffmpeg, ffprobe, dataFile) {
     });
   }
   // Keep remote notices from covering trusted pointer playback checks in this disposable profile.
-  fs.writeFileSync(path.join(profile, 'data.json'), JSON.stringify({ announcement: { preferences: { normalEnabled: false, emergencyEnabled: false } }, settings: { root: mediaDir, watch_updates_enabled: false, watch_sequels_enabled: false, cache_next_episode: false }, tasks: fixtureEpisodes, series: skipPlayback ? [] : [{ series_id: sid, series_title: 'Windows verification', episodes: fixtureEpisodes.map(task => ({ ...task.hongguoInfo, title: 'Real Hongguo acceptance footage' })) }] }));
+  fs.writeFileSync(path.join(profile, 'data.json'), JSON.stringify({ settings: { root: mediaDir, watch_updates_enabled: false, watch_sequels_enabled: false, cache_next_episode: false }, tasks: fixtureEpisodes, series: skipPlayback ? [] : [{ series_id: sid, series_title: 'Windows verification', episodes: fixtureEpisodes.map(task => ({ ...task.hongguoInfo, title: 'Real Hongguo acceptance footage' })) }] }));
   child = spawn(portable, ['--mute-audio', '--disable-renderer-backgrounding', '--disable-background-timer-throttling',
     '--disable-backgrounding-occluded-windows', '--user-data-dir=' + profile, '--remote-debugging-address=127.0.0.1',
     '--remote-debugging-port=9439', '--autoplay-policy=no-user-gesture-required'], { stdio: 'ignore' });
@@ -269,13 +274,6 @@ async function realFootage(mediaDir, ffmpeg, ffprobe, dataFile) {
   attachCdpResponses(socket);
   await new Promise((resolve, reject) => { socket.addEventListener('open', resolve, { once: true }); socket.addEventListener('error', reject, { once: true }); });
   await cdp('Page.bringToFront');
-  await evaluate(`(() => {
-    window.__verificationNextFrame = () => new Promise(resolve => {
-      const timer = setTimeout(() => { cancelAnimationFrame(frame); resolve(false); }, 100);
-      const frame = requestAnimationFrame(() => { clearTimeout(timer); resolve(true); });
-    });
-    return true;
-  })()`);
   for (let i = 0; i < 50; i++) {
     if (await evaluate('Boolean(window.electronAPI && document.querySelector("#root")?.children.length)')) break;
     await delay(100);
@@ -294,7 +292,6 @@ async function realFootage(mediaDir, ffmpeg, ffprobe, dataFile) {
   })()`);
   const settings = await evaluate('window.electronAPI.getSettings()');
   assert.equal(settings.root, mediaDir, 'Temporary profile must isolate all user state');
-  assert.deepEqual(await evaluate('window.electronAPI.getAnnouncementPreferences()'), { normalEnabled: false, emergencyEnabled: false }, 'Disposable playback profile must opt out of remote notices');
   assert(await evaluate('!document.querySelector(".announcement-dialog")'), 'Remote notice must not cover playback controls');
   assert(await evaluate('document.querySelector("#root").children.length > 0'));
   const media = await evaluate('window.electronAPI.getFfmpegStatus()');
@@ -447,6 +444,7 @@ async function realFootage(mediaDir, ffmpeg, ffprobe, dataFile) {
   const automaticHandoff = await evaluate(`(async () => {
     const video = document.querySelector('video');
     const originalSource = video.currentSrc;
+    const nextFrame = ${sampleNextFrame};
     const result = { ended: false, sourceChanged: false, nextPlaying: false, frames: 0, visibleFrames: 0, fullscreenLost: false };
     const ended = () => { result.ended = true; };
     video.addEventListener('ended', ended, { once: true });
@@ -455,7 +453,7 @@ async function realFootage(mediaDir, ffmpeg, ffprobe, dataFile) {
     const deadline = performance.now() + 8000;
     try {
       while (performance.now() < deadline) {
-        if (await window.__verificationNextFrame()) result.frames++;
+        if (await nextFrame()) result.frames++;
         const controls = getComputedStyle(document.querySelector('.player-controls'));
         if (Number(controls.opacity) > 0 || controls.pointerEvents !== 'none') result.visibleFrames++;
         if (document.fullscreenElement !== document.querySelector('.player-stage')) result.fullscreenLost = true;

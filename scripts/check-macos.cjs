@@ -169,10 +169,10 @@ function load(platform = 'darwin') {
     assert.equal(fs.readFileSync(dataFile, 'utf8'), durable, 'failed save must preserve all settings');
     assert.ok(messages.includes('storage-error'), 'failed save must notify the user');
   });
-  await check('Mac About panel displays only the public two-part version', async () => {
+  await check('Mac About panel displays the full fork version', async () => {
     const h = load();
     await h.ready();
-    assert.equal(h.about()?.applicationVersion, require('../package.json').version.replace(/^(\d+\.\d+)\.0$/, '$1'));
+    assert.equal(h.about()?.applicationVersion, require('../package.json').macRelease.version);
     assert.equal(h.about()?.version, '');
   });
   assert.equal(failures.length, 0, failures.join('; '));

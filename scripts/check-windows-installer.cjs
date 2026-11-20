@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const pkg = require('../package.json');
 const root = path.resolve(__dirname, '..');
-const releaseVersion = pkg.version.replace(/^(\d+\.\d+)\.0$/, '$1');
+const releaseVersion = pkg.version;
 const setupName = `hongguo-downloader-${releaseVersion}-win-x64-setup.exe`;
 const previousRelease = {
   version: '1.80.0',
@@ -15,11 +15,11 @@ const previousRelease = {
 
 function checkConfig() {
   const lock = require('../package-lock.json');
-  assert(require('semver').gt(pkg.version, previousRelease.version), 'Upgrade candidate must be newer than the real previous installer');
+  assert(require('semver').valid(pkg.version), 'The installer must use a full three-part release version');
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages[''].version, pkg.version);
   assert.equal(pkg.dependencies['electron-updater'], '6.8.9');
-  assert.deepEqual(pkg.build.publish, { provider: 'github', owner: 'jackotom', repo: 'hongguo-drama' });
+  assert.deepEqual(pkg.build.publish, { provider: 'github', owner: 'yuangy1995', repo: 'hongguo' });
   assert.equal(pkg.build.nsis.artifactName.replace('${version}', pkg.version).replace('${ext}', 'exe'), setupName);
   assert.equal(pkg.build.portable.artifactName.replace('${version}', pkg.version), '${productName}-' + releaseVersion + '-便携版.${ext}');
   assert(pkg.build.mac.target.some(target => target.target === 'zip' && target.arch.includes('arm64') && target.arch.includes('x64')));
@@ -203,19 +203,19 @@ async function runInstallerCheck() {
     assert.equal((await evaluate('window.electronAPI.getSettings()')).download_quality, '1080p');
     assert.equal(await evaluate('localStorage.getItem("hongguo-upgrade-smoke")'), 'from-1.80');
     const upgradedHistory = (await evaluate('window.electronAPI.getWatchHistory()')).results;
-    assert.equal(upgradedHistory.length, oldHistory.length, 'Upgrade must retain every history row');
+    assert.equal(upgradedHistory.length, oldHistory.length, 'Replacing the installation must retain every history row');
     for (const oldRecord of oldHistory) {
       const current = upgradedHistory.find(item => item.series_id === oldRecord.series_id);
-      assert.ok(current, 'Upgrade must retain the same history series');
-      for (const [key, value] of Object.entries(oldRecord)) assert.deepEqual(current[key], value, `Upgrade must retain history ${key}`);
+      assert.ok(current, 'Replacing the installation must retain the same history series');
+      for (const [key, value] of Object.entries(oldRecord)) assert.deepEqual(current[key], value, `Replacing the installation must retain history ${key}`);
       assert.equal(current.completed, false, 'Legacy history has no end-of-episode evidence');
     }
     assert.equal(fs.readFileSync(retainedFile, 'utf8'), 'Existing download must survive installation');
     await quitAppNormally();
     result.crossVersionUpgradeTested = true;
-    result.checks.push(`Real 1.80.0 → ${pkg.version} NSIS upgrade reports the new version and retains settings, viewing history, local storage and existing download`);
+    result.checks.push(`Real 1.80.0 → ${pkg.version} NSIS replacement reports the new version and retains settings, viewing history, local storage and existing download`);
     result.passed = true;
-    console.log('Windows NSIS smoke: PASS (installation, launch, metadata, same-version retention, real 1.80 upgrade retention)');
+    console.log('Windows NSIS smoke: PASS (installation, launch, metadata, same-version retention, real 1.80 migration retention)');
   } catch (error) {
     result.error = error.stack;
     throw error;

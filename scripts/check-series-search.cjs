@@ -111,6 +111,63 @@ function searchModule() { assert.ok(fs.existsSync(file), 'bounded search module 
     assert.equal(result.length, 4);
     assert.deepEqual(JSON.parse(JSON.stringify(result.map(item => [item.series_id, item.source, item.relevance]))), [[first.series_id, 'hongguo', 0], [first.series_id, 'hema', 0], [third.series_id, 'hongguo', 1], ['unrelated', 'hongguo', 3]]);
   });
+  await check('player season lookup combines earlier and later exact seasons across source pages', async () => {
+    const calls = [];
+    const { findSeriesSeasons } = searchModule();
+    const result = await findSeriesSeasons(second, [first], async (keyword, options) => {
+      calls.push([keyword, options.page, options.channel, options.cursor]);
+      if (options.page === 2) return ok([third, { series_id: '1999999', series_title: '双子房客番外第四季' }]);
+      if (keyword === '双子房客') return { ...ok([{ ...third, series_id: 'hema:3' }]), hasMore: true, channel: 'app', cursor: { offset: 20 } };
+      return ok([fourth]);
+    });
+    assert.deepEqual(result.results.map(item => [item.season, item.series_id, item.registered]), [
+      [1, first.series_id, true], [2, second.series_id, true], [3, third.series_id, false], [4, fourth.series_id, false],
+    ]);
+    assert.deepEqual(calls[1], ['双子房客', 2, 'app', { offset: 20 }]);
+    const offline = await findSeriesSeasons(second, [first], async () => { throw new Error('offline'); });
+    assert.equal(offline.partial, true);
+    assert.deepEqual(offline.results.map(item => item.season), [1, 2]);
+  });
+  await check('Hongguo player recognizes numbered seasons with a trailing particle from either direction', async () => {
+    const base = '我合成了全世界';
+    const seasons = [`${base}第1季`, `${base}第2季`, `${base}啊第3季`]
+      .map((series_title, i) => ({ series_id: String(1000010 + i), series_title }));
+    const unrelated = [
+      { series_id: '1000019', series_title: `${base}呀` },
+      { series_id: '1000020', series_title: `${base}番外第4季` },
+      { series_id: 'hema:21', series_title: `${base}啊第4季` },
+    ];
+    const { findSeriesSeasons } = searchModule();
+    for (const current of seasons) {
+      const queries = [];
+      const result = await findSeriesSeasons(current, [], async keyword => {
+        queries.push(keyword);
+        return ok(keyword === base ? [...unrelated, ...seasons] : []);
+      });
+      assert.equal(queries[0], base);
+      assert.deepEqual(result.results.map(item => item.series_id), seasons.map(item => item.series_id));
+      assert.equal(result.partial, false);
+    }
+    const offline = await findSeriesSeasons(seasons[2], seasons.slice(0, 2), async () => { throw new Error('offline'); });
+    assert.deepEqual(offline.results.map(item => item.season), [1, 2, 3]);
+    assert.equal(offline.partial, true);
+    assert.deepEqual(findSequels(seasons[1], [seasons[2]]), [], 'watch-history matching stays exact');
+  });
+  await check('season lookup retries the original title if a shorter query misses earlier seasons', async () => {
+    const base = '都重生了，谁还装富二代啊';
+    const query = base.normalize('NFKC');
+    const current = { series_id: '1000033', series_title: `${base}第三季` };
+    const earlier = { series_id: '1000031', series_title: base };
+    const calls = [];
+    const { findSeriesSeasons } = searchModule();
+    const result = await findSeriesSeasons(current, [], async (keyword, options) => {
+      calls.push([keyword, options.deadline]);
+      return ok(keyword === query ? [earlier] : []);
+    }, { deadline: Date.now() + 22000 });
+    assert.equal(calls[0][0], query.slice(0, -1));
+    assert.ok(calls.some(([keyword, deadline]) => keyword === query && deadline > calls[0][1]));
+    assert.deepEqual(result.results.map(item => item.season), [1, 3]);
+  });
   await check('real IPC supplements the selected source and exposes local-first sequel candidates', async () => {
     const mainPath = path.join(__dirname, '../main.js'), req = require('node:module').createRequire(mainPath);
     const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'hongguo-sequel-'));

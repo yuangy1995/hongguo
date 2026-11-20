@@ -11,7 +11,8 @@
  */
 const { app, BrowserWindow, BaseWindow, View, WebContentsView, globalShortcut, ipcMain: rawIpcMain, dialog, shell, session, protocol, Menu, Notification, screen, safeStorage } = require('electron');
 const path = require('path');
-const IS_PREVIEW = require('./package.json').name === 'hongguo-experience-preview';
+const appPackage = require('./package.json');
+const IS_PREVIEW = appPackage.name === 'hongguo-experience-preview';
 if (IS_PREVIEW) {
   app.setName('红果短剧预览');
   if (!app.commandLine.hasSwitch('user-data-dir')) {
@@ -68,8 +69,7 @@ const seriesSearch = require('./src/native/series-search');
 const { searchHongguo } = require('./src/native/hongguo-search');
 const { fitWindowBounds, getWindowScale, saveWindowZoom, restoreMainWindowBounds, rememberMainWindowBounds } = require('./src/native/window-layout');
 const { createEpisodePanelController } = require('./src/native/episode-panel');
-const { availableRelease } = require('./src/native/app-update');
-const { createAnnouncementService } = require('./src/native/app-announcements');
+const { appUpdateSource, availableRelease } = require('./src/native/app-update');
 const { fetchPublicDetails } = require('./src/native/public-details');
 const { fetchEpisodeComments } = require('./src/native/episode-comments');
 const { fetchDanmaku, setDeviceIdentityFile } = require('./src/native/danmaku');
@@ -79,7 +79,10 @@ const mediaAccess = require('./src/native/media-access').createMediaAccess(proce
 const rendererSecurity = require('./src/native/renderer-security').createRendererSecurity(
   path.join(__dirname, 'dist-react', 'index.html'), process.env.VITE_DEV_SERVER_URL);
 const attachFloatingPlayerWindow = require('./src/native/floating-player-window');
-const APP_VERSION = app.getVersion() || '1.0.0';
+const runtimeVersion = app.getVersion();
+const APP_VERSION = (process.platform === 'darwin' && !app.isPackaged && runtimeVersion === appPackage.version
+  ? appPackage.macRelease?.version : runtimeVersion) || runtimeVersion || '1.0.0';
+const APP_UPDATE_SOURCE = appUpdateSource();
 
 for (const level of ['log', 'warn', 'error']) {
   if (typeof console[level] !== 'function') continue;
@@ -103,6 +106,9 @@ let updateDownloadGeneration = 0;
 let pendingUpdateOperations = 0;
 let quitCleanup = null;
 let quitReady = false;
+let quitAccountReady = false;
+let exitAccountSync = null;
+let accountCheckpoint = null;
 let mergeTempCleanup = null;
 const UPDATE_BLOCKED_CHANNELS = new Set(['hongguo-download-batch', 'download-single-episode', 'download-following-episodes', 'download-series-to-nas', 'retry-task', 'retry-tasks', 'resume-all', 'merge-series', 'transcode-for-playback', 'prepare-online-play', 'start-casting', 'save-settings', 'set-boss-key']);
 const ipcMain = {
@@ -1846,6 +1852,15 @@ ipcMain.handle('find-series-sequels', async (_event, seriesId, options = {}) => 
     { localOnly: options?.localOnly === true, deadline });
 });
 
+ipcMain.handle('find-series-seasons', async (_event, seriesId, options = {}) => {
+  const entry = visibleSeries().find(item => String(item.series_id) === String(seriesId));
+  if (!entry) return { unsupported: true, results: [] };
+  const deadline = Date.now() + 22000;
+  return seriesSearch.findSeriesSeasons(entry, visibleSeries(),
+    (kw, call) => searchAtSource(kw, { deadline, ...call, source: watchHistory.sourceOf(String(entry.series_id)) }),
+    { localOnly: options?.localOnly === true, deadline });
+});
+
 // 搜索选中某部剧后，拉取完整分集并登记档案
 ipcMain.handle('search-resolve', async (event, seriesId) => {
   try {
@@ -2848,14 +2863,40 @@ ipcMain.handle('save-playback-position', async (event, seriesId, vidIndex, curre
     const sid = String(seriesId);
     const series = seriesRegistry.find(item => String(item.series_id) === sid);
     if (!series) return { success: false, error: '未找到短剧档案' };
-    store.updatePlayback(map => {
-      map[sid] = watchHistory.recordPlayback(map[sid], series, Number(vidIndex), Number(currentTime), Date.now(), metadata);
+    const saved = store.updatePlayback(map => {
+      const record = watchHistory.recordPlayback(map[sid], series, Number(vidIndex), Number(currentTime), Date.now(), metadata);
+      const trusted = mainWindow && event.sender === mainWindow.webContents && event.senderFrame === mainWindow.webContents.mainFrame;
+      map[sid] = trusted && accountController ? accountController.trackPlayback(series, record, metadata) : record;
+      return map[sid];
     });
+    accountController?.recordProgressForTest(series, saved, metadata);
+    if (metadata?.syncOnPause === true) void accountController?.syncProgress({ afterCurrent: true });
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
   }
 });
+
+ipcMain.handle('account-sync-checkpoint-ready', (_event, id) => {
+  if (accountCheckpoint?.id === id) accountCheckpoint.finish();
+});
+
+function syncAccountOnExit() {
+  if (exitAccountSync) return exitAccountSync;
+  if (!accountController?.isSignedIn()) return null;
+  const checkpoint = new Promise(resolve => {
+    if (!mainWindow?.webContents?.send || mainWindow.webContents.isDestroyed()) { resolve(); return; }
+    const id = randomUUID();
+    const finish = () => { clearTimeout(timer); accountCheckpoint = null; resolve(); };
+    const timer = setTimeout(finish, 1500);
+    accountCheckpoint = { id, finish };
+    sendToRenderer('capture-account-sync-checkpoint', id);
+  });
+  exitAccountSync = checkpoint.then(() => accountController.flushProgress()).catch(error => {
+    console.warn('[Account] 退出前同步未完成:', safeErrorText(error?.message));
+  }).finally(() => { exitAccountSync = null; });
+  return exitAccountSync;
+}
 
 ipcMain.handle('get-playback-position', async (event, seriesId) => {
   const sid = String(seriesId);
@@ -4348,6 +4389,11 @@ const historyService = createHistoryService({
   searchAtSource,
   send: (...args) => sendToRenderer(...args),
   safeErrorText,
+  accountHistory: rows => ({
+    accountSignedIn: !!accountController?.isSignedIn(),
+    results: accountController?.mergedHistory(rows) || rows,
+  }),
+  hideAccountHistory: (sid, previous) => accountController?.hideAccountHistory(sid, previous),
   onNotificationClick: () => {
     if (!mainWindow || mainWindow.isDestroyed()) createWindow();
     if (mainWindow.isMinimized()) mainWindow.restore();
@@ -4366,11 +4412,15 @@ function refreshWatchHistory(forceOrOptions = false) {
   return historyService.refresh(forceOrOptions);
 }
 
+const accountProgressTestEnabled = app.commandLine.hasSwitch?.('account-progress-sync-test')
+  && app.commandLine.hasSwitch?.('user-data-dir')
+  && fs.existsSync(path.join(app.getPath('userData'), '.account-progress-sync-test'));
 accountController = createAccountController({
   ipcMain,
   app,
   session,
   safeStorage,
+  platform: process.platform,
   BrowserWindow,
   createAccountService,
   safeMessage: accountSafeMessage,
@@ -4381,6 +4431,36 @@ accountController = createAccountController({
   navigateToPlayer,
   send: (...args) => sendToRenderer(...args),
   applyProxyToSession: ses => applyProxyToSession(proxyManager.desired || resolveProxyConfig(getCurrentSettings()), [ses]),
+  progressSync: accountProgressTestEnabled ? undefined : {
+    getPlayback: store.getPlayback, updatePlayback: store.updatePlayback, canSync: () => !proxyStartupFallback,
+    historyFilePath: () => path.join(app.getPath('userData'), 'account-history-local.json'),
+  },
+  progressTest: accountProgressTestEnabled ? {
+    allowed: event => !!mainWindow && event.sender === mainWindow.webContents
+      && event.senderFrame === mainWindow.webContents.mainFrame,
+    async confirm({ local, cloud, direction }) {
+      const localPosition = `第 ${local.vid_index} 集，${Math.floor(local.currentTime)} 秒`;
+      const remotePosition = cloud.vid_index > 0 ? `第 ${cloud.vid_index} 集，${Math.floor(cloud.currentTime)} 秒` : `${Math.floor(cloud.currentTime)} 秒`;
+      const { response } = await dialog.showMessageBox({
+        type: 'question',
+        message: `同步《${local.series_title}》的一条测试进度？`,
+        detail: `本机进度 ${localPosition}\n红果账号进度 ${remotePosition}\n${direction === 'upload' ? '本次会更新测试账号云端的这条观看记录。' : '本次会更新测试版在本机保存的这条观看记录。'}`,
+        buttons: ['取消', '确认同步'],
+        defaultId: 0,
+        cancelId: 0,
+      });
+      return response === 1;
+    },
+    saveLocal(local, cloud, episodeIndex) {
+      const series = seriesRegistry.find(item => String(item.series_id) === local.series_id);
+      store.updatePlayback(map => {
+        const previous = map[local.series_id];
+        if (!series || previous?.updatedAt !== local.updatedAt) throw new Error('本机进度已变更，请重新开始。');
+        map[local.series_id] = watchHistory.recordPlayback(previous, series, episodeIndex, cloud.currentTime, cloud.updatedAt);
+      });
+      sendToRenderer('watch-history-updated');
+    },
+  } : undefined,
 });
 
 // ===== IPC：设置 =====
@@ -5070,24 +5150,6 @@ ipcMain.handle('open-folder', async (event, taskId) => {
   return { success: false, error: '文件夹不存在' };
 });
 
-// ===== 远程公告：固定公共 JSON，普通和紧急偏好独立于 settings =====
-const appAnnouncements = createAnnouncementService({
-  store,
-  version: APP_VERSION,
-  request: (url, options) => axios.get(url, options),
-  isEnabled: () => !IS_PREVIEW && !proxyStartupFallback,
-});
-ipcMain.handle('check-announcements', (_event, options) => appAnnouncements.checkAnnouncements(options));
-ipcMain.handle('get-current-announcement', () => appAnnouncements.getCurrentAnnouncement());
-ipcMain.handle('acknowledge-announcement', (_event, payload) => appAnnouncements.acknowledgeAnnouncement(payload));
-ipcMain.handle('dismiss-announcement', (_event, payload) => appAnnouncements.dismissAnnouncement(payload));
-ipcMain.handle('get-announcement-preferences', () => appAnnouncements.getAnnouncementPreferences());
-ipcMain.handle('set-announcement-preferences', (_event, patch) => {
-  const result = appAnnouncements.setAnnouncementPreferences(patch);
-  if (result.success) sendToRenderer('announcement-preferences-changed', result.preferences);
-  return result;
-});
-
 // ===== 应用内更新：固定官方源，下载和重启均由用户确认 =====
 let updateRequest = null;
 let latestAppRelease = null;
@@ -5097,7 +5159,7 @@ function appUpdateSupport() {
   else if (process.platform === 'win32' && (portableConfig.mode === 'portable' || portableConfig.portableDir
     || process.env.PORTABLE_EXECUTABLE_FILE || process.env.PORTABLE_EXECUTABLE_DIR)) reason = '便携版需手动更新。请先退出旧程序，再运行发布页中的 setup 安装包，并从安装后生成的快捷方式启动；安装版支持后续应用内更新。若仍用便携版，请完整解压新版并直接运行新版文件。';
   else if (!['darwin', 'win32'].includes(process.platform)) reason = '当前系统请前往发布页手动更新。';
-  else if (process.platform === 'darwin' && (process.execPath.startsWith('/Volumes/') || process.execPath.includes('/AppTranslocation/'))) reason = '请先将应用放入“应用程序”文件夹后重新打开，再使用应用内更新。';
+  else if (process.platform === 'darwin') reason = 'Mac 版可检查更新，请前往发布页下载并安装新版。';
   return { supported: !reason, reason };
 }
 function appUpdateState() {
@@ -5113,6 +5175,7 @@ function getAppUpdateInstaller() {
     appUpdateInstaller = require('./src/native/app-update-installer').createUpdateInstaller({
       updater: appUpdater,
       currentVersion: APP_VERSION,
+      source: APP_UPDATE_SOURCE,
       isEnabled: () => !IS_PREVIEW && getCurrentSettings().app_updates_enabled !== false,
       installBlocker: () => {
         if (pendingUpdateOperations) return '正在处理任务或保存设置，请稍后再安装更新。';
@@ -5160,20 +5223,22 @@ ipcMain.handle('check-app-update', async event => {
     return { enabled: false, release: null };
   }
   if (!updateRequest) {
-    updateRequest = axios.get('https://api.github.com/repos/jackotom/hongguo-drama/releases/latest', {
+    const releaseTagPrefix = `${APP_UPDATE_SOURCE.releasesUrl}/tag/`;
+    updateRequest = axios.get(APP_UPDATE_SOURCE.latestApiUrl, {
       timeout: 10000, maxRedirects: 0, maxContentLength: 1024 * 1024,
       headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Hongguo-Drama-Update-Check' },
-    }).catch(() => axios.get('https://github.com/jackotom/hongguo-drama/releases/latest', {
+    }).catch(() => axios.get(`${APP_UPDATE_SOURCE.releasesUrl}/latest`, {
       // GitHub's public release endpoint does not consume the anonymous API quota.
       timeout: 10000, maxRedirects: 0, maxContentLength: 1024 * 1024,
       headers: { Accept: 'application/json', 'User-Agent': 'Hongguo-Drama-Update-Check' },
       validateStatus: status => status === 200 || status === 302,
     }).then(response => {
       if (response.status !== 302) return response;
-      const tag = /^https:\/\/github\.com\/jackotom\/hongguo-drama\/releases\/tag\/(v?\d+\.\d+(?:\.\d+)?)$/.exec(response.headers.location || '');
-      if (!tag) throw new Error('Unexpected update redirect');
-      return { data: { tag_name: tag[1] } };
-    })).then(response => ({ release: availableRelease(response.data, APP_VERSION), error: '' }))
+      const location = response.headers.location;
+      const tag = typeof location === 'string' && location.startsWith(releaseTagPrefix) ? location.slice(releaseTagPrefix.length) : '';
+      if (!/^v?\d+\.\d+(?:\.\d+)?$/.test(tag)) throw new Error('Unexpected update redirect');
+      return { data: { tag_name: tag } };
+    })).then(response => ({ release: availableRelease(response.data, APP_VERSION, APP_UPDATE_SOURCE), error: '' }))
       .catch(() => ({ release: null, error: '暂时无法检查更新，请检查网络后重试。' }))
       .finally(() => { updateRequest = null; });
   }
@@ -5186,7 +5251,7 @@ ipcMain.handle('open-app-update', async event => {
   if (IS_PREVIEW || !mainWindow || event.sender !== mainWindow.webContents || getCurrentSettings().app_updates_enabled === false) {
     return { success: false, error: '更新信息已失效，请稍后重试' };
   }
-  try { await shell.openExternal(latestAppRelease?.url || 'https://github.com/jackotom/hongguo-drama/releases/latest'); return { success: true }; }
+  try { await shell.openExternal(latestAppRelease?.url || `${APP_UPDATE_SOURCE.releasesUrl}/latest`); return { success: true }; }
   catch { return { success: false, error: '无法打开浏览器，请稍后重试' }; }
 });
 
@@ -5292,7 +5357,7 @@ ipcMain.handle('set-boss-key', (_event, value) => {
   settingsSaveQueue = result.then(() => {});
   return result;
 });
-app.on('will-quit', () => bossKey.dispose());
+app.on('will-quit', () => { accountController?.stopProgressSync(); bossKey.dispose(); });
 function syncMainWindowScale() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const scale = getWindowScale(getCurrentSettings().ui_zoom);
@@ -5431,10 +5496,23 @@ function createWindow() {
     page.loadFile(path.join(__dirname, 'dist-react', 'index.html'));
   }
 
+  const closingWindow = mainWindow;
+  let closeAfterSync = false;
+  let closeSyncPending = false;
   mainWindow.on('close', event => {
     if (process.platform !== 'darwin' && !quitReady) {
       event.preventDefault();
       app.quit();
+    } else if (process.platform === 'darwin' && !quitReady && !closeAfterSync) {
+      const syncing = syncAccountOnExit();
+      if (!syncing) return;
+      event.preventDefault();
+      if (closeSyncPending) return;
+      closeSyncPending = true;
+      void syncing.finally(() => {
+        closeAfterSync = true;
+        if (!closingWindow.isDestroyed()) closingWindow.close();
+      });
     }
   });
   mainWindow.on('closed', () => {
@@ -5479,6 +5557,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     startupStage = '初始化网络';
     const proxyStartup = await applyProxyForStartup(settings);
     proxyStartupFallback = proxyStartup.fallback;
+    accountController.startProgressSync();
     if (proxyStartup.fallback) console.warn('[Proxy] 启动代理不可用，已临时直连:', proxyStartup.reason);
     else {
       // 启动后自动接着跑「等待中」的任务（上次未下完的队列），无需手动点启动
@@ -5503,7 +5582,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     });
 
     if (process.platform === 'darwin') {
-      app.setAboutPanelOptions?.({ applicationVersion: APP_VERSION.replace(/^(\d+\.\d+)\.0$/, '$1'), version: '' });
+      app.setAboutPanelOptions?.({ applicationVersion: APP_VERSION, version: '' });
       applyInterfaceLanguage(/^zh(?:[-_.@]|$)/i.test(app.getPreferredSystemLanguages?.()[0] || app.getLocale()) ? 'zh-CN' : 'en');
     }
     // Warm the official-host trusted DNS cache before the first catalog card request.
@@ -5546,6 +5625,16 @@ app.on('window-all-closed', () => {
 app.on('before-quit', event => {
   casting.close();
   if (quitCleanup) { event.preventDefault(); return; }
+  if (quitAccountReady === 'pending') { event.preventDefault(); return; }
+  if (!quitAccountReady) {
+    const syncing = syncAccountOnExit();
+    if (syncing) {
+      event.preventDefault();
+      quitAccountReady = 'pending';
+      void syncing.finally(() => { quitAccountReady = true; app.quit(); });
+      return;
+    }
+  }
   const jobs = [...compatPreparing.values()];
   const onlineJobs = [...onlineWork, ...onlinePreparing.values()];
   const pending = [...jobs.map(job => job.promise), ...onlineJobs.map(job => job.promise), ...mergeRuns.values(), ...downloadRuns.values()];
@@ -5557,6 +5646,7 @@ app.on('before-quit', event => {
   if (downloading) {
     try { pauseAllTasks(); }
     catch (_) {
+      quitAccountReady = false;
       dialog.showErrorBox('退出未完成', '无法保存下载暂停状态，已取消本次退出。请检查本地存储后重试。');
       return;
     }
@@ -5577,6 +5667,9 @@ app.on('before-quit', event => {
     clearTimeout(timer);
     quitCleanup = null;
     if (completed) app.quit();
-    else dialog.showErrorBox('退出未完成', '任务清理超过 10 秒，已取消本次退出。应用未强制关闭，原始分集保留；任务仍在收尾，请稍后再次退出。');
+    else {
+      quitAccountReady = false;
+      dialog.showErrorBox('退出未完成', '任务清理超过 10 秒，已取消本次退出。应用未强制关闭，原始分集保留；任务仍在收尾，请稍后再次退出。');
+    }
   });
 });

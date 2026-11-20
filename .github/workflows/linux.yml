@@ -1,6 +1,14 @@
 # Hongguo Drama: build and verify the frozen desktop/Docker source.
 name: Linux x64 AppImage candidate
 on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      build_only:
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       source_sha:
@@ -75,7 +83,7 @@ jobs:
         run: xvfb-run -a node scripts/check-linux-appimage.cjs
       - name: Archive frozen source and asset digests
         run: |
-          version=$(node -p "require('./package.json').version.replace(/\.0$/, '')")
+          version=$(node -p "require('./package.json').version")
           git archive --format=zip --output="dist/hongguo-downloader-$version-linux-source.zip" HEAD
           printf '%s\n' "$GITHUB_SHA" > dist/SOURCE-SHA.txt
           sha256sum dist/*.AppImage dist/*source.tar.gz dist/*-linux-source.zip dist/SOURCE-SHA.txt > dist/LINUX-SHA256SUMS.txt

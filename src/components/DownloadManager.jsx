@@ -2,7 +2,7 @@ import { t, useLanguage, getLanguage } from '../i18n';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import useDialogKeyboard from './useDialogKeyboard';
 import './DownloadManager.css';
-import { Download, Trash2, RefreshCw, X, Film, Square, Folder, Zap, CheckSquare, Play, Pause, Layers } from './icons';
+import { AlertCircle, Check, Clock, Download, Trash2, RefreshCw, X, Film, Square, Folder, Zap, CheckSquare, Play, Pause, Layers, ChevronDown } from './icons';
 
 const STATUS_TEXT = {
   pending: '等待中',
@@ -61,6 +61,7 @@ function fmtBytes(bytes) {
 const PAGE_SIZE = 100;
 
 function DownloadManager({ onNavigate, active = true }) {
+  const mobile = window.electronAPI?.platform === 'android';
   useLanguage();
   const [tasks, setTasks] = useState([]);
   const [selected, setSelected] = useState(new Set());
@@ -80,6 +81,7 @@ function DownloadManager({ onNavigate, active = true }) {
   const [loadError, setLoadError] = useState('');
   const toastTimerRef = useRef(null);
   const moreActionsRef = useRef(null);
+  const usageNoticeRef = useRef(null);
   const mergeRequestRef = useRef(false);
   const mergeDialogGenerationRef = useRef(0);
   const activeRef = useRef(active);
@@ -90,6 +92,13 @@ function DownloadManager({ onNavigate, active = true }) {
 
   useEffect(() => {
     const menu = moreActionsRef.current;
+    if (!mobile) {
+      if (!active) {
+        menu?.hidePopover?.();
+        usageNoticeRef.current?.hidePopover?.();
+      }
+      return;
+    }
     const close = () => { if (menu) menu.open = false; };
     if (!active) { close(); return; }
     const outside = event => { if (!menu?.contains(event.target)) close(); };
@@ -108,7 +117,7 @@ function DownloadManager({ onNavigate, active = true }) {
       document.removeEventListener('keydown', escape);
       window.removeEventListener('blur', close);
     };
-  }, [active]);
+  }, [active, mobile]);
 
   const refresh = useCallback(async () => {
     const request = ++requests.current.tasks;
@@ -508,21 +517,41 @@ function DownloadManager({ onNavigate, active = true }) {
 
   useDialogKeyboard(active && !!(confirmAsk || mergeAsk), () => { setConfirmAsk(null); closeMergeDialog(); }, '.dm-container .player-confirm');
 
+  const MoreActions = mobile ? 'details' : 'div';
+  const statusCounts = [
+    ['active', '进行中', activeCount, Download],
+    ['done', '已完成', completedCount, Check],
+    ['fail', '失败/停止', failedCount, AlertCircle],
+  ];
+  if (retryingCount > 0) statusCounts.splice(1, 0, ['retry', '等待重试', retryingCount, Clock]);
+
   return (
     <div className="dm-container">
       <div className="dm-header">
-        <div className="dm-title">
+        <div className="dm-title duplicate-page-title">
           <h2>{t("下载管理")}</h2>
         </div>
         <div className="dm-stats">
-          <span className="stat stat-active">{t("进行中 ")}{t(activeCount)}</span>
-          {retryingCount > 0 && <span className="stat stat-active">{t("等待重试 ")}{t(retryingCount)}</span>}
-          <span className="stat stat-done">{t("已完成 ")}{t(completedCount)}</span>
-          <span className="stat stat-fail">{t("失败/停止 ")}{t(failedCount)}</span>
+          {statusCounts.map(([status, label, count, Icon]) =>
+            <span className={`dm-stat dm-stat-${status}`} data-empty={count === 0} key={status}>
+              <Icon size={14} aria-hidden="true" />
+              <span>{t(label)}{' '}</span><strong>{t(count)}</strong>
+            </span>)}
         </div>
+        {!mobile && <button type="button" className="btn btn-outline btn-sm" popovertarget="dm-usage-notice">
+          <AlertCircle size={15} />{t("下载说明")}
+        </button>}
       </div>
 
-      <div className="dm-usage-notice" role="note" aria-label={t("下载风险与使用倡议")}>
+      <div id="dm-usage-notice" className={`dm-usage-notice${mobile ? '' : ' desktop-popover'}`}
+        ref={usageNoticeRef} popover={mobile ? undefined : 'auto'} role={mobile ? 'note' : 'dialog'}
+        aria-label={t(mobile ? "下载风险与使用倡议" : "下载说明")}>
+        {!mobile && <header className="dm-usage-heading">
+          <strong>{t("下载说明")}</strong>
+          <button type="button" className="icon-btn" popovertarget="dm-usage-notice" popovertargetaction="hide" aria-label={t("关闭")}>
+            <X size={16} />
+          </button>
+        </header>}
         <p><strong>{t("临时故障会自动重试。")}</strong>{t("红果片源下载遇到断网、超时或传输不完整时，普通故障最多追加 3 次重试，分别等待 10、30、60 秒；注册拒绝或空响应最多追加 6 轮重试，分别等待 15、30、60、120、300、600 秒；来源暂不可用时等待 3、8、15 分钟。等待期间可停止或手动重试，但共享冷却可能让手动重试延后开始。权限限制、磁盘错误等需手动处理；重试后仍失败的任务会保留。")}</p>
         <p>{t("本软件用于学习研究，建议体验后 24 小时内自行删除；请勿冒充官方或以虚假授权名义收费。开源权利义务以 GPLv3 为准。上述倡议不代表获得平台或版权方授权，也不构成免责承诺。")}</p>
       </div>
@@ -551,7 +580,15 @@ function DownloadManager({ onNavigate, active = true }) {
           <Zap size={15} />
           {t(failedCount > 0 ? `重试失败 (${failedCount})` : '重试失败')}
         </button>
-        <details className="dm-more-actions" ref={moreActionsRef}><summary>{t("更多操作")}</summary><div className="dm-more-menu" onClick={event => { const button = event.target.closest('button'); if (button && !button.disabled) moreActionsRef.current.open = false; }}>
+        <MoreActions className="dm-more-actions" ref={mobile ? moreActionsRef : undefined}>
+          {mobile ? <summary>{t("更多操作")}</summary> : <button type="button" className="btn btn-outline" popovertarget="dm-more-menu">{t("更多操作")}<ChevronDown size={15} /></button>}
+          <div className={`dm-more-menu${mobile ? '' : ' desktop-popover'}`} id="dm-more-menu" popover={mobile ? undefined : 'auto'}
+            ref={!mobile ? moreActionsRef : undefined} onClick={event => {
+              const button = event.target.closest('button');
+              if (!button || button.disabled) return;
+              if (mobile) moreActionsRef.current.open = false;
+              else moreActionsRef.current.hidePopover?.();
+            }}>
         <button
           className="btn btn-outline"
           onClick={selectAllFailed}
@@ -580,7 +617,7 @@ function DownloadManager({ onNavigate, active = true }) {
           title={t("扫描下载目录，把磁盘上已有但列表里没有的文件补登记回来")}
         >
           <RefreshCw size={15} />{t("扫描下载目录")}</button>
-        </div></details>
+        </div></MoreActions>
         {seriesList.length > 0 && (
           <div className="merge-inline">
             <select
@@ -723,9 +760,9 @@ function DownloadManager({ onNavigate, active = true }) {
             <Trash2 size={15} />{t("删除已选（")}{t(selected.size)}{t("项）")}</button>
         <span>{t("共 ")}{t(scopedIds.length)}{t(" 项 · 当前 ")}{t(scopedIds.length ? (currentPage - 1) * PAGE_SIZE + 1 : 0)}-{t(Math.min(currentPage * PAGE_SIZE, scopedIds.length))}{t(" 项")}{t(selected.size > 0 ? ` · 已选 ${selected.size} 项（跨页保留）` : '')}</span>
         </div>
-        <nav aria-label={t("下载任务分页")}>
+        <nav className="pagination-controls" aria-label={t("下载任务分页")}>
           <button className="btn btn-outline btn-sm" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>{t("上一页")}</button>
-          <span>{t("第 {0} / {1} 页", [currentPage, pageCount])}</span>
+          <span className="pager-status" aria-live="polite">{t("第 {0} / {1} 页", [currentPage, pageCount])}</span>
           <button className="btn btn-outline btn-sm" disabled={currentPage >= pageCount} onClick={() => setPage(currentPage + 1)}>{t("下一页")}</button>
         </nav>
       </div>}

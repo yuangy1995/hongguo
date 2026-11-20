@@ -1,6 +1,9 @@
 {
   "name": "hongguo-downloader",
-  "version": "7.6.0",
+  "version": "1.0.0",
+  "macRelease": {
+    "version": "1.0.0"
+  },
   "description": "红果短剧播放与下载",
   "main": "main.js",
   "license": "GPL-3.0",
@@ -17,8 +20,9 @@
     "pack": "electron-builder --dir",
     "zip": "node scripts/make-zip.js",
     "setup:ffmpeg:mac": "node scripts/setup-ffmpeg-mac.js",
-    "build:mac": "node scripts/setup-ffmpeg-mac.js arm64 x64 && npm run build:react && electron-builder --mac dmg zip --arm64 --x64 --publish never",
-    "build:mac:dir": "node scripts/setup-ffmpeg-mac.js arm64 x64 && npm run build:react && electron-builder --mac --arm64 --x64 --dir --publish never",
+    "build:mac": "node scripts/setup-ffmpeg-mac.js arm64 x64 && npm run build:react && electron-builder --config build/electron-builder-mac.cjs --mac dmg zip --arm64 --x64 --publish never",
+    "build:mac:dir": "node scripts/setup-ffmpeg-mac.js arm64 x64 && npm run build:react && electron-builder --config build/electron-builder-mac.cjs --mac --arm64 --x64 --dir --publish never",
+    "build:mac:test": "node scripts/setup-ffmpeg-mac.js arm64 && npm run build:react && node scripts/package-mac-test.cjs",
     "test": "node scripts/test.cjs",
     "setup:software": "node scripts/setup-software-player.cjs",
     "predev": "npm run setup:software",
@@ -63,7 +67,7 @@
       "src/store.js"
     ],
     "asar": true,
-    "artifactName": "hongguo-downloader-7.6-${os}-${arch}.${ext}",
+    "artifactName": "hongguo-downloader-${version}-${os}-${arch}.${ext}",
     "win": {
       "target": [
         {
@@ -107,7 +111,7 @@
       ]
     },
     "portable": {
-      "artifactName": "${productName}-7.6-便携版.${ext}"
+      "artifactName": "${productName}-${version}-便携版.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -115,7 +119,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "红果短剧下载器",
-      "artifactName": "hongguo-downloader-7.6-win-x64-setup.${ext}"
+      "artifactName": "hongguo-downloader-${version}-win-x64-setup.${ext}"
     },
     "mac": {
       "target": [
@@ -186,8 +190,8 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "jackotom",
-      "repo": "hongguo-drama"
+      "owner": "yuangy1995",
+      "repo": "hongguo"
     },
     "linux": {
       "target": [
@@ -230,7 +234,7 @@
         }
       ],
       "syncDesktopName": true,
-      "artifactName": "hongguo-downloader-7.6-linux-x64.${ext}",
+      "artifactName": "hongguo-downloader-${version}-linux-x64.${ext}",
       "extraFiles": [
         {
           "from": "build/linux-AppRun.sh",
@@ -241,10 +245,15 @@
     "appImage": {
       "executableArgs": []
     },
-    "buildVersion": "7.6.1"
+    "buildVersion": "1.0.0"
   },
   "engines": {
     "node": ">=22.12"
   },
-  "desktopName": "hongguo-drama.desktop"
+  "desktopName": "hongguo-drama.desktop",
+  "updateFeed": {
+    "provider": "github",
+    "owner": "yuangy1995",
+    "repo": "hongguo"
+  }
 }

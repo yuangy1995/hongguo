@@ -36,13 +36,13 @@ async function main() {
   await visibleDelete().props.onClick(); ui.render();
   assert.equal(deleted.length, 0, '点击入口只能弹确认，不得立即删除');
   assert.ok(ui.text().includes('共 205 个任务'));
-  const dialog = ui.find(node => node.props.role === 'dialog');
+  const dialog = ui.find(node => node.props.role === 'dialog' && String(node.props['aria-modal']) === 'true');
   const checkbox = descendants(dialog).find(node => node.type === 'input' && node.props.type === 'checkbox');
   assert.equal(checkbox.props.checked, false, '保留现有默认：仅删任务记录');
   assert.ok(ui.button('仅删除记录'));
   checkbox.props.onChange({ target: { checked: true } }); ui.render();
   assert.ok(ui.button('删除任务和文件'));
-  descendants(ui.find(node => node.props.role === 'dialog'))
+  descendants(ui.find(node => node.props.role === 'dialog' && String(node.props['aria-modal']) === 'true'))
     .find(node => node.type === 'button' && text(node) === '取消').props.onClick(); ui.render();
   assert.equal(deleted.length, 0);
   await visibleDelete().props.onClick(); ui.render();

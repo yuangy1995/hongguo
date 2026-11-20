@@ -1,4 +1,15 @@
-# 四平台发行规则（2026-11-17起）
+# 本项目 1.0.0 首发
+
+- 基于上游 7.6 的当前改版，桌面四平台使用 1.0.0 和同一个 `v1.0.0` 标签，在 [yuangy1995/hongguo Releases](https://github.com/yuangy1995/hongguo/releases) 发行。
+- 原项目公告已移除。所有桌面版通过本项目发布页检查新版。Windows 安装版仍支持应用内下载和安装，便携版和 Linux 从发布页手动更新。
+- macOS 本次和后续使用临时签名。发布前核验 arm64 和 x64 的包与临时签名，按平台记录实际验证结果。Mac 版在应用内检查更新，从发布页下载新版后安装。
+- 上游原版继续使用其原有更新渠道，迁移到本项目时先安装本项目的包。
+
+## 云端发行
+
+在项目 GitHub Actions 手动运行「发布桌面版」，填写完整版本号，例如 `1.0.0`。先在 `docs/release-notes/1.0.0.md` 准备发行说明。四个平台都由 GitHub 托管的构建机从同一个主分支提交构建并验收。发布任务只接收同一次工作流的四平台成品，校验更新清单、对应源码和附件摘要，在发布草稿中汇总后设为 Latest。
+
+# 上游四平台发行规则（2026-11-17起）
 
 - 后续正式Release提供macOS Apple Silicon arm64、macOS Intel x64、Windows x64、Linux x64 AppImage四平台附件，以及这些平台必要的更新清单、精确源码、对应媒体源码和SHA256。Docker、TV APK、手机APK不再发布。
 - 四个平台仍共用公开版本、GitHub标签和一次Release。附件与必要验收齐备、远端大小和SHA256核对后，一次公开并设Latest。
@@ -156,8 +167,8 @@ Windows未签名、Intel仅Rosetta，实际验收及源码CI失败保留边界�
 
 | 平台 | 构建入口 | 发布门槛 |
 |---|---|---|
-| macOS arm64 | npm run build:mac | 对应 arm64 媒体组件、Developer ID、Apple 公证 Accepted、装订验证 |
-| macOS x64 | npm run build:mac | 对应 x64 媒体组件、Developer ID、Apple 公证 Accepted、装订验证；另记录 Intel 实机覆盖 |
+| macOS arm64 | npm run build:mac | 对应 arm64 媒体组件、临时签名校验、启动和播放验收 |
+| macOS x64 | npm run build:mac | 对应 x64 媒体组件、临时签名校验、启动验收；另记录 Intel 实机覆盖 |
 | Windows x64 | Windows x64 release candidate 工作流 | NSIS 安装 EXE、latest.yml、便携 EXE/ZIP；精确 FFmpeg 对应源码；安装版安装/启动/同版本重装资料保留与便携版媒体窗口冒烟；明确签名状态 |
 | Linux x64 | Linux x64 AppImage candidate 工作流（build_only=false） | AppImage 启动、ffmpeg／ffprobe／librempeg 三份媒体工具、CPU 播放器与 HEVC Wasm 加载；随机两集真实下载静音播放约10秒 |
 
@@ -184,9 +195,9 @@ Ubuntu 24.04 安装 gcc-mingw-w64-x86-64、make、pkg-config 后运行 `bash scr
 
 ## 应用内更新发行门槛
 
-- 固定公开源为 `jackotom/hongguo-drama` GitHub Releases；客户端包不得包含发布令牌。
+- 上游历史发行的公开源为 `jackotom/hongguo-drama` GitHub Releases，macOS 复刻版使用本文开头的仓库。客户端包不得包含发布令牌。
 - Mac 两种架构使用同一份 `latest-mac.yml`，`files` 中分别列出含 `arm64`、`x64` 的 ASCII ZIP 文件名、最终文件 SHA512（base64）及大小。
-- 构建产生的 ZIP 只作中间产物。正式更新 ZIP 必须从已完成 Developer ID 签名、Apple 公证与装订的最终 App 重新压缩，然后重算清单摘要；禁止沿用签名前的 ZIP、blockmap 或摘要。DMG 同样完成签名、公证、装订。
+- 以下为既有正式签名发行的历史约定。本项目临时签名的 Mac 版使用下载页安装。构建产生的 ZIP 只作中间产物。正式更新 ZIP 必须从已完成 Developer ID 签名、Apple 公证与装订的最终 App 重新压缩，然后重算清单摘要；禁止沿用签名前的 ZIP、blockmap 或摘要。DMG 同样完成签名、公证、装订。
 - Windows `latest.yml` 仅指向同名 NSIS 安装包，保留 builder 生成的 SHA512、大小和 blockmap；复制上传不得再改名。安装版与便携版共享同一版本和数据格式。
 - Windows 尚无代码签名证书。SHA512 只验证下载与官方清单一致，不提供独立的发布者身份保证；不得主动关闭签名校验或声称已签名。
 - `node scripts/check-windows-installer.cjs --config` 可本机检查发行配置；不带参数仅允许一次性 GitHub Windows CI，检查安装包元数据、安装启动、同版本重装，以及固定摘要的真实官方 1.80 安装包覆盖升级与资料保留。该检查不等于应用内自动更新端到端或实体 Windows 验收。

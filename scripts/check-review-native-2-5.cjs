@@ -46,7 +46,7 @@ function restoredEntry(format, configs, entryType) {
   }
   await check('installation errors retain verified download and retry without downloading', async () => {
     const f = fixture();
-    const download = f.controller.download('1.81'); f.checked(); await tick(); f.downloaded(); await download;
+    const download = f.controller.download('1.81.0'); f.checked(); await tick(); f.downloaded(); await download;
     f.controller.install(); await tick(); f.updater.emit('error', Error('install failed'));
     assert.equal(f.controller.install().success, true, 'native failure must allow direct install retry');
     await tick(); assert.equal(f.counts().installs, 2); assert.equal(f.counts().downloads, 1);
@@ -59,7 +59,7 @@ function restoredEntry(format, configs, entryType) {
     assert.equal(mac.controller.install().success, true, 'synchronous preparation failure must be retryable');
     await tick(); mac.native.emit('update-downloaded'); assert.equal(mac.nativeCounts().quits, 1);
     assert.equal(mac.counts().downloads, 1);
-    const failedDownload = fixture(), pending = failedDownload.controller.download('1.81');
+    const failedDownload = fixture(), pending = failedDownload.controller.download('1.81.0');
     failedDownload.checked(); await tick(); failedDownload.downloaded(Error('checksum mismatch')); await pending;
     assert.equal(failedDownload.controller.install().success, false, 'failed checksum cannot install');
   });
