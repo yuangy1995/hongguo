@@ -314,14 +314,14 @@ async function realFootage(mediaDir, ffmpeg, ffprobe, dataFile) {
       throw new Error('Download quality settings UI did not reach the expected state');
     };
     [...document.querySelectorAll('.sidebar-item')].find(b => b.textContent.trim() === '设置').click();
-    await waitFor(() => document.querySelector('#default-download-quality'));
+    await waitFor(() => document.querySelector('.settings-sections'));
+    [...document.querySelectorAll('.settings-sections button')].find(b => b.textContent.trim() === '下载设置').click();
+    await waitFor(() => document.querySelector('#default-download-quality')?.getClientRects().length);
     const select = document.querySelector('#default-download-quality');
     const initial = select.value;
     const options = [...select.options].map(o => ({ value: o.value, label: o.textContent }));
     select.value = '1080p'; select.dispatchEvent(new Event('change', { bubbles: true }));
-    await waitFor(() => document.querySelector('.settings-footer [role="status"]'));
-    document.querySelector('.settings-footer button').click();
-    await waitFor(() => document.querySelector('.settings-footer button').textContent.includes('已保存'));
+    await waitFor(() => document.querySelector('.settings-container .dm-toast-success[role="status"]')?.textContent.includes('已自动保存'));
     const saved = (await window.electronAPI.getSettings()).download_quality;
     return { initial, options, saved };
   })()`);
@@ -336,7 +336,7 @@ async function realFootage(mediaDir, ffmpeg, ffprobe, dataFile) {
     return window.electronAPI.saveSettings({ ...current, download_quality: 'auto' });
   })()`)).success, true);
   result.downloadQuality = { ...qualityUi, persistedToIsolatedProfile: true, restoredDefault: 'auto', realPlatformDownloadTested: false };
-  result.checks.push('Actual single-file EXE: download quality settings offer auto/1080p/720p; UI saves 1080p to isolated profile; default restored without platform download');
+  result.checks.push('Actual single-file EXE: download quality settings offer auto/1080p/720p; UI automatically saves 1080p to isolated profile; default restored without platform download');
   assert.equal((await evaluate('window.electronAPI.setWindowLayout("portrait")')).success, true);
   assert.equal(await evaluate('window.electronAPI.getWindowLayout()'), 'portrait');
   assert.equal(await evaluate('window.electronAPI.setAlwaysOnTop(true)'), true);
