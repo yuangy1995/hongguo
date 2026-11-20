@@ -673,7 +673,7 @@ function DownloadManager({ onNavigate, active = true }) {
   }, [scopedIds, taskById]);
   const allSelected = scopedTasks.length > 0 && scopedTasks.every(task => selected.has(task.id));
   const selectAll = () => setSelected(new Set(scopedTasks.map(task => task.id)));
-  const pageCount = Math.max(1, Math.ceil(seriesGroups.length / SERIES_PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(mobile ? scopedIds.length / PAGE_SIZE : seriesGroups.length / SERIES_PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
   const visibleGroups = seriesGroups.slice((currentPage - 1) * SERIES_PAGE_SIZE, currentPage * SERIES_PAGE_SIZE);
 
@@ -928,6 +928,7 @@ function DownloadManager({ onNavigate, active = true }) {
   };
 
   const MoreActions = mobile ? 'details' : 'div';
+  const StatusPill = mobile ? 'span' : 'button';
   const statusCounts = [
     ['active', '进行中', activeCount, Download],
     ['done', '已完成', completedCount, Check],
@@ -943,17 +944,17 @@ function DownloadManager({ onNavigate, active = true }) {
         </div>
         <div className="dm-stats">
           {statusCounts.map(([status, label, count, Icon]) =>
-            <button
-              type="button"
+            <StatusPill
+              type={mobile ? undefined : 'button'}
               className={`dm-stat dm-stat-${status}`}
               data-empty={count === 0}
               key={status}
-              onClick={() => openStatusModal(status)}
-              title={t(`查看${label}任务列表`)}
+              onClick={mobile ? undefined : () => openStatusModal(status)}
+              title={mobile ? undefined : t(`查看${label}任务列表`)}
             >
               <Icon size={14} aria-hidden="true" />
               <span>{t(label)}{' '}</span><strong>{t(count)}</strong>
-            </button>)}
+            </StatusPill>)}
         </div>
         {!mobile && <button type="button" className="btn btn-outline btn-sm" popovertarget="dm-usage-notice">
           <AlertCircle size={15} />{t("下载说明")}
@@ -1175,9 +1176,10 @@ function DownloadManager({ onNavigate, active = true }) {
           <button className="btn btn-outline btn-sm" onClick={deleteSelected} disabled={selected.size === 0}
             title={t("删除所有分页中已选的任务，确认时可选择是否同时删除本地文件")}>
             <Trash2 size={15} />{t("删除已选（")}{t(selected.size)}{t("项）")}</button>
-        <span>{t("共 {0} 部剧 · {1} 个任务", [seriesGroups.length, scopedIds.length])}{t(selected.size > 0 ? ` · 已选 ${selected.size} 项（跨页保留）` : '')}</span>
+        <span>{mobile ? t("共 {0} 项 · 当前 {1}-{2}", [scopedIds.length, (currentPage - 1) * PAGE_SIZE + 1, Math.min(currentPage * PAGE_SIZE, scopedIds.length)])
+          : t("共 {0} 部剧 · {1} 个任务", [seriesGroups.length, scopedIds.length])}{t(selected.size > 0 ? ` · 已选 ${selected.size} 项（跨页保留）` : '')}</span>
         </div>
-        {pageCount > 1 && <nav className="pagination-controls" aria-label={t("下载剧集分页")}>
+        {pageCount > 1 && <nav className="pagination-controls" aria-label={t(mobile ? "下载任务分页" : "下载剧集分页")}>
           <button className="btn btn-outline btn-sm" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>{t("上一页")}</button>
           <span className="pager-status" aria-live="polite">{t("第 {0} / {1} 页", [currentPage, pageCount])}</span>
           <button className="btn btn-outline btn-sm" disabled={currentPage >= pageCount} onClick={() => setPage(currentPage + 1)}>{t("下一页")}</button>
@@ -1190,6 +1192,11 @@ function DownloadManager({ onNavigate, active = true }) {
           <p>{t("暂无下载任务")}</p>
           <p className="dm-empty-sub">{t("搜索剧名或粘贴分享链接，选择想保存的集数。")}</p>
           {onNavigate && <button className="btn btn-primary" onClick={() => onNavigate('download')}>{t("添加第一部短剧")}</button>}
+        </div>
+      ) : mobile ? (
+        <div className="dm-list">
+          {scopedIds.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE).map(id => taskById.get(id)).filter(Boolean)
+            .map(task => renderTaskRow(task, { selectable: true }))}
         </div>
       ) : (
         <div className="dm-series-grid">
