@@ -135,6 +135,7 @@ function Browse({ onNavigate, active = true }) {
   const resultsRef = useRef(results);
   const listTimer = useRef(null);
   const toastTimer = useRef(null);
+  const listScrollRef = useRef(null);
   resultsRef.current = results;
 
   const invalidateList = useCallback(() => {
@@ -453,6 +454,7 @@ function Browse({ onNavigate, active = true }) {
     setError('');
     setRefreshNotice('');
     setPage(next);
+    listScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
     document.querySelector('.main-content:not([hidden])')?.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -609,20 +611,22 @@ function Browse({ onNavigate, active = true }) {
 
   return (
     <div className="browse-container">
-      <div className="browse-header">
-        <div className="browse-header-right">
-          {mediaSources.length > 1 && <label className="source-control">{t("来源")}<select className="input-field" aria-label={t("短剧来源")} value={source} onChange={(e) => switchSource(e.target.value)}>{mediaSources.map(({ id, label }) => <option key={id} value={id}>{id.startsWith('custom:') ? label : t(label)}</option>)}</select></label>}
-          {source === 'hongguo' && <label className="source-control">{t(mobile ? '' : '目录线路')}<select className="input-field" aria-label={t("红果目录线路")} value={catalogChannel} onChange={(e) => switchCatalogChannel(e.target.value)}><option value="app">{t(mobile ? 'App目录' : 'App（快速 · 部分片单）')}</option><option value="web">{t(mobile ? '官网目录' : '官网（完整目录）')}</option></select></label>}
-          {!mobile && <button className="btn btn-primary" onClick={() => onNavigate('download')}><Search size={15} />{t("搜索短剧")}</button>}
-          <button className="btn btn-outline" disabled={loading || sourcesLoading || meta.cursorExpired || page !== displayedPage || !hasNextBatch} onClick={() => gotoPage(displayedPage + 1)}><RefreshCw size={15} />{t("换一批")}</button>
-          <button className="btn btn-outline" aria-label={t("刷新片单")} disabled={loading || sourcesLoading} onClick={refreshList}><RefreshCw size={15} />{t(!mobile && '刷新片单')}</button>
-          {meta.total > 0 && <span className="browse-stat">{t("共 ")}{t(meta.total)}{t(" 部")}</span>}
-          {!mobile && source === 'hongguo' && catalogChannel === 'web' && sourceUrl && <button className="btn btn-outline" onClick={showBrowser}>
-            <ExternalLink size={15} />{t("打开来源页面")}</button>}
+      <div className="browse-top-deck">
+        <div className="browse-header">
+          <div className="browse-header-right">
+            {mediaSources.length > 1 && <label className="source-control">{t("来源")}<select className="input-field" aria-label={t("短剧来源")} value={source} onChange={(e) => switchSource(e.target.value)}>{mediaSources.map(({ id, label }) => <option key={id} value={id}>{id.startsWith('custom:') ? label : t(label)}</option>)}</select></label>}
+            {source === 'hongguo' && <label className="source-control">{t(mobile ? '' : '目录线路')}<select className="input-field" aria-label={t("红果目录线路")} value={catalogChannel} onChange={(e) => switchCatalogChannel(e.target.value)}><option value="app">{t(mobile ? 'App目录' : 'App（快速 · 部分片单）')}</option><option value="web">{t(mobile ? '官网目录' : '官网（完整目录）')}</option></select></label>}
+            {!mobile && <button className="btn btn-primary" onClick={() => onNavigate('download')}><Search size={15} />{t("搜索短剧")}</button>}
+            <button className="btn btn-outline" disabled={loading || sourcesLoading || meta.cursorExpired || page !== displayedPage || !hasNextBatch} onClick={() => gotoPage(displayedPage + 1)}><RefreshCw size={15} />{t("换一批")}</button>
+            <button className="btn btn-outline" aria-label={t("刷新片单")} disabled={loading || sourcesLoading} onClick={refreshList}><RefreshCw size={15} />{t(!mobile && '刷新片单')}</button>
+            {meta.total > 0 && <span className="browse-stat">{t("共 ")}{t(meta.total)}{t(" 部")}</span>}
+            {!mobile && source === 'hongguo' && catalogChannel === 'web' && sourceUrl && <button className="btn btn-outline" onClick={showBrowser}>
+              <ExternalLink size={15} />{t("打开来源页面")}</button>}
+          </div>
         </div>
-      </div>
 
-      {!mobile && <ContinueWatching active={active} />}
+        {!mobile && <ContinueWatching active={active} />}
+      </div>
       {refreshNotice && <p className="browse-source-note" role="status">{t(refreshNotice)}</p>}
 
       {/* 分类 tab */}
@@ -653,7 +657,7 @@ function Browse({ onNavigate, active = true }) {
       {source === 'reelshort' && <p className="browse-source-note">官网公开片单，按原顺序显示，每类最多 12 部；当前只提供首页快照，无后续分页。受地区限制，付费集请在官方平台确认权限。</p>}
 
       {/* 题材 chips */}
-      <FilterContainer className={mobile ? 'mobile-browse-filters' : undefined}>
+      <FilterContainer className={mobile ? 'mobile-browse-filters' : 'browse-filters'}>
       {mobile && <summary>{t("筛选题材与状态")}{genre && <> · {t(meta.genres.find(item => item.slug === genre)?.label || '')}</>}{completion !== 'all' && <> · {t(completion === 'completed' ? '已完结' : '更新中')}</>}</summary>}
       {meta.genres.length > 0 && (
         <div className="browse-genres">
@@ -678,69 +682,73 @@ function Browse({ onNavigate, active = true }) {
       {mobile && completionControl}
       {mobile && <p className="browse-source-note">{t("再点分类或题材可换一批；热播榜保持来源热度顺序。App与官网片单可能不同。")}</p>}
       </FilterContainer>
-      {!loading && !error && results.length > 0 && visibleResults.length === 0 && <div className="browse-filter-empty" role="status"><p>{t("本页没有明确标记为")}{t(completion === 'completed' ? '已完结' : '更新中')}{t("的剧集。")}</p><button className="btn btn-outline" onClick={() => setCompletion('all')}>{t("显示本页全部")}</button></div>}
 
       {error && results.length > 0 && <div className="alert alert-error browse-update-error" role="alert">
         <span>{t(error)}</span><button className="btn btn-outline btn-sm" disabled={loading || sourcesLoading} onClick={retryList}>{t("重试")}</button>
       </div>}
-      {error && results.length === 0 && <div className="browse-error-state" role={unsupported ? 'status' : 'alert'}><Film size={36} /><h3>{t(unsupported ? '这里是图文漫画' : '暂时没能加载剧集')}</h3><p>{t(error)}</p><div className="search-empty-actions">{unsupported ? <button className="btn btn-primary" onClick={() => switchCategory('comic-drama')}>{t("查看漫剧")}</button> : <button className="btn btn-primary" onClick={retryList}><RefreshCw size={15} />{t("重新加载")}</button>}<button className="btn btn-outline" onClick={() => onNavigate('download')}>{t("按剧名搜索")}</button></div></div>}
 
       {loading && results.length > 0 && <div className="browse-loading" role="status"><RefreshCw size={18} className="spin" /><span>{t("正在更新片单，仍可浏览上次结果…")}</span><button className="btn btn-outline btn-sm" onClick={cancelList}>{t("取消加载")}</button></div>}
 
-      {loading && results.length === 0 ? (
-        <div className="browse-loading-state" role="status"><div className="browse-loading"><RefreshCw size={18} className="spin" /><span>{t("正在加载")}{t(categories.find((item) => item.slug === category)?.label || '短剧')}…</span><button className="btn btn-outline btn-sm" onClick={cancelList}>{t("取消加载")}</button></div><div className="poster-skeletons" aria-hidden="true">{t(Array.from({ length: 5 }, (_, i) => <div className="poster-skeleton" key={i}><div /><span /><span /></div>))}</div></div>
-      ) : (
-        <div className="browse-grid">
-          {visibleResults.map((item) => {
-            const dl = downloadedMap[String(item.series_id)];
-            return (
-              <div className="browse-card-item" key={item.series_id}>
-              <button
-                type="button"
-                className="browse-card"
-                disabled={openingId === item.series_id}
-                onClick={() => openSeries(item)}
-                title={`${mobile ? t('播放：') : ''}${item.series_title}`}
-              >
-                <div className="browse-cover">
-                  {item.rank > 0 && <span className="browse-rank-badge">{t("榜单第 {0} 名", [item.rank])}</span>}
-                  {item.cover ? (
-                    <img src={item.cover} alt={item.series_title} loading="lazy" />
-                  ) : (
-                    <div className="cover-placeholder"><Film size={22} /></div>
-                  )}
-                  {(item.episode_label || item.episode_count > 0) && (
-                    <span className="browse-ep-badge">{t(item.episode_label || `${item.episode_count} 集`)}</span>
-                  )}
-                  {dl && dl.completed > 0 && (
-                    <span className="browse-dl-badge">
-                      <Check size={11} /> {t(dl.completed)}/{t(dl.total)}
-                    </span>
-                  )}
-                  <div className="browse-hover">
-                    <span className="browse-hover-play">
-                      <Play size={16} /> {t(mobile || dl && dl.completed > 0 ? '播放' : '查看')}
-                    </span>
+      <div className="browse-list-area" ref={listScrollRef}>
+        {!loading && !error && results.length > 0 && visibleResults.length === 0 && <div className="browse-filter-empty" role="status"><p>{t("本页没有明确标记为")}{t(completion === 'completed' ? '已完结' : '更新中')}{t("的剧集。")}</p><button className="btn btn-outline" onClick={() => setCompletion('all')}>{t("显示本页全部")}</button></div>}
+
+        {error && results.length === 0 && <div className="browse-error-state" role={unsupported ? 'status' : 'alert'}><Film size={36} /><h3>{t(unsupported ? '这里是图文漫画' : '暂时没能加载剧集')}</h3><p>{t(error)}</p><div className="search-empty-actions">{unsupported ? <button className="btn btn-primary" onClick={() => switchCategory('comic-drama')}>{t("查看漫剧")}</button> : <button className="btn btn-primary" onClick={retryList}><RefreshCw size={15} />{t("重新加载")}</button>}<button className="btn btn-outline" onClick={() => onNavigate('download')}>{t("按剧名搜索")}</button></div></div>}
+
+        {loading && results.length === 0 ? (
+          <div className="browse-loading-state" role="status"><div className="browse-loading"><RefreshCw size={18} className="spin" /><span>{t("正在加载")}{t(categories.find((item) => item.slug === category)?.label || '短剧')}…</span><button className="btn btn-outline btn-sm" onClick={cancelList}>{t("取消加载")}</button></div><div className="poster-skeletons" aria-hidden="true">{t(Array.from({ length: 5 }, (_, i) => <div className="poster-skeleton" key={i}><div /><span /><span /></div>))}</div></div>
+        ) : (
+          <div className="browse-grid">
+            {visibleResults.map((item) => {
+              const dl = downloadedMap[String(item.series_id)];
+              return (
+                <div className="browse-card-item" key={item.series_id}>
+                <button
+                  type="button"
+                  className="browse-card"
+                  disabled={openingId === item.series_id}
+                  onClick={() => openSeries(item)}
+                  title={`${mobile ? t('播放：') : ''}${item.series_title}`}
+                >
+                  <div className="browse-cover">
+                    {item.rank > 0 && <span className="browse-rank-badge">{t("榜单第 {0} 名", [item.rank])}</span>}
+                    {item.cover ? (
+                      <img src={item.cover} alt={item.series_title} loading="lazy" />
+                    ) : (
+                      <div className="cover-placeholder"><Film size={22} /></div>
+                    )}
+                    {(item.episode_label || item.episode_count > 0) && (
+                      <span className="browse-ep-badge">{t(item.episode_label || `${item.episode_count} 集`)}</span>
+                    )}
+                    {dl && dl.completed > 0 && (
+                      <span className="browse-dl-badge">
+                        <Check size={11} /> {t(dl.completed)}/{t(dl.total)}
+                      </span>
+                    )}
+                    <div className="browse-hover">
+                      <span className="browse-hover-play">
+                        <Play size={16} /> {t(mobile || dl && dl.completed > 0 ? '播放' : '查看')}
+                      </span>
+                    </div>
                   </div>
+                  <div className="browse-card-title">{item.series_title}</div>
+                  {item.completion_status === 'completed' && <div className="browse-completion-label">{t("已完结")}</div>}
+                  {item.completion_status === 'ongoing' && <div className="browse-completion-label">{t("更新中")}</div>}
+                  {item.heat && <div className="browse-card-heat">{t(item.heat)}</div>}
+                  {item.tags && item.tags.length > 0 && (
+                    <div className="browse-card-tags">
+                      {item.tags.slice(0, 2).map((t) => (
+                        <span key={t} className="browse-tag">{t}</span>
+                      ))}
+                    </div>
+                  )}
+                </button>
+                {mobile && <button className="mobile-drama-details" aria-label={t(`详情与下载：${item.series_title}`)} onClick={() => openSeries(item, false)}>{t(openingId === item.series_id ? '正在打开…' : '详情与下载')}</button>}
                 </div>
-                <div className="browse-card-title">{item.series_title}</div>
-                {item.completion_status === 'completed' && <div className="browse-completion-label">{t("已完结")}</div>}
-                {item.completion_status === 'ongoing' && <div className="browse-completion-label">{t("更新中")}</div>}
-                {item.heat && <div className="browse-card-heat">{t(item.heat)}</div>}
-                {item.tags && item.tags.length > 0 && (
-                  <div className="browse-card-tags">
-                    {item.tags.slice(0, 2).map((t) => (
-                      <span key={t} className="browse-tag">{t}</span>
-                    ))}
-                  </div>
-                )}
-              </button>
-              {mobile && <button className="mobile-drama-details" aria-label={t(`详情与下载：${item.series_title}`)} onClick={() => openSeries(item, false)}>{t(openingId === item.series_id ? '正在打开…' : '详情与下载')}</button>}
-              </div>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* 分页 */}
       {totalPages > 1 && (

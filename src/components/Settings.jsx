@@ -61,6 +61,7 @@ function SettingsPage({ active = true, preview = false, configNote = '', wakeReg
   const settingsPage = useRef(null);
   useEffect(() => { if (wakeRegionFocus) setSection('playback'); }, [wakeRegionFocus]);
   const [saved, setSaved] = useState(false);
+  const [confirmAutoDelete, setConfirmAutoDelete] = useState(false);
   const [proxyOpen, setProxyOpen] = useState(false);
   const [proxyDraft, setProxyDraft] = useState(null);
   const [testResult, setTestResult] = useState(null);
@@ -70,12 +71,14 @@ function SettingsPage({ active = true, preview = false, configNote = '', wakeReg
   const [pictureModeSaving, setPictureModeSaving] = useState(false);
   const [pictureModeNotice, setPictureModeNotice] = useState('');
   const [pictureModeError, setPictureModeError] = useState('');
-  const [dirty, setDirty] = useState(false);
   const [loadError, setLoadError] = useState('');
   const testVersion = useRef(0);
   const savingRef = useRef(false);
   const pictureModeRequest = useRef({ pending: false, version: 0 });
   const editedKeys = useRef(new Set());
+  const pendingPatch = useRef({});
+  const queuedSave = useRef(false);
+  const debounceTimer = useRef(null);
   const savedTimer = useRef(null);
 
   const loadSettings = async () => {
@@ -107,11 +110,12 @@ function SettingsPage({ active = true, preview = false, configNote = '', wakeReg
     }
   };
 
-  useEffect(() => () => { testVersion.current++; clearTimeout(savedTimer.current); }, []);
+  useEffect(() => () => { testVersion.current++; clearTimeout(savedTimer.current); clearTimeout(debounceTimer.current); }, []);
 
   useEffect(() => {
     if (!active) {
       testVersion.current++;
+      setConfirmAutoDelete(false);
       setTesting(false);
       setTestResult(null);
       return;
@@ -119,12 +123,29 @@ function SettingsPage({ active = true, preview = false, configNote = '', wakeReg
     void refreshSettings();
   }, [active]);
 
-  const update = (key, value) => {
+  const EDITABLE_KEYS = ['root', 'name_format', 'download_quality', 'download_metadata', 'cache_next_episode', 'compat_mode', 'auto_delete_watched', 'show_danmaku_controls', 'max_concurrent', 'proxy_enabled', 'proxy_mode', 'proxy_host', 'proxy_port', 'proxy_username', 'proxy_password', 'watch_updates_enabled', 'watch_sequels_enabled', 'watch_notifications_enabled', 'search_app_enabled', 'app_updates_enabled'];
+
+  const flushPendingSave = async () => {
+    clearTimeout(debounceTimer.current);
+    debounceTimer.current = null;
+    if (Object.keys(pendingPatch.current).length === 0) return;
+    if (savingRef.current) { queuedSave.current = true; return; }
+    await persist(pendingPatch.current, false);
+  };
+
+  const update = (key, value, { defer = false } = {}) => {
     editedKeys.current.add(key);
+    pendingPatch.current[key] = value;
     setSettings((prev) => ({ ...prev, [key]: value }));
     setSaved(false);
-    setDirty(true);
     setSaveError('');
+    clearTimeout(debounceTimer.current);
+    if (defer) {
+      debounceTimer.current = setTimeout(() => { void flushPendingSave(); }, 350);
+    } else {
+      debounceTimer.current = null;
+      void flushPendingSave();
+    }
   };
 
   const changePictureInPictureMode = async (event) => {
@@ -165,33 +186,50 @@ function SettingsPage({ active = true, preview = false, configNote = '', wakeReg
     setSaving(true);
     setSaved(false);
     setSaveError('');
+    const submitted = {};
+    let shouldFlushQueue = false;
     try {
-      // Submit only edited fields; the main process merges newer playback options.
-      const editable = ['root', 'name_format', 'download_quality', 'download_metadata', 'cache_next_episode', 'compat_mode', 'auto_delete_watched', 'show_danmaku_controls', 'max_concurrent', 'proxy_enabled', 'proxy_mode', 'proxy_host', 'proxy_port', 'proxy_username', 'proxy_password', 'watch_updates_enabled', 'watch_sequels_enabled', 'watch_notifications_enabled', 'search_app_enabled', 'app_updates_enabled'];
-      const submitted = {};
-      for (const key of editable) {
-        if (Object.hasOwn(next, key) && (editedKeys.current.has(key) || isProxy && key.startsWith('proxy_'))) submitted[key] = next[key];
+      // 只提交本次改动的字段，保留其他区域较新的配置
+      for (const key of EDITABLE_KEYS) {
+        if (isProxy) {
+          if (key.startsWith('proxy_') && Object.hasOwn(next, key)) submitted[key] = next[key];
+        } else if (Object.hasOwn(next, key) && editedKeys.current.has(key)) {
+          submitted[key] = next[key];
+        }
       }
       if (isProxy) submitted.clear_proxy_password = next.clear_proxy_password === true && !String(next.proxy_password || '');
+      if (Object.keys(submitted).length === 0) return;
       const res = await window.electronAPI.saveSettings(submitted);
       if (!res?.success) throw new Error(res?.error || '设置未保存，请重试');
       if (isProxy) closeProxy();
-      const saved = await window.electronAPI.getSettings();
-      setSettings(saved);
-      window.dispatchEvent(new CustomEvent('hongguo-playback-settings', { detail: saved }));
-      editedKeys.current.clear();
-      setDirty(false);
+      else {
+        for (const [key, val] of Object.entries(submitted)) {
+          if (pendingPatch.current[key] === val) {
+            delete pendingPatch.current[key];
+            editedKeys.current.delete(key);
+          }
+        }
+      }
+      const fresh = { download_quality: 'auto', picture_in_picture_mode: 'custom', ...await window.electronAPI.getSettings() };
+      const merged = { ...fresh, ...(isProxy ? {} : submitted) };
+      for (const key of editedKeys.current) {
+        if (Object.hasOwn(pendingPatch.current, key)) merged[key] = pendingPatch.current[key];
+      }
+      setSettings(merged);
+      window.dispatchEvent(new CustomEvent('hongguo-playback-settings', { detail: merged }));
       setSaved(true);
       clearTimeout(savedTimer.current);
       savedTimer.current = setTimeout(() => setSaved(false), 2000);
+      shouldFlushQueue = queuedSave.current && Object.keys(pendingPatch.current).length > 0;
     } catch (error) {
       setSaveError(error.message || '设置保存失败，请重试');
     } finally {
+      queuedSave.current = false;
       savingRef.current = false;
       setSaving(false);
     }
+    if (shouldFlushQueue) await flushPendingSave();
   };
-  const save = () => persist(settings);
 
   const closeProxy = () => {
     testVersion.current++;
@@ -242,6 +280,7 @@ function SettingsPage({ active = true, preview = false, configNote = '', wakeReg
   const applyProxy = () => persist({ ...settings, ...proxyDraft }, true);
 
   useDialogKeyboard(active && proxyOpen, () => { if (!savingRef.current) closeProxy(); }, '.proxy-modal');
+  useDialogKeyboard(active && confirmAutoDelete, () => setConfirmAutoDelete(false), '.settings-auto-delete-confirm');
 
   if (!settings) {
     return <div className="settings-container">{t(loadError ? <div role="alert"><p>{t(loadError)}</p><button className="btn btn-outline" onClick={loadSettings}>{t("重新加载")}</button></div> : '加载中...')}</div>;
@@ -316,15 +355,15 @@ function SettingsPage({ active = true, preview = false, configNote = '', wakeReg
           <span className="settings-label">{t("播放与缓存")}</span>
           <label className="proxy-switch-row"><input type="checkbox" checked={settings.cache_next_episode !== false} onChange={event => update('cache_next_episode', event.target.checked)} /><span className="proxy-switch-text">{t("缓存后续 2 集")}<em>{t("开始播放后最多预取接下来两集可在线播放的分集，减少连续切集等待；会使用网络流量。")}</em></span></label>
           <label className="proxy-switch-row"><input type="checkbox" checked={settings.compat_mode !== false} onChange={event => update('compat_mode', event.target.checked)} /><span className="proxy-switch-text">{t("自动兼容模式")}<em>{t("无法解码时尝试转码播放，解决部分黑屏有声问题。")}</em></span></label>
-          <label className="proxy-switch-row"><input type="checkbox" checked={settings.auto_delete_watched === true} onChange={event => update('auto_delete_watched', event.target.checked)} /><span className="proxy-switch-text">{t("看完自动删除")}<em>{t("看完一集后删除该集已下载的视频、在线播放缓存和转码缓存。下载文件会永久删除；需要时可重新下载。保存后生效。")}</em></span></label>
+          <label className="proxy-switch-row"><input type="checkbox" aria-label={t("看完自动删除")} checked={settings.auto_delete_watched === true} onChange={event => {
+            if (event.target.checked) setConfirmAutoDelete(true);
+            else update('auto_delete_watched', false);
+          }} /><span className="proxy-switch-text">{t("看完自动删除")}<em>{t("看完一集后，将永久删除该集已下载的视频、在线播放缓存和转码缓存。需要时可重新下载。")}</em></span></label>
           <label className="proxy-switch-row"><input type="checkbox" aria-label={t("优先使用红果 App 搜索")} checked={settings.search_app_enabled === true} onChange={event => update('search_app_enabled', event.target.checked)} /><span className="proxy-switch-text">{t("优先使用红果 App 搜索")}<em>{t("失败或空结果自动回退官网；关闭此项时，官网不可用仍会尝试 App 备用搜索。")}</em></span></label>
         </div>
         <div className="settings-group" hidden={section !== 'playback'}>
           <span className="settings-label">{t("弹幕按钮设置")}</span>
-          <div className="settings-inline-save">
-          <label className="proxy-switch-row"><input type="checkbox" aria-label={t("显示弹幕按钮")} checked={settings.show_danmaku_controls !== false} onChange={event => update('show_danmaku_controls', event.target.checked)} /><span className="proxy-switch-text">{t("显示弹幕按钮")}<em>{t("保存后生效。关闭时隐藏弹幕及弹幕设置按钮，并停用弹幕；再次开启会恢复原有弹幕偏好。")}</em></span></label>
-            <button type="button" className="btn btn-primary" aria-label={t("保存当前设置")} onClick={save}>{t(saving ? '保存中…' : saved ? '已保存' : '保存')}</button>
-          </div>
+          <label className="proxy-switch-row"><input type="checkbox" aria-label={t("显示弹幕按钮")} checked={settings.show_danmaku_controls !== false} onChange={event => update('show_danmaku_controls', event.target.checked)} /><span className="proxy-switch-text">{t("显示弹幕按钮")}<em>{t("更改立即生效。关闭时隐藏弹幕及弹幕设置按钮，并停用弹幕；再次开启会恢复原有弹幕偏好。")}</em></span></label>
         </div>
         <div className="settings-group" hidden={section !== 'playback'}>
           <label className="settings-label" htmlFor="danmaku-source">{t("弹幕来源")}</label>
@@ -347,7 +386,8 @@ function SettingsPage({ active = true, preview = false, configNote = '', wakeReg
               className="input-field"
               aria-label={t("下载目录")}
               value={settings.root || ''}
-              onChange={(e) => update('root', e.target.value)}
+              onChange={(e) => update('root', e.target.value, { defer: true })}
+              onBlur={() => void flushPendingSave()}
               placeholder={t("选择下载保存目录")}
             />
             <button className="btn btn-outline" onClick={selectFolder}>
@@ -376,7 +416,8 @@ function SettingsPage({ active = true, preview = false, configNote = '', wakeReg
             className="input-field mt8"
             aria-label={t("文件命名规则")}
             value={settings.name_format || ''}
-            onChange={(e) => update('name_format', e.target.value)}
+            onChange={(e) => update('name_format', e.target.value, { defer: true })}
+            onBlur={() => void flushPendingSave()}
           />
           <p className="settings-hint">{t("可用变量：")}<code>{t("剧名")}</code> · <code>{t("集数")}</code>{t("（如 001）· ")}<code>{t("标题")}</code>{t("。每集保留独立集号，避免同名覆盖。")}</p>
         </div>
@@ -390,7 +431,7 @@ function SettingsPage({ active = true, preview = false, configNote = '', wakeReg
             <option value="1080p">1080P</option>
             <option value="720p">720P</option>
           </select>
-          <p className="settings-hint" id="default-download-quality-hint">{t("保存后用于新建下载任务，也可在下载时单独选择。红果片源所选清晰度不可用或下载失败时，自动尝试更低清晰度，并在下载管理中提示；已有文件不自动删除或覆盖。")}</p>
+          <p className="settings-hint" id="default-download-quality-hint">{t("自动保存并用于新建下载任务，也可在下载时单独选择。红果片源所选清晰度不可用或下载失败时，自动尝试更低清晰度，并在下载管理中提示；已有文件不自动删除或覆盖。")}</p>
         </div>
 
         <div className="settings-group" hidden={section !== 'downloads'}>
@@ -405,7 +446,7 @@ function SettingsPage({ active = true, preview = false, configNote = '', wakeReg
               <option key={n} value={n}>{t(n)}{t(" 个同时下载")}</option>
             ))}
           </select>
-          <p className="settings-hint">{t("同时下载 ")}<b>{settings.max_concurrent || 3}</b>{t(" 集（保存后立即生效）。 并发越高越快，但可能触发接口限流，建议 3~5。")}</p>
+          <p className="settings-hint">{t("同时下载 ")}<b>{settings.max_concurrent || 3}</b>{t(" 集（更改立即生效）。并发越高越快，但可能触发接口限流，建议 3~5。")}</p>
         </div>
 
 
@@ -424,24 +465,43 @@ function SettingsPage({ active = true, preview = false, configNote = '', wakeReg
         </> : <>
         <div className="settings-group" hidden={section !== 'updates'}>
           <span className="settings-label">{t("检测更新")}</span>
-          <label className="proxy-switch-row"><input type="checkbox" aria-label={t("自动检测更新")} checked={settings.app_updates_enabled !== false} onChange={event => update('app_updates_enabled', event.target.checked)} /><span className="proxy-switch-text">{t("自动检测更新")}<em>{t("启动时及运行期间每 6 小时检查正式新版。保存后生效；下载和重启安装都由你点击确认。")}</em></span></label>
+          <label className="proxy-switch-row"><input type="checkbox" aria-label={t("自动检测更新")} checked={settings.app_updates_enabled !== false} onChange={event => update('app_updates_enabled', event.target.checked)} /><span className="proxy-switch-text">{t("自动检测更新")}<em>{t("启动时及运行期间每 6 小时检查正式新版。更改立即生效；下载和重启安装都由你点击确认。")}</em></span></label>
           <button type="button" className="btn btn-outline" disabled={settings.app_updates_enabled === false} onClick={() => window.dispatchEvent(new CustomEvent('hongguo-check-app-update'))}><RefreshCw size={15} />{t("检查更新")}</button>
-          <p className="settings-hint">{t("可重新打开已关闭的更新提醒、查看下载进度或安装已下载的新版。关闭检测后需重新开启并保存。")}</p>
+          <p className="settings-hint">{t("可重新打开已关闭的更新提醒、查看下载进度或安装已下载的新版。关闭检测后需重新开启。")}</p>
         </div>
         </>}
 
 
       </fieldset>
-        <div className="settings-footer" hidden={!dirty && !['playback', 'downloads', 'updates'].includes(section)}>
-          {dirty && <span className="settings-hint" role="status">{t("有未保存的修改")}</span>}
-          <button className="btn btn-primary" onClick={save}>
-            {t(saving ? '正在保存…' : saved ? <><Check size={16} />{t(" 已保存")}</> : '保存设置')}
-          </button>
-        </div>
-        {saveError && !proxyOpen && <p className="alert alert-error" role="alert">{t(saveError)}</p>}
+        {!proxyOpen && (saving || saved) && !saveError && (
+          <div className={`dm-toast ${saving ? 'dm-toast-info' : 'dm-toast-success'}`} role="status" onClick={() => setSaved(false)}>
+            {saving ? t('正在保存…') : <><Check size={14} />{t(" 已自动保存")}</>}
+          </div>
+        )}
+        {saveError && !proxyOpen && (
+          <div className="alert alert-error settings-save-alert" role="alert">
+            <span>{t(saveError)}</span>
+            <button type="button" className="btn btn-outline btn-sm" onClick={() => void flushPendingSave()}>{t("重试保存")}</button>
+          </div>
+        )}
       </div>
       </div>
 
+      {confirmAutoDelete && (
+        <div className="player-confirm-mask" onClick={() => setConfirmAutoDelete(false)}>
+          <div className="player-confirm settings-auto-delete-confirm" role="dialog" aria-modal="true" aria-labelledby="settings-auto-delete-title" tabIndex={-1} onClick={event => event.stopPropagation()}>
+            <div className="player-confirm-title" id="settings-auto-delete-title">{t("开启看完自动删除")}</div>
+            <p className="player-confirm-msg">{t("看完一集后，将永久删除该集已下载的视频、在线播放缓存和转码缓存。需要时可重新下载。")}</p>
+            <div className="player-confirm-foot">
+              <button type="button" className="btn btn-outline" onClick={() => setConfirmAutoDelete(false)}>{t("取消")}</button>
+              <button type="button" className="btn btn-danger-solid" onClick={() => {
+                setConfirmAutoDelete(false);
+                update('auto_delete_watched', true);
+              }}>{t("开启自动删除")}</button>
+            </div>
+          </div>
+        </div>
+      )}
       {proxyOpen && proxyDraft && (
         <div className="proxy-modal-mask" onClick={() => !saving && closeProxy()}>
           <div className="proxy-modal" role="dialog" aria-modal="true" aria-label={t("网络代理设置")} tabIndex={-1} onClick={(e) => e.stopPropagation()}>

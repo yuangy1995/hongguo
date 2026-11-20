@@ -80,6 +80,7 @@ const run = code => vm.runInContext(code,context);
     assert.equal((await handlers['download-app-update']({})).success, true, 'update session must retain the current proxy during save');
   } finally { releaseWindow(); await changing; }
   run("process.platform = 'darwin'");
-  assert.equal(run('appUpdateSupport().supported'), false, 'temporarily signed Mac builds use the release page');
+  assert.equal(run('appUpdateSupport().supported'), true, 'packaged Mac builds can download the disk image');
+  assert.equal(run('appUpdateSupport().mode'), 'mac-dmg', 'Mac hands the verified DMG to Finder');
   console.log('PASS update proxy: applied before download, connection reset, credential boundary, direct/system switching');
 })().catch(error=>{console.error(error);process.exitCode=1});

@@ -198,16 +198,17 @@ export default function App({ platformPages = {} }) {
     <div className={`app-layout ${mobile ? 'platform-android' : 'desktop-mist'} ${stealthMode ? 'stealth-mode' : ''} ${isMac ? 'platform-mac' : ''} layout-${layout} ${page === 'player' ? 'player-focused' : ''} ${borderless && page === 'player' && layout === 'portrait' ? 'player-borderless' : ''}`}>
       <aside className="sidebar" aria-label={t("主导航")}>
         <div className="sidebar-window-drag" aria-hidden="true" />
-        {mobile && <div className="sidebar-brand">
-          <div className="logo"><Play size={21} /></div>
-          <div><div className="brand-text">{t(appInfo?.appName || '红果短剧')}</div><div className="brand-sub">{t(appInfo?.preview ? '独立体验 · 本机保存' : '每一集，都值得期待')}</div></div>
-        </div>}
+        <div className="sidebar-brand">
+          <div className="logo"><Play size={mobile ? 21 : 16} /></div>
+          <div><div className="brand-text">{t(appInfo?.appName || '红果短剧')}</div>{mobile && <div className="brand-sub">{t(appInfo?.preview ? '独立体验 · 本机保存' : '每一集，都值得期待')}</div>}</div>
+        </div>
         <nav className="sidebar-menu">
           <div className="sidebar-group-label">{t("内容")}</div>
           {MENU.filter((item) => item.id !== 'settings' && (mobile || item.id !== 'account')).map((item) => {
             const Icon = item.icon;
             return (
               <button key={item.id} className={`sidebar-item ${page === item.id ? 'active' : ''}`}
+                title={t(item.label)}
                 aria-current={page === item.id ? 'page' : undefined} onClick={() => navigate(item.id)}>
                 <Icon size={19} /><span>{t(item.label)}</span>
               </button>
@@ -216,6 +217,7 @@ export default function App({ platformPages = {} }) {
         </nav>
         <div className="sidebar-footer">
           <button className={`sidebar-item ${page === 'settings' ? 'active' : ''}`}
+            title={t("设置")}
             aria-current={page === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}>
             <Settings size={19} /><span>{t("设置")}</span>
           </button>
@@ -229,6 +231,7 @@ export default function App({ platformPages = {} }) {
           {page === 'player' && layout === 'portrait' && <PageMenu items={mobile ? MENU : MENU.filter(item => item.id !== 'account')} page={page} onNavigate={navigate} />}
           <div className="toolbar-actions">
             <span className="toolbar-caption">{t(appInfo?.preview ? '功能预览' : '红果短剧')}</span>
+            {!mobile && page === 'player' && <span id="player-toolbar-cast" className="toolbar-cast-slot" hidden={actionsHidden} />}
             {!mobile && page === 'player' && <button className="btn btn-outline btn-sm" onClick={() => { setEpisodesOpen(false); toggleStealth(true); }} title={t("小窗置顶播放并在支持的系统上跨虚拟桌面可见；鼠标移开时暂停隐藏，移回继续；Esc 退出")}>{t("小窗模式")}</button>}
             {page === 'player' && <button className="btn btn-outline btn-sm player-actions-toggle" aria-pressed={actionsHidden || borderless && layout === 'portrait'}
               onClick={() => {
@@ -257,7 +260,7 @@ export default function App({ platformPages = {} }) {
           </div>
         </header>
         <nav className="compact-navigation" aria-label={t("竖屏导航")}>
-          {MENU.map((item) => {
+          {(mobile ? MENU : MENU.filter(item => item.id !== 'account')).map((item) => {
             const Icon = item.icon;
             return <button key={item.id} aria-current={page === item.id ? 'page' : undefined}
               onClick={() => navigate(item.id)} title={t(item.label)}><Icon size={18} /><span>{t(item.label)}</span></button>;

@@ -49,6 +49,29 @@ function mount(api = {}, component = 'AppUpdateNotice', props = {}) {
     ui.emit('hongguo-check-app-update'); await ui.flush(); assert.ok(ui.button('重启并安装')); assert.equal(installs, 0);
     await ui.button('重启并安装').props.onClick(); assert.equal(installs, 1); ui.unmount(); assert.equal(ui.events.size, 0);
   });
+  await test('Mac downloads in the app and opens the DMG only on request', async () => {
+    const mac = { ...idle, mode: 'mac-dmg' };
+    let downloads = 0, opens = 0;
+    const ui = mount({
+      getAppUpdateState: async () => mac,
+      downloadAppUpdate: async () => {
+        downloads++;
+        return { success: true, state: { ...mac, status: 'downloaded', version: release.version, percent: 100 } };
+      },
+      installAppUpdate: async () => { opens++; return { success: true }; },
+    });
+    await ui.flush();
+    assert.equal(ui.button('前往发布页手动下载'), undefined);
+    await ui.button('下载更新').props.onClick();
+    await ui.flush();
+    assert.equal(downloads, 1);
+    assert.equal(opens, 0);
+    assert.equal(ui.button('重启并安装'), undefined);
+    assert.ok(ui.text().includes('确认替换'));
+    await ui.button('打开安装包').props.onClick();
+    assert.equal(opens, 1);
+    ui.unmount();
+  });
   await test('manual check reports no new release and network failure', async () => {
     let result = { enabled: true, release: null };
     const ui = mount({ checkAppUpdate: async () => result }); await ui.flush(); assert.equal(ui.text(), '');

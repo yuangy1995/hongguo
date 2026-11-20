@@ -21,7 +21,13 @@ export default function CommunityPanel({ seriesId, episodeId, title, cover, comp
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [shareStatus, setShareStatus] = useState('');
+  const [toast, setToast] = useState(null);
+  const showToast = (msg, type = 'success') => setToast(msg ? { text: msg, type, seq: Date.now() } : null);
+  useEffect(() => {
+    if (!toast || typeof setTimeout !== 'function') return undefined;
+    const timer = setTimeout(() => setToast(null), toast.type === 'error' ? 4200 : 2800);
+    return () => clearTimeout(timer);
+  }, [toast]);
   const [library, setLibrary] = useState(readLocalLibrary);
   const requestKey = `${id}:${episodeId || ''}:${retry}`;
   const detail = result?.key === requestKey ? result.data : null;
@@ -68,32 +74,42 @@ export default function CommunityPanel({ seriesId, episodeId, title, cover, comp
 
   return <section className="community-panel" aria-label={t("公开剧评与本机收藏")}>
     <div className="community-heading">
-      <div><h3>{t("剧评与收藏")}</h3>{!compact && <p>{t("公开评论，只读。收藏仅保存在本机。")}</p>}</div>
-      <div className="community-actions">
-        <button type="button" className="btn btn-outline" onClick={async () => {
+      <div className="community-heading-top">
+        <div><h3>{t("剧评与收藏")}</h3>{!compact && <p>{t("公开评论，只读。收藏仅保存在本机。")}</p>}</div>
+        <button type="button" className="btn btn-outline community-share-btn" onClick={async () => {
           try {
             await navigator.clipboard.writeText(`https://hongguoduanju.com/detail?series_id=${encodeURIComponent(id)}`);
-            setShareStatus('官方分享链接已复制');
-          } catch { setShareStatus('复制失败，请重试'); }
+            showToast('官方分享链接已复制', 'success');
+          } catch { showToast('复制失败，请重试', 'error'); }
         }}>{t("复制分享链接")}</button>
-        <button type="button" className={`btn ${favorite ? 'community-favorited' : 'btn-outline'}`} aria-pressed={favorite} onClick={() => setLibrary(saveLocalSeries({ id, title, cover, favorite: !favorite }))}>{t(favorite ? '已收藏到本机' : '收藏到本机')}</button>
+      </div>
+      <div className="community-actions">
+        <button type="button" className={`btn ${favorite ? 'community-favorited' : 'btn-outline'}`} aria-pressed={favorite} onClick={() => {
+          const next = !favorite;
+          const updated = saveLocalSeries({ id, title, cover, favorite: next });
+          setLibrary(updated);
+          if (!updated.error) showToast(next ? '已收藏到本机' : '已取消本机收藏', next ? 'success' : 'info');
+        }}>{t(favorite ? '已收藏到本机' : '收藏到本机')}</button>
         <button type="button" className={`btn community-episode-like ${episodeLiked ? 'community-favorited' : 'btn-outline'}`} aria-pressed={episodeLiked} disabled={!episodeId} onClick={() => {
           if (!currentEpisodeId) return;
+          const nextLiked = !episodeLiked;
           const next = episodeLiked ? likedEpisodeIds.filter(value => value !== currentEpisodeId) : [...likedEpisodeIds, currentEpisodeId];
-          setLibrary(saveLocalSeries({ id, title, cover, liked_episode_ids: next }));
+          const updated = saveLocalSeries({ id, title, cover, liked_episode_ids: next });
+          setLibrary(updated);
+          if (!updated.error) showToast(nextLiked ? '已点亮本集小红心' : '已取消本集小红心', nextLiked ? 'success' : 'info');
         }}><span className="community-heart" aria-hidden="true">{t(episodeLiked ? '♥' : '♡')}</span>{t(episodeLiked ? '已点小红心（本机）' : '本集小红心（本机）')}</button>
-        {episodeId && <button type="button" className="btn btn-outline community-episode-button" aria-expanded={opened && episodeScope} aria-controls={panelId} onClick={() => {
-          if (opened && episodeScope) setOpenedSeries('');
-          else { setScope('episode'); setOpenedSeries(id); }
-        }}>{t(opened && episodeScope ? '收起当前集评论' : '当前集评论')}</button>}
         <button type="button" className="btn btn-outline" aria-expanded={opened && !episodeScope} aria-controls={panelId} onClick={() => {
           if (opened && !episodeScope) setOpenedSeries('');
           else { setScope('series'); setOpenedSeries(id); }
         }}>{t(opened && !episodeScope ? '收起剧评' : '查看公开剧评')}</button>
+        {episodeId && <button type="button" className="btn btn-outline community-episode-button" aria-expanded={opened && episodeScope} aria-controls={panelId} onClick={() => {
+          if (opened && episodeScope) setOpenedSeries('');
+          else { setScope('episode'); setOpenedSeries(id); }
+        }}>{t(opened && episodeScope ? '收起当前集评论' : '当前集评论')}</button>}
       </div>
     </div>
     {library.error && <p className="community-error" role="alert">{t(library.error)}</p>}
-    {shareStatus && <p className="community-note" role="status">{t(shareStatus)}</p>}
+    {toast && <div className={`dm-toast dm-toast-${toast.type}`} role={toast.type === 'error' ? 'alert' : 'status'} onClick={() => showToast('')}>{t(toast.text)}</div>}
     {opened && <div id={panelId} className="community-content" aria-busy={loading}>
       {loading && <p className="community-status" role="status">{t("正在读取公开评分与评论…")}</p>}
       {!loading && error && <div className="community-error" role="alert"><p>{t(error)}</p><button type="button" className="btn btn-sm" onClick={() => setRetry(value => value + 1)}>{t("重试")}</button></div>}

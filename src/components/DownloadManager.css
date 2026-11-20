@@ -276,6 +276,8 @@
 }
 
 .dm-toast-success { background: var(--success-fill); }
+.dm-toast-info { background: var(--primary); }
+.dm-toast-warning { background: #d97706; }
 .dm-toast-error { background: var(--danger-fill); }
 
 @keyframes dm-toast-in {

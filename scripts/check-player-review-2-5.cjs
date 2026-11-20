@@ -43,7 +43,7 @@ const defer = () => { let resolve; const promise = new Promise(done => { resolve
     } finally { ui.unmount(); }
   });
   for (const [label, key, initial] of [['自动兼容模式', 'compat_mode', true], ['看完自动删除', 'auto_delete_watched', false]]) {
-    await test(`${label} updates only after successful persistence`, async () => {
+    await test(`${label} auto-saves and updates persisted setting after persistence`, async () => {
       const pending = defer();
       let persisted = { [key]: initial }, submitted;
       const ui = mountSettings({ getSettings: async () => ({ ...persisted }), saveSettings: async next => {
@@ -53,14 +53,12 @@ const defer = () => { let resolve; const promise = new Promise(done => { resolve
       } });
       try {
         await ui.flush(); assert.equal(setting(ui, label).props.checked, initial);
-        setting(ui, label).props.onChange({ target: { checked: !initial } }); await ui.flush();
-        assert.equal(persisted[key], initial, 'editing the draft must not change the active setting');
-        const saving = ui.button('保存当前设置').props.onClick(); await ui.flush();
+        const saving = setting(ui, label).props.onChange({ target: { checked: !initial } }); await ui.flush();
         assert.equal(submitted[key], !initial); assert.equal(persisted[key], initial, 'pending save must keep the persisted setting');
-        assert.equal(ui.find(node => node.type === 'fieldset').props.disabled, true);
+        assert.equal(ui.find(node => node.type === 'fieldset' && node.props.className?.includes('settings-preferences')).props.disabled, true);
         pending.resolve({ success: true }); await saving; await ui.flush();
         assert.equal(persisted[key], !initial); assert.equal(setting(ui, label).props.checked, !initial);
-        assert.ok(visible(ui, '已保存')); assert.ok(!visible(ui, '有未保存的修改'));
+        assert.ok(visible(ui, '已自动保存'));
       } finally { pending.resolve({ success: false }); ui.unmount(); }
     });
     for (const rejected of [false, true]) await test(`${label} ${rejected ? 'rejection' : 'failure'} keeps state and explains failure`, async () => {
@@ -70,14 +68,13 @@ const defer = () => { let resolve; const promise = new Promise(done => { resolve
         persisted = { ...next }; return { success: true };
       } });
       try {
-        await ui.flush(); setting(ui, label).props.onChange({ target: { checked: !initial } }); await ui.flush();
-        await ui.button('保存当前设置').props.onClick(); await ui.flush();
+        await ui.flush(); await setting(ui, label).props.onChange({ target: { checked: !initial } }); await ui.flush();
         assert.equal(persisted[key], initial, 'failed save must keep the persisted setting');
-        assert.equal(setting(ui, label).props.checked, !initial, 'keep the unsaved draft available for retry');
+        assert.equal(setting(ui, label).props.checked, !initial, 'keep the unsaved value available for retry');
         assert.ok(ui.find(node => node.props.role === 'alert' && text(node).includes('设置写入失败')));
-        assert.ok(visible(ui, '有未保存的修改')); assert.ok(!visible(ui, '已保存'));
-        assert.equal(ui.find(node => node.type === 'fieldset').props.disabled, false);
-        broken = false; await ui.button('保存当前设置').props.onClick(); await ui.flush();
+        assert.ok(!visible(ui, '已自动保存'));
+        assert.equal(ui.find(node => node.type === 'fieldset' && node.props.className?.includes('settings-preferences')).props.disabled, false);
+        broken = false; await ui.button('重试保存').props.onClick(); await ui.flush();
         assert.equal(persisted[key], !initial); assert.ok(!visible(ui, '设置写入失败'));
       } finally { ui.unmount(); }
     });

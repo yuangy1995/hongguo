@@ -851,11 +851,15 @@ async function mount(file, api, props = {}, storage = null, exportName = 'defaul
     history.button('列表').props.onClick();
     await history.flush();
     assert.equal(history.find(node => node.props.className === 'history-list').props['data-view'], 'list');
-    await history.button('刷新记录').props.onClick();
+    await history.button('同步账号记录').props.onClick();
     assert.deepEqual(refreshes, [true]);
     await history.find(node => node.props['aria-label']?.includes('继续观看 手机断点')).props.onClick();
     assert.deepEqual(opened, [['1000001', true]]);
     history.unmount();
+    const signedOut = await mount('WatchHistory', { ...api, getWatchHistory: async () => ({ success: true, accountSignedIn: false, results: [] }) }, {}, storage);
+    await signedOut.flush();
+    assert.equal(signedOut.button('同步账号记录'), undefined);
+    signedOut.unmount();
   });
   await test('the season picker keeps found seasons while retrying a partial result', async () => {
     const seasons = [1, 2, 3].map(season => ({ season, series_id: String(season), series_title: `测试剧第${season}季` }));
@@ -1901,7 +1905,7 @@ async function mount(file, api, props = {}, storage = null, exportName = 'defaul
     assert.ok(ui.button('清除已保存密码'), 'first password save must immediately enable clearing');
     ui.button('取消').props.onClick(); ui.render();
     ui.find(n => n.props['aria-label'] === '下载目录').props.onChange({ target: { value: '/fixture-downloads' } }); ui.render();
-    await ui.button('保存设置').props.onClick(); await ui.flush();
+    await ui.find(n => n.props['aria-label'] === '下载目录').props.onBlur(); await ui.flush();
     assert.equal(Object.hasOwn(submitted.at(-1), 'proxy_password'), false, 'ordinary save must not replay the password');
     ui.button('配置代理').props.onClick(); ui.render();
     ui.button('清除已保存密码').props.onClick(); ui.render();
@@ -1912,7 +1916,7 @@ async function mount(file, api, props = {}, storage = null, exportName = 'defaul
     assert.equal(ui.button('清除已保存密码'), undefined, 'cleared password must not appear saved');
     ui.button('取消').props.onClick(); ui.render();
     ui.find(n => n.props['aria-label'] === '下载目录').props.onChange({ target: { value: '/fixture-downloads-next' } }); ui.render();
-    await ui.button('保存设置').props.onClick(); await ui.flush();
+    await ui.find(n => n.props['aria-label'] === '下载目录').props.onBlur(); await ui.flush();
     assert.equal(Object.hasOwn(submitted.at(-1), 'proxy_password'), false);
     assert.equal(Object.hasOwn(submitted.at(-1), 'clear_proxy_password'), false);
     assert.equal(stored.proxy_password, '');
@@ -1920,10 +1924,12 @@ async function mount(file, api, props = {}, storage = null, exportName = 'defaul
   });
   await test('settings failed save reports the reason and retains the draft', async () => {
     const ui = await mount('Settings', { getSettings: async () => ({ root: '/old' }), saveSettings: async () => ({ success: false, error: '磁盘空间不足' }) });
-    await ui.flush(); ui.find(n => n.props['aria-label'] === '下载目录').props.onChange({ target: { value: '/new' } }); ui.render();
-    await ui.button('保存设置').props.onClick(); ui.render();
+    await ui.flush();
+    const input = ui.find(n => n.props['aria-label'] === '下载目录');
+    input.props.onChange({ target: { value: '/new' } }); ui.render();
+    await ui.find(n => n.props['aria-label'] === '下载目录').props.onBlur(); await ui.flush();
     assert.ok(ui.text().includes('磁盘空间不足')); assert.equal(ui.find(n => n.props['aria-label'] === '下载目录').props.value, '/new');
-    assert.ok(!ui.text().includes('已保存')); ui.unmount();
+    assert.ok(!ui.text().includes('已自动保存')); ui.unmount();
   });
   await test('settings reactivation reflects playback switches while keeping the draft', async () => {
     let stored = { root: '/old', auto_delete_watched: false, cache_next_episode: false, compat_mode: false };
@@ -1960,20 +1966,21 @@ async function mount(file, api, props = {}, storage = null, exportName = 'defaul
     ui.setProps({ active: false });
     stored = { ...stored, auto_delete_watched: false, cache_next_episode: false, compat_mode: false };
     ui.setProps({ active: true }); await ui.flush();
-    await ui.button('保存设置').props.onClick(); await ui.flush();
+    await ui.find(n => n.props['aria-label'] === '下载目录').props.onBlur(); await ui.flush();
     assert.equal(Object.hasOwn(submitted.at(-1), 'auto_delete_watched'), false, 'unrelated save must not resubmit stale auto-delete');
     assert.equal(ui.find(n => n.props['aria-label'] === '下载目录').props.value, '/new', 'failed save retains draft');
     fail = false;
-    await ui.button('保存设置').props.onClick(); await ui.flush();
+    await ui.button('重试保存').props.onClick(); await ui.flush();
     assert.equal(stored.root, '/new');
     for (const key of ['auto_delete_watched', 'cache_next_episode', 'compat_mode']) assert.equal(stored[key], false, `preserve latest ${key}`);
     const autoDelete = ui.find(n => n.type === 'label' && n.children.some(child => child?.props?.className === 'proxy-switch-text' && child.children[0] === '看完自动删除'));
-    autoDelete.children.find(n => n?.type === 'input').props.onChange({ target: { checked: true } }); ui.render();
-    await ui.button('保存设置').props.onClick(); await ui.flush();
-    assert.equal(stored.auto_delete_watched, true, 'explicit user edit must still apply');
+    await autoDelete.children.find(n => n?.type === 'input').props.onChange({ target: { checked: true } }); await ui.flush();
+    assert.equal(stored.auto_delete_watched, false, 'the checkbox alone must not enable automatic deletion');
+    await ui.button('开启自动删除').props.onClick(); await ui.flush();
+    assert.equal(stored.auto_delete_watched, true, 'confirmed edit must apply immediately');
     stored.auto_delete_watched = false;
     ui.find(n => n.props['aria-label'] === '下载目录').props.onChange({ target: { value: '/next' } }); ui.render();
-    await ui.button('保存设置').props.onClick(); await ui.flush();
+    await ui.find(n => n.props['aria-label'] === '下载目录').props.onBlur(); await ui.flush();
     assert.equal(stored.auto_delete_watched, false, 'successful save clears the earlier edit intent');
     ui.unmount();
   });

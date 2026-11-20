@@ -99,6 +99,10 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
     pendingAutoplayRef.current = !snapshot.paused;
   });
   const playbackActive = active || floatingPlayer.floating || nativePictureInPicture;
+  const [toolbarCastSlot, setToolbarCastSlot] = useState(null);
+  useLayoutEffect(() => {
+    setToolbarCastSlot(!mobile && !portrait && active && !actionsHidden ? document.querySelector?.('#player-toolbar-cast') || null : null);
+  }, [mobile, portrait, active, actionsHidden]);
   const [autoNext, setAutoNext] = useState(true);
   const [autoAdvancing, setAutoAdvancing] = useState(false);
   const [cacheNext, setCacheNext] = useState(true);
@@ -158,6 +162,7 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
   const videoRef = useRef(null);
   const transitionFrameRef = useRef(null);
   const stageRef = useRef(null);
+  const dismissedPopupClickRef = useRef(0);
   const downloadToolsRef = useRef(null);
   const playbackOptionsRef = useRef(null);
   const seriesPickerRef = useRef(null);
@@ -2143,8 +2148,16 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
       </div>
       {t(createPortal(
       <div className={`player-stage ${windowFill ? 'player-window-fill' : ''}`} data-picture-mode={pictureMode} ref={stageRef}
+        onPointerDownCapture={(event) => {
+          if (event.target?.closest?.('.player-controls, button, input, select, textarea, a, [role="dialog"], [popover]')) return;
+          const doc = stageRef.current?.ownerDocument;
+          if (doc?.querySelector?.('.player-controls-popover, .player-controls-menu, .player-controls-danmaku [role="dialog"], .cast-popover, [popover]:popover-open')) {
+            dismissedPopupClickRef.current = Date.now() + 600;
+          }
+        }}
         onDoubleClick={(event) => {
           if (event.target.closest('.player-controls, button, input, select, textarea, a, [role="dialog"]')) return;
+          if (Date.now() < dismissedPopupClickRef.current) return;
           clearTimeout(videoClickTimer.current);
           if (canPlay) return toggleFullscreen();
         }}>
@@ -2159,6 +2172,10 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
             aria-label={t(mobile ? '视频画面，轻触显示控件，长按临时2倍速，双击全屏' : `视频画面，${formatShortcut(shortcuts.play, t)}播放或暂停`)}
             onClick={(event) => {
               if (mobile) return;
+              if (Date.now() < dismissedPopupClickRef.current) {
+                dismissedPopupClickRef.current = 0;
+                return;
+              }
               const video = videoRef.current;
               if (!canPlay || !video || event.detail > 1) return;
               video.focus({ preventScroll: true });
@@ -2454,6 +2471,10 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
       </div>
 
       {!mobile && downloadTools}
+      {!mobile && !portrait && !actionsHidden && toolbarCastSlot && createPortal(
+        <CastPanel seriesId={activeSeriesId} episode={current} title={detail?.series_title} videoRef={videoRef} />,
+        toolbarCastSlot
+      )}
 
       <div className="player-footer" hidden={actionsHidden}>
         {/^[0-9]{6,30}$/.test(String(activeSeriesId)) && (
@@ -2461,7 +2482,7 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
             compact={!mobile} />
         )}
         <div className="player-footer-tools">
-          {!mobile && <CastPanel seriesId={activeSeriesId} episode={current} title={detail?.series_title} videoRef={videoRef} />}
+          {!mobile && (portrait || !toolbarCastSlot) && <CastPanel seriesId={activeSeriesId} episode={current} title={detail?.series_title} videoRef={videoRef} />}
           {mobile && <SequelFinder seriesId={activeSeriesId} active={active && !actionsHidden} />}
           <NasDownload seriesId={activeSeriesId} quality={downloadQuality} disabled={qualityLoading} compact={!mobile} />
         </div>

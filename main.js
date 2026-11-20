@@ -70,6 +70,7 @@ const { searchHongguo } = require('./src/native/hongguo-search');
 const { fitWindowBounds, getWindowScale, saveWindowZoom, restoreMainWindowBounds, rememberMainWindowBounds } = require('./src/native/window-layout');
 const { createEpisodePanelController } = require('./src/native/episode-panel');
 const { appUpdateSource, availableRelease } = require('./src/native/app-update');
+const { MAC_UPDATE_MODE, createMacDownloadTransport, createMacUpdateDownloader } = require('./src/native/mac-update-download');
 const { fetchPublicDetails } = require('./src/native/public-details');
 const { fetchEpisodeComments } = require('./src/native/episode-comments');
 const { fetchDanmaku, setDeviceIdentityFile } = require('./src/native/danmaku');
@@ -102,6 +103,7 @@ let castBusy = false;
 let mainWindow = null;
 let appUpdateInstaller = null;
 let appUpdater = null;
+let macUpdateSession = null;
 let updateDownloadGeneration = 0;
 let pendingUpdateOperations = 0;
 let quitCleanup = null;
@@ -295,7 +297,7 @@ const validateProxyDraft = proxyConfig.validateDraft;
 let accountController = null;
 const proxyManager = createProxyManager({
   config: proxyConfig,
-  getSessions: () => [session.defaultSession, appUpdater?.netSession, accountController?.peekWebSession()],
+  getSessions: () => [session.defaultSession, appUpdater?.netSession, macUpdateSession, accountController?.peekWebSession()],
   log: message => console.log(message),
   schedule: (...args) => setTimeout(...args),
   cancel: timer => clearTimeout(timer),
@@ -5150,7 +5152,7 @@ ipcMain.handle('open-folder', async (event, taskId) => {
   return { success: false, error: '文件夹不存在' };
 });
 
-// ===== 应用内更新：固定官方源，下载和重启均由用户确认 =====
+// ===== 应用内更新：固定项目发布源，由用户确认下载和安装 =====
 let updateRequest = null;
 let latestAppRelease = null;
 function appUpdateSupport() {
@@ -5159,13 +5161,35 @@ function appUpdateSupport() {
   else if (process.platform === 'win32' && (portableConfig.mode === 'portable' || portableConfig.portableDir
     || process.env.PORTABLE_EXECUTABLE_FILE || process.env.PORTABLE_EXECUTABLE_DIR)) reason = '便携版需手动更新。请先退出旧程序，再运行发布页中的 setup 安装包，并从安装后生成的快捷方式启动；安装版支持后续应用内更新。若仍用便携版，请完整解压新版并直接运行新版文件。';
   else if (!['darwin', 'win32'].includes(process.platform)) reason = '当前系统请前往发布页手动更新。';
-  else if (process.platform === 'darwin') reason = 'Mac 版可检查更新，请前往发布页下载并安装新版。';
+  else if (process.platform === 'darwin' && ['arm64', 'x64'].includes(process.arch)) {
+    return { supported: true, reason: '', mode: MAC_UPDATE_MODE };
+  } else if (process.platform === 'darwin') reason = '当前系统请前往发布页手动更新。';
   return { supported: !reason, reason };
 }
 function appUpdateState() {
   return appUpdateInstaller?.getState() || { ...appUpdateSupport(), status: 'idle', version: null, percent: 0, error: '' };
 }
+function fetchAppUpdateRelease(signal) {
+  return axios.get(APP_UPDATE_SOURCE.latestApiUrl, {
+    signal, timeout: 10000, maxRedirects: 0, maxContentLength: 1024 * 1024,
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Hongguo-Drama-Update-Check' },
+  });
+}
 function getAppUpdateInstaller() {
+  if (!appUpdateInstaller && process.platform === 'darwin') {
+    macUpdateSession = session.fromPartition('hongguo-mac-update', { cache: false });
+    appUpdateInstaller = createMacUpdateDownloader({
+      currentVersion: APP_VERSION,
+      source: APP_UPDATE_SOURCE,
+      arch: process.arch,
+      tempDir: app.getPath('temp'),
+      isEnabled: () => !proxyStartupFallback && getCurrentSettings().app_updates_enabled !== false,
+      fetchRelease: async signal => (await fetchAppUpdateRelease(signal)).data,
+      downloadImage: createMacDownloadTransport(macUpdateSession),
+      openPath: file => shell.openPath(file),
+      emit: state => sendToRenderer('app-update-state', state),
+    });
+  }
   if (!appUpdateInstaller) {
     appUpdater = require('electron-updater').autoUpdater;
     appUpdater.on('login', (authInfo, callback) => {
@@ -5193,17 +5217,21 @@ ipcMain.handle('get-app-update-state', () => appUpdateState());
 ipcMain.handle('download-app-update', async () => {
   const support = appUpdateSupport();
   if (!support.supported) return { success: false, error: support.reason };
+  if (proxyStartupFallback) return { success: false, error: '请先修复或明确关闭代理。' };
   if (!latestAppRelease || getCurrentSettings().app_updates_enabled === false) return { success: false, error: '更新信息已失效，请重新检查更新。' };
   try {
     const request = updateDownloadGeneration;
+    const version = latestAppRelease.version;
     const installer = getAppUpdateInstaller();
     if (!['checking', 'downloading', 'downloaded', 'installing'].includes(installer.getState().status)) {
-      await applyProxyToSession(proxyManager.desired || resolveProxyConfig(getCurrentSettings()), [appUpdater.netSession]);
+      await applyProxyToSession(proxyManager.desired || resolveProxyConfig(getCurrentSettings()), [macUpdateSession || appUpdater.netSession]);
     }
     if (request !== updateDownloadGeneration) return { success: false, error: '更新已取消。', state: installer.getState() };
-    return await installer.download(latestAppRelease.version);
+    return await installer.download(version);
   }
-  catch (_) { return { success: false, error: '无法准备应用内更新，请重试或前往发布页下载安装。' }; }
+  catch (_) { return { success: false, error: support.mode === MAC_UPDATE_MODE
+    ? '暂时无法下载更新，请检查网络后重试。'
+    : '无法准备应用内更新，请重试或前往发布页下载安装。' }; }
 });
 ipcMain.handle('cancel-app-update', () => {
   if (appUpdateInstaller?.getState().status === 'installing') return { success: false, error: '正在安装更新，无法取消。', state: appUpdateState() };
@@ -5224,10 +5252,7 @@ ipcMain.handle('check-app-update', async event => {
   }
   if (!updateRequest) {
     const releaseTagPrefix = `${APP_UPDATE_SOURCE.releasesUrl}/tag/`;
-    updateRequest = axios.get(APP_UPDATE_SOURCE.latestApiUrl, {
-      timeout: 10000, maxRedirects: 0, maxContentLength: 1024 * 1024,
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Hongguo-Drama-Update-Check' },
-    }).catch(() => axios.get(`${APP_UPDATE_SOURCE.releasesUrl}/latest`, {
+    updateRequest = fetchAppUpdateRelease().catch(() => axios.get(`${APP_UPDATE_SOURCE.releasesUrl}/latest`, {
       // GitHub's public release endpoint does not consume the anonymous API quota.
       timeout: 10000, maxRedirects: 0, maxContentLength: 1024 * 1024,
       headers: { Accept: 'application/json', 'User-Agent': 'Hongguo-Drama-Update-Check' },

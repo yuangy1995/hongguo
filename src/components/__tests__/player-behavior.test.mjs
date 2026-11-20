@@ -379,7 +379,7 @@ test('the speed-step label follows the current slower and faster bindings', () =
   assert.ok(page.find(node => node.type === 'span' && node.children?.includes('J / K 倍速调节')));
 });
 
-test('saving playback settings dispatches the retained-player sync event', async () => {
+test('toggling playback settings auto-saves and dispatches the retained-player sync event', async () => {
   const page = mountSettings();
   const events = [];
   page.window.addEventListener('hongguo-playback-settings', event => events.push(event.detail));
@@ -387,13 +387,32 @@ test('saving playback settings dispatches the retained-player sync event', async
   page.render();
   const danmaku = page.find(node => node.type === 'input' && node.props['aria-label'] === '显示弹幕按钮');
   assert.ok(danmaku);
-  danmaku.props.onChange({ target: { checked: true } });
+  assert.equal(page.find(node => node.type === 'button' && node.props['aria-label'] === '保存当前设置'), undefined);
+  await danmaku.props.onChange({ target: { checked: true } });
+  await tick(); await tick();
   page.render();
-  const save = page.find(node => node.type === 'button' && node.props['aria-label'] === '保存当前设置');
-  assert.ok(save);
-  await save.props.onClick();
   assert.equal(events.length, 1);
   assert.equal(events[0].show_danmaku_controls, true);
+});
+
+test('enabling automatic deletion in settings requires confirmation', async () => {
+  const page = mountSettings();
+  const toggle = () => page.find(node => node.type === 'input' && node.props['aria-label'] === '看完自动删除');
+  const button = label => page.find(node => node.type === 'button' && node.children?.includes(label));
+  await tick();
+  page.render();
+  toggle().props.onChange({ target: { checked: true } });
+  page.render();
+  assert.ok(button('开启自动删除'));
+  assert.notEqual((await page.window.electronAPI.getSettings()).auto_delete_watched, true);
+  button('取消').props.onClick();
+  page.render();
+  assert.equal(button('开启自动删除'), undefined);
+  toggle().props.onChange({ target: { checked: true } });
+  page.render();
+  button('开启自动删除').props.onClick();
+  await tick();
+  assert.equal((await page.window.electronAPI.getSettings()).auto_delete_watched, true);
 });
 
 test('software decode ends the buffering overlay on metadata and stays paused', async () => {

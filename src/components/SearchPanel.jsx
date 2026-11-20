@@ -18,7 +18,6 @@ const SEARCH_SAFETY_TIMEOUT_MS = 25000;
 function SearchPanel({ onSelectSeries, onViewSeries, onSwitchToInput, active = true }) {
   useLanguage();
   const mobile = window.electronAPI?.platform === 'android';
-  const History = mobile ? 'div' : 'details';
   const [source, setSource] = useState('all');
   const { sources: mediaSources, revision: sourceRevision, loading: sourcesLoading, error: sourcesError } = useMediaSources();
   const requestVersion = useRef(0);
@@ -392,11 +391,13 @@ function SearchPanel({ onSelectSeries, onViewSeries, onSwitchToInput, active = t
         {suggestions.map(({ term, source: origin }) => <option key={term} value={term} label={origin} />)}
       </datalist>
       <p className="settings-hint search-suggestions-hint" id="search-suggestions-hint">{t("本机联想：匹配搜索历史和本次浏览过的真实剧名。")}</p>
-      {history.length > 0 && <History className="search-history" open={mobile ? undefined : results === null ? true : undefined}>
-        {!mobile && <summary>{t("本机搜索历史")}</summary>}
-        <div className="search-history-heading">{mobile && <span>{t("本机搜索历史")}</span>}<button type="button" className="btn-chip" onClick={clearHistory}>{t("清除历史")}</button></div>
+      {history.length > 0 && <div className="search-history">
+        <div className="search-history-heading">
+          <span>{t("本机搜索历史")}</span>
+          <button type="button" className="btn btn-outline btn-sm search-history-clear" onClick={clearHistory}>{t("清除历史")}</button>
+        </div>
         <div className="search-history-terms">{history.map((term) => <span className="search-history-term" key={term}><button type="button" className="btn-chip" title={term} onClick={() => { changeKeyword(term); inputRef.current?.focus(); }}>{term}</button><button type="button" className="search-history-remove" aria-label={t(`删除搜索历史：${term}`)} title={t("删除这条搜索历史")} onClick={() => removeHistory(term)}>×</button></span>)}</div>
-      </History>}
+      </div>}
       {historyError && <p className="search-history-error" role="alert">{t(historyError)}</p>}
       {mobile && <p className="settings-hint" style={{ marginTop: 8 }}>
         {t(onViewSeries ? '点海报直接播放；详情与下载可单独打开。' : source === 'all' ? '同时搜索所有已启用来源，结果标明来源；选择一部即可查看全部剧集。' : '按剧名查找，选择一部即可查看全部剧集。')}

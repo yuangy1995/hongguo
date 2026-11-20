@@ -6,6 +6,8 @@ import { groupHistory, historyGroupSuggestions } from './historyGroups.mjs';
 
 const PREFERENCES_KEY = 'hongguo:watch-history-preferences';
 const ACCOUNT_VIEW_KEY = 'hongguo:account-history-view';
+const CARD_SIZE_KEY = 'hongguo:history-card-size';
+const CARD_SIZES = ['small', 'standard', 'large'];
 
 export default function WatchHistory({ active = true, onNavigate }) {
   useLanguage();
@@ -22,11 +24,27 @@ export default function WatchHistory({ active = true, onNavigate }) {
     try { return window.localStorage.getItem(ACCOUNT_VIEW_KEY) === 'list' ? 'list' : 'cards'; }
     catch { return 'cards'; }
   });
+  const [cardSize, setCardSize] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem(CARD_SIZE_KEY);
+      return CARD_SIZES.includes(saved) ? saved : 'standard';
+    } catch { return 'standard'; }
+  });
   const [checkingRow, setCheckingRow] = useState('');
   const [opening, setOpening] = useState('');
   const [removing, setRemoving] = useState('');
   const [error, setError] = useState('');
-  const [status, setStatus] = useState('');
+  const [notice, setNotice] = useState(null);
+  const noticeTimer = useRef(null);
+  const showNotice = (text, type = 'info', duration) => {
+    if (typeof clearTimeout === 'function') clearTimeout(noticeTimer.current);
+    setNotice(text ? { text, type } : null);
+    if (text && typeof setTimeout === 'function') {
+      const ms = duration ?? (type === 'error' || type === 'warning' ? 4500 : 3200);
+      noticeTimer.current = setTimeout(() => setNotice(null), ms);
+    }
+  };
+  useEffect(() => () => { if (typeof clearTimeout === 'function') clearTimeout(noticeTimer.current); }, []);
   const [expanded, setExpanded] = useState({});
   const [decisions, setDecisions] = useState(() => {
     try { const value = JSON.parse(localStorage.getItem('hongguo:history-groups')); return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; } catch { return {}; }
@@ -72,7 +90,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
   const savePreferences = next => {
     setPreferences(next);
     try { window.localStorage.setItem(PREFERENCES_KEY, JSON.stringify(next)); }
-    catch { setStatus('本次选择已生效，但未能保存；重启后可能恢复默认。'); }
+    catch { showNotice('本次选择已生效，但未能保存；重启后可能恢复默认。', 'warning'); }
   };
 
   const load = async () => {
@@ -98,61 +116,76 @@ export default function WatchHistory({ active = true, onNavigate }) {
       load();
       if (!mobile) void window.electronAPI.syncAccountProgress?.().catch(() => {});
     }
-    else document.querySelector?.('.history-menu:popover-open')?.hidePopover?.();
+    else {
+      document.querySelector?.('.history-menu:popover-open')?.hidePopover?.();
+      if (typeof clearTimeout === 'function') clearTimeout(noticeTimer.current);
+      setNotice(null);
+    }
     return () => { request.current++; };
   }, [active, mobile]);
   useEffect(() => window.electronAPI.onWatchHistoryUpdated?.(() => { if (active) load(); }), [active]);
+  useEffect(() => window.electronAPI.onAccountUpdated?.(() => { if (active) load(); }), [active]);
   useEffect(() => window.electronAPI.onWatchHistoryProgress?.(data => { if (active) setProgress(data); }), [active]);
   useEffect(() => window.electronAPI.onAccountProgressSyncStatus?.(data => setSyncError(data?.error || '')), []);
 
   const refreshAccount = async () => {
-    setRefreshingAccount(true); setError(''); setStatus('');
+    setRefreshingAccount(true); setError(''); showNotice('');
     try {
       const result = await window.electronAPI.getAccountHistory({ refresh: true });
-      if (!result?.success) throw new Error(result?.error || '账号观看记录刷新失败，请稍后重试。');
+      if (!result?.success) throw new Error(result?.error || '账号观看记录同步失败，请稍后重试。');
       await load();
-      setStatus('已刷新账号观看记录。');
-    } catch (failure) { setError(failure.message || '账号观看记录刷新失败，请稍后重试。'); }
+      showNotice('已同步账号观看记录。', 'success');
+    } catch (failure) {
+      const msg = failure.message || '账号观看记录同步失败，请稍后重试。';
+      if (rows.length) showNotice(msg, 'error'); else setError(msg);
+    }
     finally { setRefreshingAccount(false); }
   };
 
   const checkUpdates = async () => {
-    setChecking(true); setStatus(''); setError(''); setProgress(null);
+    setChecking(true); showNotice(''); setError(''); setProgress(null);
     try {
       const result = await window.electronAPI.refreshWatchHistory({ scope });
       if (!result?.success) throw new Error(result?.error || '检查失败，请重试');
       await load();
-      setStatus(`已检查 ${result.checked} 部${result.failed ? `，${result.failed} 部未完成，可稍后重试` : ''}${result.remaining ? `；本次预算内还有 ${result.remaining} 部，点击继续检查` : ''}`);
-    } catch (failure) { setError(failure.message || '检查失败，请重试'); }
+      const msg = `已检查 ${result.checked} 部${result.failed ? `，${result.failed} 部未完成，可稍后重试` : ''}${result.remaining ? `；本次预算内还有 ${result.remaining} 部，点击继续检查` : ''}`;
+      showNotice(msg, result.failed || result.remaining ? 'warning' : result.checked > 0 ? 'success' : 'info');
+    } catch (failure) {
+      const msg = failure.message || '检查失败，请重试';
+      if (rows.length) showNotice(msg, 'error'); else setError(msg);
+    }
     finally { setChecking(false); setProgress(null); }
   };
 
   const checkRow = async (row) => {
     if (checking || checkingRow) return;
-    setCheckingRow(row.series_id); setStatus(''); setError('');
+    setCheckingRow(row.series_id); showNotice(''); setError('');
     try {
       const result = await window.electronAPI.checkWatchHistoryItem(row.series_id);
       if (!result?.success) throw new Error(result?.error || '检查失败，请重试');
       await load();
-      setStatus(result.error
-        ? `《${row.series_title}》分集已检查；续作检查未完成：${result.error}`
-        : `《${row.series_title}》${result.checked ? '已检测完成' : '没有可更新的记录'}。`);
+      if (result.error) showNotice(`《${row.series_title}》分集已检查；续作检查未完成：${result.error}`, 'warning');
+      else showNotice(`《${row.series_title}》${result.checked ? '已检测完成' : '没有可更新的记录'}。`, result.checked ? 'success' : 'info');
     } catch (failure) {
       await load();
-      setError(failure.message || '检查失败，请重试');
+      const msg = failure.message || '检查失败，请重试';
+      if (rows.length) showNotice(msg, 'error'); else setError(msg);
     }
     finally { setCheckingRow(''); }
   };
 
   const remove = async (row) => {
-    setRemoving(row.series_id); setError(''); setStatus('');
+    setRemoving(row.series_id); setError(''); showNotice('');
     try {
       const result = await window.electronAPI.removeWatchHistory(row.series_id);
       if (!result?.success) throw new Error(result?.error || '移除失败，请重试');
       setRows(current => current.filter(item => item.series_id !== row.series_id));
-      setStatus(`已移除《${row.series_title}》的观看记录，视频文件不受影响。`);
+      showNotice(`已移除《${row.series_title}》的观看记录，视频文件不受影响。`, 'info');
       void load();
-    } catch (failure) { setError(failure.message || '移除失败，请重试'); }
+    } catch (failure) {
+      const msg = failure.message || '移除失败，请重试';
+      if (rows.length) showNotice(msg, 'error'); else setError(msg);
+    }
     finally { setRemoving(''); }
   };
 
@@ -216,7 +249,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
       </div>
       <div className="history-tools">
         {accountSignedIn && <button className="btn btn-outline" type="button" disabled={refreshingAccount} onClick={refreshAccount}>
-          <RefreshCw size={15} className={refreshingAccount ? 'spin' : ''} />{t("刷新记录")}
+          <RefreshCw size={15} className={refreshingAccount ? 'spin' : ''} />{t("同步账号记录")}
         </button>}
         <select className="history-scope" value={scope} onChange={event => savePreferences({ ...preferences, scope: event.target.value })} disabled={checking || !!checkingRow || loading} aria-label={t("批量检测范围")} title={t("批量检测范围")}>
           <option value="all">{t("全部记录")}</option>
@@ -249,6 +282,12 @@ export default function WatchHistory({ active = true, onNavigate }) {
             try { window.localStorage.setItem(ACCOUNT_VIEW_KEY, mode); } catch {}
           }}>{t(mode === 'cards' ? '卡片' : '列表')}</button>)}
         </div>
+        {view === 'cards' && <div className="account-history-views history-card-sizes" role="group" aria-label={t("卡片大小")}>
+          {[['small', '小'], ['standard', '中'], ['large', '大']].map(([size, label]) => <button type="button" key={size} aria-pressed={cardSize === size} onClick={() => {
+            setCardSize(size);
+            try { window.localStorage.setItem(CARD_SIZE_KEY, size); } catch {}
+          }}>{t(label)}</button>)}
+        </div>}
       </div>}
       <label className="history-display-option" title={t("只调整当前列表；批量检测范围不变，也不会删除记录")}>
         <input type="checkbox" checked={hideLowSeasons} disabled={loading} onChange={event => savePreferences({ ...preferences, hideLowSeasons: event.target.checked })} />
@@ -257,7 +296,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
     </div>
     {mobile && <p className="history-hint">{t("按最近观看时间排序，检查更新不改变观看顺序。同组提醒汇总到首个可见记录。")}{t("按当前最后一集的片尾进度判断；隐藏低季后，计数仅代表列表中的季，旧记录可能显示未看完。")}</p>}
     {error && <div className="history-error" role="alert"><span>{t(error)}</span><button className="btn btn-outline btn-sm" onClick={load}>{t("重新加载")}</button></div>}
-    {status && <p className="history-hint" role="status">{t(status)}</p>}
+    {notice && <div className={`dm-toast dm-toast-${notice.type}`} role={notice.type === 'error' ? 'alert' : 'status'} onClick={() => showNotice('')}>{t(notice.text)}</div>}
     {accountSignedIn && syncError && <p className="history-hint" role="status">{t("账号进度同步未完成，将稍后重试。")}</p>}
     {checking && progress?.total > 0 && <p className="history-hint" role="status">{t("正在检查 ")}{t((progress.checked || 0) + (progress.failed || 0) + (progress.skipped || 0))} / {t(progress.total)}{t(progress.current ? `：${progress.current}` : '')}
     </p>}
@@ -267,7 +306,8 @@ export default function WatchHistory({ active = true, onNavigate }) {
     </div> : !visibleRows.length ? <div className="history-empty" role="status">
       <Clock size={30} /><h2>{t(accountSignedIn && query.trim() ? '没有匹配的观看记录' : emptyTitle)}</h2>
       <button type="button" className="btn btn-outline" onClick={() => { setFilter('all'); setQuery(''); }}>{t("查看全部")}</button>
-    </div> : <ul className="history-list" data-view={accountSignedIn ? view : 'list'}>{visibleRows.map(row => {
+    </div> : <ul className="history-list" data-view={accountSignedIn ? view : 'list'} data-card-size={cardSize}>{visibleRows.map(row => {
+      const cardView = !mobile && accountSignedIn && view === 'cards';
       const group = groupById.get(row.series_id);
       const groupHeadId = group[0].series_id;
       const isHead = visibleRows.find(item => groupById.get(item.series_id) === group) === row;
@@ -292,7 +332,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
           {t(decisions[row.series_id] === null ? <span className="history-group-state">{t("独立显示 · 手动")}</span> : group.length > 1 && group.some(item => Object.hasOwn(decisions, item.series_id)) && <span className="history-group-state">{t("手动分组")}</span>)}
           {row.unreadEpisodes > 0 && <span className="history-update">{t("新增 ")}{t(row.unreadEpisodes)}{t(" 集")}</span>}
         </span>
-        <span className="history-action"><Play size={15} />{t(opening === row.series_id ? '打开中…' : '继续观看')}</span>
+        {!cardView && <span className="history-action"><Play size={15} />{t(opening === row.series_id ? '打开中…' : '继续观看')}</span>}
       </button>
       <div className="history-row-actions">
         {group.length > 1 && isHead && <button className="btn btn-outline btn-sm history-fold" aria-expanded={!hideLowSeasons || !!expanded[groupHeadId]} onClick={() => { if (!hideLowSeasons) savePreferences({ ...preferences, hideLowSeasons: true }); setExpanded(value => ({ ...value, [groupHeadId]: hideLowSeasons ? !value[groupHeadId] : false })); }}>{t(!hideLowSeasons || expanded[groupHeadId] ? '折叠组' : '展开组')}</button>}
@@ -325,6 +365,9 @@ export default function WatchHistory({ active = true, onNavigate }) {
         {!mobile && <summary><AlertCircle size={14} />{t("检查未完成，可稍后重试")}</summary>}
         {updateErrors.map(([label, message]) => <p className="history-check-error" key={label}>{t(label)}{t(message)}</p>)}
       </Relations>}
+      {cardView && <button type="button" className="history-action history-card-cta" disabled={!active || !!opening || !!removing} onClick={() => resume(row)}>
+        <Play size={15} />{t(opening === row.series_id ? '打开中…' : '继续观看')}
+      </button>}
     </li>; })}</ul>)}
   </section>;
 }

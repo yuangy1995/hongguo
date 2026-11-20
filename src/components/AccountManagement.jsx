@@ -1,6 +1,6 @@
 import { t, useLanguage, getLanguage } from '../i18n';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Play, RefreshCw, Search, User, X } from './icons';
+import { AlertCircle, Check, Play, RefreshCw, Search, User, X } from './icons';
 import './AccountManagement.css';
 
 const HISTORY_VIEW_KEY = 'hongguo:account-history-view';
@@ -371,11 +371,19 @@ export function AccountSidebar({ onCheckpoint }) {
     finally { setBusy(false); }
   };
 
-  return <div className="sidebar-account">
-    <div className="sidebar-account-status" role="status">
-      <User size={17} aria-hidden="true" />
-      <div><strong title={account?.account?.nickname}>{t('红果账号')}</strong>
-        <small data-expired={account?.expired === true}>{t(!account ? '正在读取…' : account.expired ? '登录已失效，请重新登录' : account.signedIn ? '已登录' : account.error || account.success === false ? '登录状态暂时无法读取' : '未登录')}</small>
+  const nickname = account?.account?.nickname?.trim();
+  const authState = !account ? 'loading' : account.signedIn ? 'valid' : account.expired ? 'expired' : 'signed-out';
+  const statusHint = !account ? '正在读取…' : account.expired ? '登录已失效，请重新登录' : account.signedIn ? '已登录' : account.error || account.success === false ? '登录状态暂时无法读取' : '未登录';
+
+  return <div className="sidebar-account" data-auth-state={authState}>
+    <div className="sidebar-account-status" role="status" aria-label={t(statusHint)} title={t(statusHint)}>
+      <span className="sidebar-account-avatar" aria-hidden="true">
+        <User size={16} />
+        {account?.signedIn && <span className="sidebar-account-badge sidebar-account-badge-valid"><Check size={9} /></span>}
+        {account?.expired && <span className="sidebar-account-badge sidebar-account-badge-expired"><AlertCircle size={9} /></span>}
+      </span>
+      <div><strong title={nickname || t('红果账号')}>{nickname || t('红果账号')}</strong>
+        {!account?.signedIn && <small data-expired={account?.expired === true}>{t(statusHint)}</small>}
       </div>
     </div>
     {account && (account.signedIn
