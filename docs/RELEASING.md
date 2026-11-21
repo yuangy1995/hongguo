@@ -13,6 +13,14 @@
 
 需要发新版本时，由维护者手动合并上游改动并检查本项目的功能，再通过 GitHub Actions 的「发布桌面版」启动四平台发行。
 
+## 1.0.5 正式发行
+
+1.0.5 已于 2026-11-21 21:43:36（Asia/Shanghai）公开并设为 Latest。标签 `v1.0.5` 对应源码 `9729fca0b096442cc10e5fcaba2696ea5d533d91`。四平台由同一次 GitHub Actions 工作流构建，共 20 份附件。发布任务已核对远端摘要和匿名下载入口。见 [发布页](https://github.com/yuangy1995/hongguo/releases/tag/v1.0.5)及[构建和验收](https://github.com/yuangy1995/hongguo/actions/runs/44909143926)。
+
+- 双 Mac DMG 的临时签名、版本、架构和启动检查通过。已回读两个公开安装包并确认默认文件隔离设置启用。Apple 芯片版在隔离资料中下载《她那么骄》第 1、2 集并静音播放各约 10 秒。Intel Mac 覆盖启动。
+- Linux AppImage 在隔离资料中下载《步步登阶第二部》第 21、22 集并静音播放各约 10 秒。Windows x64 在 GitHub 虚拟机通过便携版真实下载《首辅娇娘》第 55、56 集、静音播放、新装、重装及 1.80 升级检查，EXE 未签名。
+- 本机隔离界面检查覆盖浅色、深色、导航选中项的对比度、键盘聚焦和竖屏切换。桌面及 Android 源码回归通过。见 [源码检查](https://github.com/yuangy1995/hongguo/actions/runs/44909141797)。
+
 ## 1.0.4 正式发行
 
 1.0.4 已于 2026-11-21 00:00:45（Asia/Shanghai）公开并设为 Latest。标签 `v1.0.4` 对应源码 `0f09655d20d133a00b4598b6064aed3c53b3ffbb`，四平台共 20 份附件。Apple 芯片构建机排队后成功分配，四个平台最终成品均来自同一次 GitHub Actions 工作流。见 [发布页](https://github.com/yuangy1995/hongguo/releases/tag/v1.0.4)及[构建和验收](https://github.com/yuangy1995/hongguo/actions/runs/44752665364)。
