@@ -5,6 +5,7 @@ import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import './index.css';
 import './desktop-mist.css';
+import './silk-glass.css';
 import { initializePosterSize } from './theme';
 
 import { initializeLanguage } from './i18n';

@@ -60,7 +60,10 @@ assert.deepEqual(availableRelease({ tag_name: 'v1.0.3' }, '1.0.2', macSource), {
 assert.deepEqual(availableRelease({ tag_name: 'v1.0.4' }, '1.0.3', macSource), {
   version: '1.0.4', url: 'https://github.com/yuangy1995/hongguo/releases/tag/v1.0.4',
 });
-assert.equal(pkg.version, '1.0.4', 'Current source release target must be 1.0.4');
+assert.deepEqual(availableRelease({ tag_name: 'v1.0.5' }, '1.0.4', macSource), {
+  version: '1.0.5', url: 'https://github.com/yuangy1995/hongguo/releases/tag/v1.0.5',
+});
+assert.equal(pkg.version, '1.0.5', 'Current source release target must be 1.0.5');
 assert.equal(pkg.build.buildVersion, pkg.version);
 assert.equal(lock.version, pkg.version, 'Lockfile version must match the release');
 assert.equal(lock.packages[''].version, pkg.version, 'Lockfile root package must match the release');

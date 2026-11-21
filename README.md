@@ -2,6 +2,12 @@
 
 本项目基于 [jackotom/hongguo-drama](https://github.com/jackotom/hongguo-drama) 修改。感谢原作者 jackotom 和原项目贡献者。
 
+## 1.0.5 更新内容
+
+- 更新桌面为银灰毛玻璃风格，优化导航、卡片及按下或选中时的视觉反馈。
+
+[1.0.5 更新说明](docs/release-notes/1.0.5.md)
+
 ## 1.0.4 更新内容
 
 - 下载管理按短剧分组，可查看各集进度、按状态筛选和补下载未下载的分集。

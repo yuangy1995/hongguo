@@ -1,0 +1,189 @@
+/* 银灰丝绸毛玻璃：中性银灰底、丝绸光泽背景、大圆角磨砂卡片、柔和胶囊状态色。叠加在雾白界面之上。 */
+.desktop-mist {
+  --bg: #dfe3e6;
+  --bg-subtle: rgba(248, 250, 251, 0.62);
+  --bg-elevated: #f7f8f9;
+  --bg-card: rgba(250, 251, 252, 0.58);
+  --bg-inset: rgba(236, 239, 241, 0.72);
+  --bg-hover: rgba(255, 255, 255, 0.78);
+  --bg-input: rgba(255, 255, 255, 0.70);
+  --sidebar-hover: rgba(255, 255, 255, 0.62);
+  --sidebar-active: rgba(255, 255, 255, 0.88);
+  --text: #23292e;
+  --text-secondary: #5b646c;
+  --text-tertiary: #505a63;
+  --primary: #33424c;
+  --primary-hover: #26323a;
+  --accent: #4a5a66;
+  --accent-text: #2b363e;
+  --accent-hover: #33424c;
+  --accent-soft: rgba(255, 255, 255, 0.78);
+  --accent-border: rgba(120, 134, 146, 0.45);
+  --border: rgba(255, 255, 255, 0.55);
+  --border-muted: rgba(150, 160, 168, 0.18);
+  --border-strong: rgba(130, 140, 150, 0.40);
+  --focus-ring: #6b7a86;
+  --focus-soft: rgba(107, 122, 134, 0.40);
+  --selection: #d9dee2;
+  --skeleton: rgba(222, 227, 231, 0.75);
+  --scroll-thumb: rgba(140, 150, 158, 0.55);
+  --success: #325e4e;
+  --success-bg: rgba(214, 230, 222, 0.78);
+  --warning: #76521d;
+  --danger: #963a43;
+  --danger-bg: rgba(240, 214, 216, 0.80);
+  --radius: 12px;
+  --radius-lg: 22px;
+  --mist-side: 176px;
+  --mist-frame: rgba(255, 255, 255, 0.70);
+  --mist-glass: rgba(246, 248, 249, 0.46);
+  --mist-glass-strong: rgba(255, 255, 255, 0.80);
+  --mist-glass-subtle: rgba(240, 243, 245, 0.52);
+  --mist-controls: rgba(255, 255, 255, 0.62);
+  --mist-rim: rgba(255, 255, 255, 0.85);
+  --mist-border-outer: rgba(255, 255, 255, 0.62);
+  --mist-shadow: rgba(40, 50, 58, 0.10);
+  --mist-shadow-lg: 0 20px 44px -22px rgba(36, 46, 54, 0.30), 0 2px 8px -2px rgba(36, 46, 54, 0.06);
+  --mist-blur: blur(26px) saturate(140%);
+  --silk-pink: rgba(232, 196, 200, 0.85);
+  --silk-lilac: rgba(214, 214, 230, 0.85);
+  --silk-amber: rgba(240, 218, 176, 0.85);
+  --silk-sky: rgba(210, 224, 232, 0.85);
+  --mist-backdrop:
+    linear-gradient(118deg, transparent 18%, rgba(255, 255, 255, 0.55) 30%, transparent 42%),
+    linear-gradient(152deg, transparent 46%, rgba(255, 255, 255, 0.45) 58%, rgba(170, 182, 190, 0.25) 66%, transparent 76%),
+    linear-gradient(28deg, transparent 58%, rgba(255, 255, 255, 0.40) 70%, transparent 84%),
+    radial-gradient(900px 520px at 85% 10%, rgba(176, 190, 198, 0.45), transparent 65%),
+    radial-gradient(800px 600px at 10% 95%, rgba(168, 182, 190, 0.40), transparent 65%),
+    linear-gradient(160deg, #eceef0, #d6dbdf 55%, #c9d0d5);
+}
+
+:root[data-theme="dark"] .desktop-mist {
+  --bg: #1d2226;
+  --bg-elevated: #2a3136;
+  --bg-card: rgba(44, 51, 57, 0.58);
+  --bg-hover: rgba(70, 80, 88, 0.70);
+  --text: #eef1f3;
+  --text-secondary: #b6bec5;
+  --text-tertiary: #959ea6;
+  --primary: #c9d2d9;
+  --primary-hover: #e1e7eb;
+  --accent: #c9d2d9;
+  --accent-text: #f1f4f6;
+  --accent-soft: rgba(80, 92, 102, 0.70);
+  --border: rgba(255, 255, 255, 0.10);
+  --border-strong: rgba(255, 255, 255, 0.22);
+  --focus-ring: #c9d2d9;
+  --selection: #44505a;
+  --success: #9bd6bb;
+  --success-bg: rgba(60, 96, 82, 0.55);
+  --warning: #e6c078;
+  --danger: #ff9ea6;
+  --danger-bg: rgba(120, 56, 62, 0.55);
+  --mist-glass: rgba(46, 53, 59, 0.50);
+  --mist-glass-strong: rgba(66, 76, 84, 0.82);
+  --mist-glass-subtle: rgba(38, 44, 49, 0.52);
+  --mist-controls: rgba(60, 69, 76, 0.66);
+  --mist-rim: rgba(255, 255, 255, 0.08);
+  --mist-border-outer: rgba(255, 255, 255, 0.10);
+  --silk-pink: rgba(120, 72, 78, 0.70);
+  --silk-lilac: rgba(82, 82, 112, 0.70);
+  --silk-amber: rgba(116, 92, 52, 0.70);
+  --silk-sky: rgba(64, 84, 96, 0.70);
+  --mist-backdrop:
+    linear-gradient(118deg, transparent 18%, rgba(255, 255, 255, 0.05) 30%, transparent 42%),
+    linear-gradient(152deg, transparent 46%, rgba(255, 255, 255, 0.06) 58%, transparent 76%),
+    radial-gradient(900px 520px at 85% 10%, rgba(90, 104, 114, 0.35), transparent 65%),
+    linear-gradient(160deg, #262c31, #1b2024 60%, #15191c);
+}
+
+/* 主按钮：深石板色实心 */
+.desktop-mist .btn, .desktop-mist .input-field { border-radius: 12px; }
+.desktop-mist .btn-primary,
+.desktop-mist .btn-primary:hover:not(:disabled) {
+  background: var(--primary);
+  color: var(--bg-elevated);
+  box-shadow: 0 6px 16px -8px rgba(30, 40, 48, 0.55);
+}
+.desktop-mist .btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+
+/* 卡片：更通透的磨砂玻璃与细白描边 */
+.desktop-mist :is(.account-card, .hongguo-card, .settings-card, .drama-feed-feature, .browse-continue) {
+  border-radius: 22px;
+  box-shadow: inset 0 1px 0 var(--mist-rim), inset 0 0 0 1px rgba(255, 255, 255, 0.18), var(--mist-shadow-lg);
+}
+
+/* 导航：悬浮玻璃条，选中项用白色磨砂块 */
+.desktop-mist.layout-landscape:not(.stealth-mode) .sidebar { border-radius: 26px; }
+.desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-brand { border-bottom: 0; }
+.desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-brand .logo {
+  background: var(--primary);
+  color: var(--bg-elevated);
+  box-shadow: 0 4px 12px -4px rgba(30, 40, 48, 0.45);
+}
+.desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-item { border-radius: 14px; }
+.desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-item.active::before { display: none; }
+.desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-footer { border-top: 0; }
+
+/* 标题：大号粗体 */
+.desktop-mist.layout-landscape:not(.stealth-mode) .toolbar-location { font-size: 24px; font-weight: 800; letter-spacing: -0.03em; }
+.desktop-mist h2 { font-weight: 800; letter-spacing: -0.03em; }
+
+/* 胶囊状态色：柔和粉、紫、琥珀 */
+.desktop-mist .sidebar-account-avatar { background: var(--mist-glass-strong); color: var(--text); box-shadow: inset 0 1px 0 var(--mist-rim); }
+.desktop-mist :is(.badge, .tag, .chip, .ep-chip, .filter-chip) { border-radius: 999px; }
+
+/* 海报：圆角加大 */
+.desktop-mist :is(.poster, .drama-poster, .browse-card img, .hongguo-card img) { border-radius: 14px; }
+
+/* 选中状态：统一深石板实心 + 白字，与未选中的透明玻璃明确区分 */
+.desktop-mist :is(.active, [aria-pressed="true"], [aria-selected="true"], [aria-current="page"]):not(.sidebar-item):not(:disabled) {
+  background: var(--primary) !important;
+  color: var(--bg-elevated) !important;
+  border-color: transparent !important;
+  box-shadow: 0 4px 12px -6px rgba(30, 40, 48, 0.55) !important;
+}
+.desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-item.active {
+  background: var(--primary);
+  color: var(--bg-elevated);
+  border-color: transparent;
+  box-shadow: 0 6px 14px -8px rgba(30, 40, 48, 0.6);
+}
+@supports (appearance: base-select) {
+  :is(.desktop-mist, [data-desktop-player-popup]) select option:checked {
+    background: var(--primary);
+    color: var(--bg-elevated);
+  }
+  :is(.desktop-mist, [data-desktop-player-popup]) select option:checked:hover { background: var(--primary-hover); }
+}
+
+/* 卡片右上角「更多」按钮：居中的圆形磨砂按钮 */
+.desktop-mist .history-list[data-view="cards"] .history-row-actions > .history-more {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 0 6px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--mist-glass-strong);
+  border: 1px solid var(--mist-rim);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0;
+  box-shadow: 0 4px 10px -4px rgba(20, 28, 34, 0.45);
+}
+.desktop-mist .history-list[data-view="cards"] .history-row-actions > .history-more:hover { background: var(--bg-elevated); }
+
+/* 长文字：按钮内省略，不超出卡片 */
+.desktop-mist .btn { max-width: 100%; min-width: 0; }
+.desktop-mist .history-related { min-width: 0; max-width: 100%; }
+.desktop-mist .history-related-actions > .btn {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
