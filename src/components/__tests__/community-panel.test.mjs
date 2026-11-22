@@ -70,30 +70,43 @@ test('empty and partial episode comments are identified without inventing a comp
  assert.ok(noResults.texts().some(text=>text.includes('本次未返回公开评论')));
 });
 
-test('episode hearts stay local per episode while comments and the whole-series favorite keep working',async()=>{
+test('guests keep their local favorite while legacy hearts are neither shown nor changed',async()=>{
  const episode11='7500000000000000011',episode22='7500000000000000022';
  let resolveDetails;
  const ui=harness({seriesId:'12345678',episodeId:episode11,title:'Fixture',cover:''},
   ()=>new Promise(resolve=>{resolveDetails=resolve;}),{items:[{id:'12345678',title:'Fixture',published_at:null,favorite:true,cover:'',liked_episode_ids:[episode11]}]});
- assert.ok(ui.findButton('已点小红心（本机）').props['aria-pressed']);
- assert.ok(ui.findButton('已点小红心（本机）').children.some(child=>child?.props?.['aria-hidden']==='true'&&child.children.includes('♥')));
- ui.findButton('已点小红心（本机）').props.onClick();ui.render();
- assert.equal(ui.findButton('本集小红心（本机）').props['aria-pressed'],false);
- assert.ok(ui.findButton('本集小红心（本机）').children.some(child=>child?.props?.['aria-hidden']==='true'&&child.children.includes('♡')));
- assert.deepEqual(ui.library.items[0].liked_episode_ids,[]);assert.equal(ui.library.items[0].favorite,true);
- ui.findButton('本集小红心（本机）').props.onClick();ui.render();
- assert.ok(ui.findButton('已点小红心（本机）').props['aria-pressed']);
+ assert.equal(ui.findButton('登录后可点赞').props.disabled,true);
+ assert.equal(ui.findButton('登录后可点赞').props['aria-pressed'],false);
  ui.findButton('当前集评论').props.onClick();ui.render();await tick();resolveDetails(details('评论刷新'));await tick();ui.render();
  assert.deepEqual(ui.library.items[0].liked_episode_ids,[episode11]);assert.equal(ui.library.items[0].favorite,true);
  ui.findButton('已收藏到本机').props.onClick();ui.render();
  assert.equal(ui.library.items[0].favorite,false);assert.deepEqual(ui.library.items[0].liked_episode_ids,[episode11]);
  ui.render({...ui.props,episodeId:episode22});
- assert.ok(ui.findButton('本集小红心（本机）'));ui.findButton('本集小红心（本机）').props.onClick();ui.render();
- assert.deepEqual(new Set(ui.library.items[0].liked_episode_ids),new Set([episode11,episode22]));assert.ok(ui.findButton('收藏到本机'));
+ assert.equal(ui.findButton('登录后可点赞').props.disabled,true);
+ assert.deepEqual(ui.library.items[0].liked_episode_ids,[episode11]);assert.ok(ui.findButton('收藏到本机'));
 });
 
-test('episode heart is disabled and unpressed without an episode id',()=>{
- const ui=harness({seriesId:'12345678',title:'Fixture',cover:''},async()=>details('unused'));
- const button=ui.findButton('本集小红心（本机）');
+test('cloud hearts match the exact current episode and favorites keep their source',async()=>{
+ const seriesId='12345678', first='7500000000000000011', second='7500000000000000022';
+ const changes=[];
+ const accountLibrary={signedIn:true,ready:true,lists:{
+  favorite:{items:[],loaded:true},
+  like:{items:[{id:seriesId,episodeId:first}],loaded:true},
+ },change:async action=>{changes.push(action);return{success:true};}};
+ const ui=harness({seriesId,episodeId:first,title:'Fixture',cover:'',accountLibrary},async()=>details('unused'),
+  {items:[{id:seriesId,title:'Fixture',favorite:true}]});
+ assert.ok(ui.texts().includes('本机收藏'));
+ assert.ok(ui.findButton('取消本集点赞').props['aria-pressed']);
+ await ui.findButton('取消本集点赞').props.onClick();
+ assert.equal(changes[0].item.episodeId,first);assert.equal(changes[0].value,false);
+ ui.render({...ui.props,episodeId:second});
+ assert.equal(ui.findButton('点赞本集').props['aria-pressed'],false);
+ await ui.findButton('点赞本集').props.onClick();
+ assert.equal(changes[1].item.episodeId,second);assert.equal(changes[1].value,true);
+ await ui.findButton('收藏到云端').props.onClick();
+ await ui.findButton('移到账号收藏').props.onClick();
+ assert.equal(changes[2].move,false);assert.equal(changes[3].move,true);
+ ui.render({...ui.props,episodeId:undefined});
+ const button=ui.findButton('点赞本集');
  assert.equal(button.props.disabled,true);assert.equal(button.props['aria-pressed'],false);
 });

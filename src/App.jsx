@@ -16,6 +16,7 @@ import AppUpdateNotice from './components/AppUpdateNotice';
 import DramaFeed from './components/DramaFeed';
 import ReleaseCalendar from './components/ReleaseCalendar';
 import AccountManagement, { AccountSidebar } from './components/AccountManagement';
+import useAccountLibrary from './components/useAccountLibrary';
 
 const MENU = [
   { id: 'browse', label: '发现短剧', icon: Home },
@@ -32,6 +33,7 @@ const MENU = [
 export default function App({ platformPages = {} }) {
   useLanguage();
   const mobile = window.electronAPI.platform === 'android';
+  const accountLibrary = useAccountLibrary();
   const [moreOpen, setMoreOpen] = useState(false);
   const navigationHistory = useRef(['browse']);
   const backNavigation = useRef(false);
@@ -130,20 +132,20 @@ export default function App({ platformPages = {} }) {
       case 'browse':
         return <Browse active={page === id} onNavigate={navigate} />;
       case 'player':
-        return playerMounted ? <Player portrait={layout === 'portrait'} episodesOpen={episodesOpen} setEpisodesOpen={setEpisodesOpen} actionsHidden={actionsHidden || (borderless && layout === 'portrait')} active={page === id} target={playerTarget} onSeriesSelected={rememberPlayerSeries} onFloatingChange={setFloatingPlayer} onNavigate={navigate} accountCheckpointRef={accountCheckpoint} /> : null;
+        return playerMounted ? <Player portrait={layout === 'portrait'} episodesOpen={episodesOpen} setEpisodesOpen={setEpisodesOpen} actionsHidden={actionsHidden || (borderless && layout === 'portrait')} active={page === id} target={playerTarget} onSeriesSelected={rememberPlayerSeries} onFloatingChange={setFloatingPlayer} onNavigate={navigate} accountCheckpointRef={accountCheckpoint} accountLibrary={accountLibrary} /> : null;
       case 'feed':
         return page === 'feed' ? <DramaFeed onNavigate={navigate} /> : null;
       case 'calendar':
-        return <ReleaseCalendar opening={calendarOpening} active={page === id} onPlay={async ({ seriesId }) => {
+        return <ReleaseCalendar accountLibrary={accountLibrary} opening={calendarOpening} active={page === id} onPlay={async ({ seriesId, episodeId }) => {
           if (pageRef.current !== 'calendar' || calendarOpeningRef.current) return;
           const version = ++calendarRequest.current;
           calendarOpeningRef.current = true;
           setCalendarOpening(seriesId);
           try {
-            const payload = { seriesId, resume: true };
+            const payload = episodeId ? { seriesId, episodeId } : { seriesId, resume: true };
             let result = await window.electronAPI.playSeries(payload);
             if (version !== calendarRequest.current) return;
-            if (!result?.success && result?.code === 'SERIES_NOT_FOUND') {
+            if (!result?.success && ['SERIES_NOT_FOUND', 'EPISODE_NOT_FOUND'].includes(result?.code)) {
               const resolved = await window.electronAPI.searchResolve(seriesId);
               if (version !== calendarRequest.current) return;
               if (!resolved?.success) throw new Error(resolved?.error || '加载剧集失败，请重试');

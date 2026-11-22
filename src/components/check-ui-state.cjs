@@ -884,6 +884,53 @@ async function mount(file, api, props = {}, storage = null, exportName = 'defaul
     assert.match(ui.text(), /部分查询未完成/);
     ui.unmount();
   });
+  await test('the official season picker exposes a separate reservation action during refresh and shows confirmed state', async () => {
+    const current = { season: 6, series_id: '7550000000000000006', series_title: '当前剧集', playable: true };
+    const next = { season: 7, series_id: '7550000000000000007', series_title: '下一季', playable: false, upcoming: true, reservationId: '7550000000000000019' };
+    const lookups = [], changes = [];
+    const accountLibrary = {
+      signedIn: true, lists: { pendingReservations: { loaded: false, items: [], busy: true } },
+      change: async action => { changes.push(action); return { success: true }; },
+    };
+    const ui = await mount('SeasonPicker', {
+      findSeriesSeasons: async (id, options) => {
+        lookups.push([id, options]);
+        return { official: true, results: [current, next] };
+      },
+      searchResolve: () => assert.fail('upcoming season must not enter playback'),
+    }, {
+      seriesId: current.series_id, active: true, seriesList: [],
+      onSwitch: () => assert.fail('upcoming season must not switch the player'),
+      accountLibrary,
+    });
+    await ui.flush();
+    assert.deepEqual(lookups, [[current.series_id, undefined]]);
+    const reserve = ui.button('预约');
+    assert.match(ui.text(), /下一季待上线/);
+    assert.ok(reserve.props.className.includes('player-season-reservation'));
+    assert.equal(reserve.props.disabled, false);
+    await reserve.props.onClick();
+    assert.equal(changes[0].item.id, next.series_id);
+    assert.equal(changes[0].item.reservationId, next.reservationId);
+    assert.equal(changes[0].value, true);
+    ui.setProps({ accountLibrary: {
+      ...accountLibrary,
+      lists: { pendingReservations: { loaded: true, busy: true, items: [
+        { id: next.series_id, reservationId: '7550000000000000020', online: false },
+      ] } },
+    } });
+    await ui.flush();
+    assert.match(ui.text(), /待上线 · 已预约/);
+    const cancel = ui.button('取消预约');
+    assert.equal(cancel.props.disabled, false);
+    await cancel.props.onClick();
+    assert.equal(changes[1].value, false);
+    ui.setProps({ accountLibrary: { signedIn: false, lists: {} } });
+    await ui.flush();
+    assert.equal(ui.button('登录后可预约').props.disabled, true);
+    assert.doesNotMatch(ui.text(), /已预约/);
+    ui.unmount();
+  });
   await test('closing a loading detail ignores its late result', async () => {
     const pending = deferred();
     const ui = await mount('Browse', { getSeriesList: async () => [], browseCategories: async () => [], browseList: async () => ({ success: true, results: [{ series_id: 'A', series_title: 'A' }] }), searchResolve: () => pending.promise, getSeriesEpisodes: async () => ok(detail('A')) });

@@ -20,6 +20,7 @@ const context = { window: { electronAPI: { platform: 'darwin' } }, document, mod
   if (name === 'react') return react;
   if (name === './i18n') return i18nStub;
   if (name.endsWith('useStealthWindow')) return () => ({ stealthMode: false, toggleStealth() {} });
+  if (name.endsWith('useAccountLibrary')) return () => ({});
   return name;
 } };
 context.exports = context.module.exports;

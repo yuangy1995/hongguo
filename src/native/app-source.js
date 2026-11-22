@@ -251,13 +251,16 @@ function signedMetadataRequest(apiPath, values = {}, payload = null) {
 
 // Account requests use the registered device identity plus the website login cookie.
 function signedAccountRequest(apiPath, values = {}, identity, payload) {
+    const { LIBRARY_READ_PATHS, LIBRARY_WRITE_PATHS, LIBRARY_GZIP_PATHS } = require('./account-library');
     const allowed = payload === undefined
-        ? ['/reading/user/info/v1/', '/reading/bookapi/read_history/list/v1/', '/reading/bookapi/read_progress/list/v1/', '/reading/bookapi/multi-detail/v1/']
-        : ['/reading/bookapi/read_history/update/v', '/reading/bookapi/read_progress/upload/v'];
+        ? ['/reading/user/info/v1/', '/reading/bookapi/read_history/list/v1/', '/reading/bookapi/read_progress/list/v1/', '/reading/bookapi/multi-detail/v1/', '/reading/bookapi/plan/v', ...LIBRARY_READ_PATHS]
+        : ['/reading/bookapi/read_history/update/v', '/reading/bookapi/read_progress/upload/v', ...LIBRARY_WRITE_PATHS];
     if (!allowed.includes(apiPath)) {
         throw new Error('不支持的账号接口');
     }
-    const body = payload === undefined ? null : Buffer.from(JSON.stringify(payload));
+    const json = payload === undefined ? null : Buffer.from(JSON.stringify(payload));
+    const gzip = LIBRARY_GZIP_PATHS.includes(apiPath);
+    const body = gzip ? gzipSync(json) : json;
     if (![identity?.device_id, identity?.iid].every(value => typeof value === 'string' && /^\d{1,30}$/.test(value) && /[1-9]/.test(value))
         || typeof identity?.cdid !== 'string' || !/^[a-f0-9-]{36}$/i.test(identity.cdid)) {
         throw new Error('账号设备身份无效');
@@ -283,6 +286,12 @@ function signedAccountRequest(apiPath, values = {}, identity, payload) {
         'x-medusa': buildMedusa(url, body, khronos, device), 'x-tt-dt': '',
     };
     if (body) { headers['Content-Type'] = 'application/json; charset=utf-8'; headers['x-ss-stub'] = md5(body); }
+    if (gzip) {
+        headers['Content-Encoding'] = 'gzip';
+        headers['x-ss-dp'] = device.aid;
+        headers.lc = '101';
+        headers['x-reading-request'] = `${requestTicket}-${crypto.randomBytes(4).readUInt32LE()}`;
+    }
     return { url, headers, body };
 }
 

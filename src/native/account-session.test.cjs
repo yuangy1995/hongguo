@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
+const { gunzipSync } = require('node:zlib');
 const {
   createAccountService, secureSessionStore, parseQr, parseHistory,
 } = require('./account-session');
@@ -22,6 +23,183 @@ function fakeEncryption() {
     decryptString: value => transform(value).toString('utf8'),
   };
 }
+
+test('account library confirms mobile favorites, exact episode likes and reservations using signed requests', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-account-library-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const seriesId = '7481000000000000001';
+  const episodeId = '7481000000000000002';
+  const otherEpisodeId = '7481000000000000003';
+  const reservationId = '7481000000000000004';
+  const releasedItemId = '7481000000000000005';
+  const fallbackSeriesId = '7481000000000000006';
+  const fixtureCover = 'https://example.com/poster.jpg';
+  const identity = { device_id: '123456789', iid: '987654321', cdid: '12345678-1234-1234-1234-123456789012' };
+  const liked = new Set([otherEpisodeId]);
+  let favorite = false, reserved = false, writes = 0, activeCookie, delayedRead, releaseRead;
+  let rejectRemove = false, rejectReleasedRead = false;
+  const released = new Set([releasedItemId, fallbackSeriesId]);
+  const favoriteRow = { series_id: seriesId, series_title: '测试剧', cover: fixtureCover };
+  const upcomingRow = {
+    item_id: reservationId, name: '待上线测试剧', is_online: false,
+    sub_title_list: [{ content: '<span>12月上线</span>' }], expected_rec_text: '即将上线，火速预约',
+    schedule_publish_time: Date.UTC(2026, 11, 14, 16) / 1000,
+  };
+  const upcomingRows = [upcomingRow,
+    { item_id: '1007', expected_rec_text: '12月18日上线', sub_info: '即将上线，火速预约' },
+    { item_id: '1008', expected_rec_text: '即将上线', schedule_publish_time: upcomingRow.schedule_publish_time },
+    { item_id: '1009', expected_publish_time: String(Date.UTC(2026, 11, 9, 16)) },
+    { item_id: '1010', expected_rec_text: '815万期待', sub_info: '即将上线，火速预约' },
+    { item_id: '1011', schedule_publish_time: 0, expected_publish_time: -1 },
+    { item_id: '1012', sub_title_list: [{ content: '即将上线' }], expected_publish_time: upcomingRow.schedule_publish_time },
+    { item_id: '1013', sub_title_list: [{ content: '11月30日上线' }], expected_publish_time: upcomingRow.schedule_publish_time },
+    { item_id: '1014', sub_title_list: [{ content: '12月上线' }] },
+    { item_id: '1015', sub_title_list: [{ content: '即将上线' }], expected_publish_time: Date.UTC(2026, 10, 20, 16) / 1000 },
+    { item_id: '1016', sub_title_list: [{ content: '即将上线' }], expected_publish_time: Date.UTC(2026, 10, 19, 16) / 1000 },
+    { item_id: '1017', schedule_publish_time: Date.UTC(2026, 10, 19, 16) / 1000, expected_publish_time: upcomingRow.schedule_publish_time },
+    { item_id: '1018', schedule_publish_time: Date.UTC(2026, 10, 20, 10, 30) / 1000 },
+    { item_id: '1019', expected_rec_text: '明天上线', expected_publish_time: Date.UTC(2026, 10, 23, 11, 45) },
+  ];
+  const ok = data => ({ code: 0, data });
+  const service = createAccountService({
+    filePath: path.join(root, 'account.json'), local: true,
+    now: () => Date.UTC(2026, 10, 22, 12),
+    webRequest: async () => webPayload({ user_id_str: '1234567', name: '账号测试' }),
+    identityRequest: async () => identity,
+    accountRequest: async (address, options, _deadline, signal) => {
+      assert.equal(options.headers.Cookie, activeCookie);
+      assert.ok(options.headers['x-gorgon']);
+      assert.ok(options.preserveLargeIntegerFields.includes('series_id'));
+      const url = new URL(address);
+      assert.equal(url.hostname, 'api5-normal-sinfonlinea.fqnovel.com');
+      if (options.method === 'POST') {
+        writes++;
+        assert.ok(options.headers['x-ss-stub']);
+        const gzip = options.headers['Content-Encoding'] === 'gzip';
+        const raw = (gzip ? gunzipSync(options.data) : options.data).toString();
+        const body = JSON.parse(preserveLargeJsonIntegers(raw, ['item_id']));
+        if (url.pathname.endsWith('/bookshelf/video/update/v1/')) {
+          const [entry] = body.update_bookshelf_video_list;
+          assert.equal(entry.book_id, seriesId);
+          assert.equal(entry.book_type, 2);
+          favorite = entry.video_shelf_operate_type === 0;
+        } else if (url.pathname === '/novel/articleapi/do_action/v1/') {
+          assert.equal(body.object_id, episodeId);
+          assert.equal(body.business_param.video_id, seriesId);
+          if (body.action_type === 3) liked.add(episodeId);
+          else { assert.equal(body.action_type, 4); liked.delete(episodeId); }
+        } else if (url.pathname === '/reading/user/subscribe/delete/v') {
+          assert.equal(gzip, true);
+          assert.equal(body.is_online, true);
+          assert.equal(body.tab_type, 13);
+          assert.equal(body.all_select, false);
+          assert.deepEqual(body.not_del_item_id, []);
+          assert.equal(body.item_id.length, 1);
+          assert.ok(released.has(body.item_id[0]));
+          if (rejectRemove) return { code: 103 };
+          released.delete(body.item_id[0]);
+        } else {
+          assert.equal(url.pathname, '/reading/bookapi/search/uncover_subscribe/v');
+          assert.equal(gzip, true);
+          assert.ok(raw.includes(`"item_id":${reservationId}`));
+          assert.equal(body.item_id, reservationId);
+          reserved = body.op_type === 1;
+        }
+        return ok({});
+      }
+      if (url.pathname.endsWith('/bookshelf/video/info/v1/')) {
+        if (delayedRead) {
+          await new Promise(resolve => { releaseRead = resolve; });
+          assert.equal(signal.aborted, true);
+        }
+        return ok({ video_shelf_info: favorite ? [favoriteRow] : null });
+      }
+      if (url.pathname === '/reading/ugc/action/mget/v') {
+        assert.equal(url.searchParams.get('action_type'), '3');
+        const entries = [...liked];
+        const index = url.searchParams.get('offset') === '0' ? 0 : 1;
+        return ok({ has_more: index === 0 && entries.length > 1, next_offset: 1,
+          mixed_data_list: entries.slice(index, index + 1).map(vid => ({
+            video_data: { vid, series_id: seriesId, vid_index: vid === episodeId ? 3 : 4, video_detail: favoriteRow },
+          })) });
+      }
+      assert.equal(url.pathname, '/reading/user/subscribe/list/v1/');
+      if (url.searchParams.get('tab_type') === '5') return ok({ subscribe_items: upcomingRows });
+      assert.equal(url.searchParams.get('tab_type'), '13');
+      if (rejectReleasedRead && url.searchParams.get('is_online') === 'true') return { code: 103 };
+      return ok({ has_more: false, subscribe_items: url.searchParams.get('is_online') === 'true'
+        ? [...released].map(key => key === releasedItemId
+          ? { item_id: releasedItemId, is_online: true, subscribe_data: { video_detail: {
+            series_id: seriesId, series_title: '已上线测试剧',
+            series_cover: 'https://p3-reading-sign.fqnovelpic.com/fixture/poster~tplv-test.heic?signature=fixture',
+          } } }
+          : { item_id: '0', is_online: true, subscribe_data: { ...favoriteRow, series_id: fallbackSeriesId,
+            video_detail: { series_title: '已上线封面回退测试剧' },
+          } })
+        : reserved ? [upcomingRow] : [] });
+    },
+  });
+  const login = async cookie => {
+    activeCookie = cookie;
+    await service.completeWebLogin(cookie);
+    return service.librarySessionId();
+  };
+  const first = await login('sessionid=fixture-a');
+  assert.deepEqual(await service.readLibrary(first, 'favorite'), []);
+  const save = { kind: 'favorite', seriesId, value: true };
+  assert.equal((await service.changeLibrary(first, save)).entry.title, '测试剧');
+  assert.equal((await service.changeLibrary(first, save)).entry.id, seriesId);
+  assert.equal(writes, 1, 'a favorite already on the account needs no duplicate write');
+  const like = { kind: 'like', seriesId, episodeId, value: true };
+  const added = await service.changeLibrary(first, like);
+  assert.deepEqual(added.items.map(item => item.episodeId), [otherEpisodeId, episodeId]);
+  assert.equal(added.entry.episodeIndex, 3);
+  assert.equal((await service.changeLibrary(first, { ...like, value: false })).entry, null);
+  assert.deepEqual((await service.readLibrary(first, 'like')).map(item => item.episodeId), [otherEpisodeId]);
+  const upcoming = await service.readLibrary(first, 'upcoming');
+  assert.equal(upcoming[0].reservationId, reservationId);
+  assert.deepEqual(upcoming.map(item => item.scheduled), [
+    '预计12月15日上线', '12月18日上线', '预计12月15日上线', '预计12月10日上线', '即将上线', '',
+    '预计12月15日上线', '11月30日上线', '12月上线', '原预计11月21日上线', '原预计11月20日上线', '预计12月15日上线',
+    '原预计11月20日 18:30上线', '预计11月23日 19:45上线',
+  ]);
+  const reserve = { kind: 'reservation', reservationId, value: true };
+  const confirmedReservation = await service.changeLibrary(first, reserve);
+  assert.equal(confirmedReservation.entry.reservationId, reservationId);
+  assert.equal(confirmedReservation.entry.scheduled, '预计12月15日上线');
+  assert.deepEqual(confirmedReservation.pendingItems.map(item => item.reservationId), [reservationId]);
+  rejectReleasedRead = true;
+  await assert.rejects(service.readLibrary(first, 'reservation'), /未确认/);
+  assert.deepEqual((await service.readLibrary(first, 'pendingReservations')).map(item => item.reservationId), [reservationId]);
+  rejectReleasedRead = false;
+  const reservations = await service.readLibrary(first, 'reservation');
+  assert.deepEqual(reservations.map(item => item.online), [false, true, true]);
+  assert.equal(reservations[1].cover, 'https://p3-novel.byteimg.com/fixture/poster~tplv-shrink:320:0.webp');
+  assert.equal(reservations[2].cover, fixtureCover);
+  const removeReleased = { kind: 'reservation', seriesId, reservationId: releasedItemId, online: true, value: false };
+  rejectRemove = true;
+  await assert.rejects(service.changeLibrary(first, removeReleased), /未确认/);
+  assert.ok(released.has(releasedItemId));
+  rejectRemove = false;
+  assert.equal((await service.changeLibrary(first, removeReleased)).entry, null);
+  assert.equal((await service.changeLibrary(first, { ...removeReleased, seriesId: fallbackSeriesId, reservationId: '' })).entry, null);
+  assert.deepEqual((await service.readLibrary(first, 'reservation')).map(item => item.reservationId), [reservationId]);
+  assert.equal((await service.changeLibrary(first, { ...reserve, value: false })).entry, null);
+  assert.deepEqual(await service.readLibrary(first, 'reservation'), []);
+  delayedRead = true;
+  const staleRead = assert.rejects(service.readLibrary(first, 'favorite'), /账号已变更/);
+  while (!releaseRead) await new Promise(resolve => setImmediate(resolve));
+  await service.logout();
+  assert.equal(service.librarySessionId(), '');
+  releaseRead();
+  await staleRead;
+  delayedRead = false;
+  const second = await login('sessionid=fixture-a');
+  assert.notEqual(second, first);
+  await assert.rejects(service.changeLibrary(first, { ...save, value: false }), /账号已变更/);
+  assert.deepEqual((await service.readLibrary(second, 'favorite')).map(item => item.id), [seriesId]);
+  assert.equal((await service.changeLibrary(second, { ...save, value: false })).entry, null);
+});
 
 test('account history parser keeps current APP rows with display metadata', () => {
   const rows = parseHistory({

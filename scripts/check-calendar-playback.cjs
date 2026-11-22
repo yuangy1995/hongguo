@@ -12,8 +12,8 @@ const mainSource = fs.readFileSync(path.join(__dirname, '../main.js'), 'utf8');
 const playHandler = mainSource.slice(mainSource.indexOf('function navigateToPlayer'), mainSource.indexOf('// ===== 在线播放 ====='));
 assert.match(playHandler, /function navigateToPlayer[\s\S]*ipcMain\.handle\('play-series'/, 'real playback IPC must be found');
 
-function fixture({ exists = true, dismissed = false, saveError = '', resolveError = '', playError = '', missingMessage = '', resolveGate } = {}) {
-  const registry = exists ? [{ series_id: 'A', dismissed, forgotten: dismissed }] : [];
+function fixture({ exists = true, dismissed = false, saveError = '', resolveError = '', playError = '', missingMessage = '', resolveGate, episodes } = {}) {
+  const registry = exists ? [{ series_id: 'A', dismissed, forgotten: dismissed, episodes }] : [];
   const requests = [], resolutions = [], slots = [], effects = [];
   let cursor = 0, tree, navigate, handler;
   const component = name => ({ __esModule: true, default: name });
@@ -50,7 +50,7 @@ function fixture({ exists = true, dismissed = false, saveError = '', resolveErro
   const module = { exports: {} };
   vm.runInNewContext(appSource, { module, exports: module.exports, window: { electronAPI: api }, navigator: {},
     require: name => name === './i18n' ? i18nStub : name === 'react' ? react : name === './theme' ? { initializeTheme() {} }
-      : name === './components/useStealthWindow' ? { __esModule: true, default: () => ({}) } : component(name),
+      : ['./components/useStealthWindow', './components/useAccountLibrary'].includes(name) ? { __esModule: true, default: () => ({}) } : component(name),
   });
   const render = () => { cursor = 0; tree = module.exports.default({}); effects.splice(0).forEach(fn => fn()); };
   const find = predicate => {
@@ -63,12 +63,23 @@ function fixture({ exists = true, dismissed = false, saveError = '', resolveErro
   render();
   return { registry, requests, resolutions, find, flush,
     go: label => find(node => node.type === 'button' && node.children.some(child => child?.children?.includes(label))).props.onClick(),
-    play: async () => { await find(node => node.type === './components/ReleaseCalendar').props.onPlay({ seriesId: 'A' }); await flush(); },
+    play: async (episodeId) => { await find(node => node.type === './components/ReleaseCalendar').props.onPlay({ seriesId: 'A', episodeId }); await flush(); },
     directPlay: payload => handler({}, payload),
     target: () => find(node => node.type === './components/Player')?.props.target,
     error: () => find(node => node.props.role === 'alert')?.children[0]?.children[0],
   };
 }
+
+test('a liked episode navigates using its registered VID rather than a stale episode number', async () => {
+  const episodeId = '7500000000000000011';
+  const app = fixture({ episodes: [{ vid: '7500000000000000012', vid_index: 1 }, { vid: episodeId, vid_index: 2 }] });
+  await app.play(episodeId);
+  assert.equal(app.resolutions.length, 0);
+  assert.equal(app.target().seriesId, 'A');
+  assert.equal(app.target().vidIndex, 2);
+  assert.equal(app.target().resume, false);
+  assert.equal((await app.directPlay({ seriesId: 'A', episodeId: '7500000000000000013' })).code, 'EPISODE_NOT_FOUND');
+});
 
 for (const dismissed of [false, true]) for (const saved of [null, { vid_index: 2, currentTime: 37 }]) {
   test(`offline calendar playback: dismissed=${dismissed}, saved=${!!saved}`, async () => {

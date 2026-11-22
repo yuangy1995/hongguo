@@ -669,7 +669,7 @@
 }
 
 /* 容器统一最大宽度 */
-.desktop-mist :is(.browse-container, .history-container, .hongguo-container, .dm-container, .settings-container, .account-page, .drama-feed, .release-calendar) {
+.desktop-mist :is(.browse-container, .history-container, .hongguo-container, .dm-container, .settings-container, .account-page, .drama-feed) {
   max-width: 1380px;
   margin-inline: auto;
 }
@@ -1374,17 +1374,27 @@
   width: 465px;
   padding: 0;
 }
-.desktop-mist .player-season-menu[popover] { width: 340px; overflow: hidden; }
+.desktop-mist .player-season-menu[popover] { width: min(380px, calc(100vw - 24px)); overflow: hidden; }
 .desktop-mist .player-season-menu:popover-open { display: flex; flex-direction: column; }
 .desktop-mist .player-season-list {
   display: grid; gap: 5px; min-height: 0; padding: 2px; overflow-y: auto; overscroll-behavior: contain;
 }
 .desktop-mist .player-season-feedback:empty { display: none; }
 .desktop-mist .player-season-feedback { flex-shrink: 0; }
-.desktop-mist .player-season-list .btn {
+.desktop-mist .player-season-list > .btn,
+.desktop-mist .player-season-copy {
   display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px; text-align: start; overflow-wrap: anywhere;
 }
 .desktop-mist .player-season-list .btn[aria-current="true"] { opacity: 1; background: var(--accent-soft); color: var(--accent-text); }
+.desktop-mist .player-season-unavailable {
+  display: flex; align-items: center; justify-content: space-between; gap: 9px;
+  min-width: 0; padding: 7px 8px 7px 11px; border: 1px solid var(--border);
+  border-radius: 11px; background: var(--bg-subtle);
+}
+.desktop-mist .player-season-copy { align-items: center; min-width: 0; font-size: 12px; }
+.desktop-mist .player-season-reservation { flex: 0 0 auto; white-space: nowrap; }
+.desktop-mist .player-season-name small { display: block; margin-top: 3px; color: var(--text-secondary); font-size: 11px; }
+.desktop-mist .player-season-reserved { color: var(--accent-text); font-weight: 650; }
 .desktop-mist .player-season-list [role="status"] { grid-column: 1 / -1; }
 .desktop-mist .player-season-menu p { margin: 7px 0; font-size: 12px; color: var(--text-secondary); }
 .desktop-mist .player-season-menu p[role="alert"] { color: var(--danger); }
@@ -1828,7 +1838,6 @@
 }
 
 /* ===== 6. 收藏与上新 (ReleaseCalendar)：居中毛玻璃空态 + 日历时间轴卡片 ===== */
-.desktop-mist .release-calendar { max-width: 1080px; }
 .desktop-mist .release-toolbar {
   gap: 8px;
   padding: 7px 12px;

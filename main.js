@@ -66,6 +66,7 @@ const store = require('./src/store');
 const watchHistory = require('./src/native/watch-history');
 const { createAccountService, safeMessage: accountSafeMessage } = require('./src/native/account-session');
 const seriesSearch = require('./src/native/series-search');
+const { fetchHongguoSeriesSeasons } = require('./src/native/hongguo-series-seasons');
 const { searchHongguo } = require('./src/native/hongguo-search');
 const { fitWindowBounds, getWindowScale, saveWindowZoom, restoreMainWindowBounds, rememberMainWindowBounds, fitCreationWindowOptions, syncWindowMinimumSize } = require('./src/native/window-layout');
 const { createEpisodePanelController } = require('./src/native/episode-panel');
@@ -1858,9 +1859,20 @@ ipcMain.handle('find-series-sequels', async (_event, seriesId, options = {}) => 
 ipcMain.handle('find-series-seasons', async (_event, seriesId, options = {}) => {
   const entry = visibleSeries().find(item => String(item.series_id) === String(seriesId));
   if (!entry) return { unsupported: true, results: [] };
+  const source = watchHistory.sourceOf(String(entry.series_id));
+  if (source === 'hongguo') {
+    if (options?.localOnly === true) return { official: true, results: [] };
+    try {
+      const results = await fetchHongguoSeriesSeasons(String(entry.series_id));
+      return { official: true, results };
+    } catch (error) {
+      console.warn('[Series] 官方系列剧读取失败:', error.code || error.message);
+      return { official: true, results: [], partial: true, error: '官方系列剧暂时无法读取，请稍后重试。' };
+    }
+  }
   const deadline = Date.now() + 22000;
   return seriesSearch.findSeriesSeasons(entry, visibleSeries(),
-    (kw, call) => searchAtSource(kw, { deadline, ...call, source: watchHistory.sourceOf(String(entry.series_id)) }),
+    (kw, call) => searchAtSource(kw, { deadline, ...call, source }),
     { localOnly: options?.localOnly === true, deadline });
 });
 
@@ -2926,15 +2938,17 @@ function navigateToPlayer(payload) {
  * 主进程只负责发导航指令，具体的剧集状态由渲染层拉取，避免重复维护一份数据。
  */
 ipcMain.handle('play-series', async (event, payload) => {
-  const { seriesId, vidIndex } = payload || {};
+  const { seriesId, vidIndex, episodeId } = payload || {};
   const entry = seriesRegistry.find(item => String(item.series_id) === String(seriesId));
   if (!entry) return { success: false, code: 'SERIES_NOT_FOUND', error: '未找到短剧档案，请重新打开详情' };
+  const episode = episodeId ? entry.episodes?.find(item => String(item.vid) === episodeId && !item.locked) : null;
+  if (episodeId && !episode) return { success: false, code: 'EPISODE_NOT_FOUND', error: '暂时无法定位已点赞的分集，请稍后重试。' };
   if (entry.dismissed) {
     const wasForgotten = entry.forgotten;
     try { entry.dismissed = false; entry.forgotten = false; saveSeriesRegistry(); }
     catch (error) { entry.dismissed = true; entry.forgotten = wasForgotten; return { success: false, error: error.message }; }
   }
-  return navigateToPlayer({ seriesId, vidIndex, resume: payload?.resume === true });
+  return navigateToPlayer({ seriesId, vidIndex: episode?.vid_index ?? vidIndex, resume: !episodeId && payload?.resume === true });
 });
 
 // ===== 在线播放 =====
@@ -4434,6 +4448,8 @@ accountController = createAccountController({
   navigateToPlayer,
   send: (...args) => sendToRenderer(...args),
   applyProxyToSession: ses => applyProxyToSession(proxyManager.desired || resolveProxyConfig(getCurrentSettings()), [ses]),
+  allowLibrary: event => !!mainWindow && event.sender === mainWindow.webContents
+    && event.senderFrame === mainWindow.webContents.mainFrame,
   progressSync: accountProgressTestEnabled ? undefined : {
     getPlayback: store.getPlayback, updatePlayback: store.updatePlayback, canSync: () => !proxyStartupFallback,
     historyFilePath: () => path.join(app.getPath('userData'), 'account-history-local.json'),

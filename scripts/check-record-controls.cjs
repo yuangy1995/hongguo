@@ -28,6 +28,7 @@ function fixture() {
       useState: initial => { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === 'function' ? initial() : initial; return [slots[i], value => { slots[i] = typeof value === 'function' ? value(slots[i]) : value; }]; },
       useRef: initial => { const i = cursor++; return slots[i] ||= { current: initial }; },
       useMemo: fn => { cursor++; return fn(); },
+      useCallback: (fn, deps) => { const i = cursor++; if (!slots[i] || deps.some((v, j) => !Object.is(v, slots[i].deps[j]))) slots[i] = { fn, deps }; return slots[i].fn; },
       useEffect: (fn, deps) => { const i = cursor++; if (!slots[i] || deps.some((v, j) => !Object.is(v, slots[i][j]))) { slots[i] = deps; effects.push(fn); } },
     };
     react.useLayoutEffect = react.useEffect;
@@ -35,7 +36,7 @@ function fixture() {
     const render = () => { cursor = 0; tree = component(props); effects.splice(0).forEach(fn => { const cleanup = fn(); if (cleanup) cleanups.push(cleanup); }); };
     const nodes = () => { const result = []; const visit = n => { if (!n || typeof n !== 'object') return; result.push(n); n.children?.forEach(visit); }; visit(tree); return result; };
     render();
-    return { render, nodes, find: fn => nodes().find(fn), unmount: () => cleanups.splice(0).forEach(fn => fn()), flush: async () => { for (let i = 0; i < 8; i++) { await Promise.resolve(); render(); } } };
+    return { render, nodes, result: () => tree, find: fn => nodes().find(fn), unmount: () => cleanups.splice(0).forEach(fn => fn()), flush: async () => { for (let i = 0; i < 8; i++) { await Promise.resolve(); render(); } } };
   };
   return { storage, window, load, mount };
 }
@@ -157,7 +158,7 @@ test('calendar displays saved poster and removes only the selected entry', () =>
   const h = fixture(), library = h.load('localLibrary.js');
   library.saveLocalSeries({ id: 'a', title: '甲', favorite: true, cover: 'https://fixture.invalid/poster.jpg' });
   library.saveLocalSeries({ id: 'b', title: '乙', favorite: false });
-  const ui = h.mount('components/ReleaseCalendar.jsx', { '../localLibrary': library });
+  const ui = h.mount('components/ReleaseCalendar.jsx', { '../localLibrary': library, './useAccountLibrary': h.load('components/useAccountLibrary.js') });
   assert.equal(ui.find(n => n.type === 'img')?.props.src, 'https://fixture.invalid/poster.jpg');
   const remove = ui.find(n => n.props['aria-label'] === '移除《甲》');
   assert.ok(remove); remove.props.onClick(); ui.render();
@@ -169,11 +170,165 @@ test('legacy calendar uses local catalog posters without restoring removed rows'
   library.saveLocalSeries({ id: 'a', title: '甲', favorite: true });
   let resolve;
   h.window.electronAPI.getSeriesList = () => new Promise(done => { resolve = done; });
-  const ui = h.mount('components/ReleaseCalendar.jsx', { '../localLibrary': library });
+  const ui = h.mount('components/ReleaseCalendar.jsx', { '../localLibrary': library, './useAccountLibrary': h.load('components/useAccountLibrary.js') });
   assert.equal(typeof resolve, 'function');
   resolve([{ series_id: 'a', cover: 'https://fixture.invalid/old.jpg' }]); await ui.flush();
   assert.equal(ui.find(n => n.type === 'img')?.props.src, 'https://fixture.invalid/old.jpg');
   ui.find(n => n.props['aria-label'] === '移除《甲》').props.onClick(); await ui.flush();
   assert.equal(library.readLocalLibrary().items.length, 0);
   assert.ok(!ui.find(n => n.type === 'img'));
+});
+
+test('calendar shows empty cloud favorites when signed in and empty local favorites when signed out', () => {
+  const h = fixture(), library = h.load('localLibrary.js');
+  const imports = { '../localLibrary': library, './useAccountLibrary': h.load('components/useAccountLibrary.js') };
+  const accountLibrary = { signedIn: true, ready: true, lists: { favorite: { loaded: true, items: [] } } };
+  library.saveLocalSeries({ id: 'a', title: '仅浏览短剧', favorite: false });
+  const ui = h.mount('components/ReleaseCalendar.jsx', imports, { accountLibrary });
+  const heading = label => ui.find(node => node.type === 'h3' && node.children.includes(label));
+  const label = text => ui.find(node => node.children.includes(text));
+  ui.find(node => node.type === 'button' && node.children.includes('收藏')).props.onClick();
+  ui.render();
+  assert.ok(heading('云端收藏'));
+  assert.ok(label('暂无云端记录'));
+  assert.equal(heading('本机收藏'), undefined);
+  assert.equal(heading('还没有本机收藏'), undefined);
+
+  accountLibrary.lists.favorite.items = [{ id: 'cloud', title: '云端短剧' }];
+  ui.render();
+  assert.ok(label('云端短剧'));
+  assert.equal(heading('本机收藏'), undefined);
+  assert.equal(heading('还没有本机收藏'), undefined);
+
+  library.saveLocalSeries({ id: 'b', title: '本机短剧', favorite: true });
+  ui.render();
+  assert.ok(heading('云端收藏'));
+  assert.ok(heading('本机收藏'));
+  assert.ok(label('本机短剧'));
+
+  library.removeLocalSeries('b');
+  ui.render();
+  assert.equal(heading('本机收藏'), undefined);
+  assert.equal(heading('还没有本机收藏'), undefined);
+
+  accountLibrary.signedIn = false;
+  ui.render();
+  assert.equal(heading('云端收藏'), undefined);
+  assert.equal(label('云端短剧'), undefined);
+  assert.equal(label('暂无云端记录'), undefined);
+  assert.ok(heading('还没有本机收藏'));
+  assert.ok(label('在剧集详情点「收藏到本机」。'));
+  ui.unmount();
+});
+
+test('calendar defaults to cards and remembers its list choice across tabs and mounts', async () => {
+  const h = fixture(), library = h.load('localLibrary.js');
+  const imports = { '../localLibrary': library, './useAccountLibrary': h.load('components/useAccountLibrary.js') };
+  library.saveLocalSeries({ id: 'a', title: '本机短剧', favorite: true });
+  const reservation = { id: '', reservationId: '1001', title: '待上线短剧', online: false, scheduled: '12月15日上线' };
+  const released = { id: '1003', reservationId: '1002', title: '已上线短剧', online: true };
+  const actions = [];
+  const props = { accountLibrary: {
+    signedIn: true, ready: true,
+    lists: { reservation: { loaded: true, items: [reservation, released] } },
+    change: async action => { actions.push(action); return { success: true }; },
+  }, onPlay() {} };
+  const ui = h.mount('components/ReleaseCalendar.jsx', imports, props);
+  const button = label => ui.find(node => node.type === 'button' && node.children.includes(label));
+  assert.equal(ui.result().props['data-view'], 'cards');
+  assert.equal(button('卡片').props['aria-pressed'], true);
+  button('我的预约').props.onClick();
+  ui.render();
+  assert.equal(ui.result().props['data-view'], 'cards');
+  assert.equal(button('已上线').props['aria-pressed'], true);
+  assert.equal(button('待上线').props['aria-pressed'], false);
+  for (const tab of ['已上线', '待上线']) {
+    assert.ok(button(tab).children.some(node => node?.props?.className === 'release-reservation-count' && node.children.map(String).includes('1')));
+  }
+  assert.ok(ui.find(node => node.type === 'strong' && node.children.includes(released.title)));
+  assert.ok(button('播放'));
+  assert.equal(button('取消预约'), undefined);
+  assert.ok(!button('移除预约记录').props.disabled);
+  await button('移除预约记录').props.onClick();
+  assert.equal(actions[0].item, released);
+  assert.equal(actions[0].value, false);
+  button('待上线').props.onClick();
+  ui.render();
+  assert.ok(ui.find(node => node.type === 'strong' && node.children.includes(reservation.title)));
+  assert.ok(ui.find(node => node.type === 'span' && node.children.includes(reservation.scheduled)));
+  assert.equal(button('播放'), undefined);
+  assert.equal(button('移除预约记录'), undefined);
+  button('列表').props.onClick();
+  ui.render();
+  assert.equal(ui.result().props['data-view'], 'list');
+  assert.equal(button('列表').props['aria-pressed'], true);
+  assert.ok(ui.find(node => node.type === 'span' && node.children.includes(reservation.scheduled)));
+  await button('取消预约').props.onClick();
+  assert.equal(actions[1].item, reservation);
+  assert.equal(actions[1].value, false);
+  button('收藏').props.onClick();
+  ui.render();
+  assert.equal(ui.result().props['data-view'], 'list');
+  assert.ok(ui.find(node => node.type === 'strong' && node.children.includes('本机短剧')));
+  const reopened = h.mount('components/ReleaseCalendar.jsx', imports, props);
+  assert.equal(reopened.result().props['data-view'], 'list');
+  button('卡片').props.onClick();
+  reopened.render();
+  assert.equal(h.storage.get('hongguo:release-calendar-display'), 'cards');
+  ui.unmount();
+  reopened.unmount();
+});
+
+test('moving a favorite changes only the selected local favorite after current-account confirmation', async () => {
+  const h = fixture(), library = h.load('localLibrary.js');
+  const [a, b, c] = ['a', 'b', 'c'].map(id => ({ id, title: id.toUpperCase(), favorite: true, published_at: 1762041600000 }));
+  for (const item of [a, b, c]) library.saveLocalSeries(item);
+  const localIds = () => Array.from(library.readLocalLibrary().items.filter(item => item.favorite), item => item.id);
+  let onAccount, finish, sessionId = '', cloud = [];
+  h.window.electronAPI = {
+    getAccountStatus: async () => ({ success: true, signedIn: !!sessionId, librarySession: sessionId }),
+    onAccountUpdated: fn => { onAccount = fn; },
+    getAccountLibrary: async () => ({ success: true, items: cloud }),
+    changeAccountLibrary: (token, change) => {
+      assert.equal(token, sessionId);
+      assert.equal(change.kind, 'favorite');
+      assert.equal(change.seriesId, c.id);
+      assert.equal(change.value, true);
+      return new Promise(resolve => { finish = resolve; });
+    },
+  };
+  const ui = h.mount('components/useAccountLibrary.js', { '../localLibrary': library });
+  const switchSession = async value => { sessionId = value; onAccount({ signedIn: !!value }); await ui.flush(); };
+  const move = () => ui.result().change({ kind: 'favorite', item: c, value: true, move: true });
+  try {
+    await switchSession('first');
+    assert.deepEqual(localIds(), ['a', 'b', 'c']);
+    await switchSession('');
+    assert.deepEqual(localIds(), ['a', 'b', 'c']);
+    await switchSession('second');
+    const denied = move();
+    finish({ success: false, error: '云端拒绝' });
+    assert.equal((await denied).success, false);
+    assert.deepEqual(localIds(), ['a', 'b', 'c']);
+    const stale = move();
+    await switchSession('');
+    await switchSession('third');
+    finish({ success: true, entry: c, items: [c] });
+    assert.equal((await stale).cancelled, true);
+    assert.deepEqual(localIds(), ['a', 'b', 'c']);
+    const confirmed = move();
+    cloud = [c];
+    finish({ success: true, entry: c, items: cloud });
+    assert.equal((await confirmed).success, true);
+    await ui.flush();
+    assert.equal(ui.result().lists.favorite.items[0].id, c.id);
+    assert.equal(library.readLocalLibrary().items.find(item => item.id === c.id).published_at, c.published_at);
+    await switchSession('');
+    assert.equal(ui.result().lists.favorite, undefined);
+    assert.deepEqual(localIds(), ['a', 'b']);
+    await switchSession('fourth');
+    await ui.result().refresh('favorite');
+    await ui.flush();
+    assert.equal(ui.result().lists.favorite.items[0].id, c.id);
+  } finally { ui.unmount(); }
 });

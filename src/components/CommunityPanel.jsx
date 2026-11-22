@@ -10,7 +10,7 @@ const reviewDate = value => {
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString(getLanguage(), { timeZone: 'Asia/Shanghai' });
 };
 
-export default function CommunityPanel({ seriesId, episodeId, title, cover, compact = false }) {
+export default function CommunityPanel({ seriesId, episodeId, title, cover, accountLibrary, active = true }) {
   useLanguage();
   const id = String(seriesId || '');
   const panelId = useId();
@@ -33,10 +33,23 @@ export default function CommunityPanel({ seriesId, episodeId, title, cover, comp
   const detail = result?.key === requestKey ? result.data : null;
   const favorite = library.items.some(item => item.id === id && item.favorite);
   const currentEpisodeId = String(episodeId || '');
-  const likedEpisodeIds = library.items.find(item => item.id === id)?.liked_episode_ids || [];
-  const episodeLiked = !!currentEpisodeId && likedEpisodeIds.includes(currentEpisodeId);
+  const signedIn = accountLibrary?.signedIn === true;
+  const ready = accountLibrary?.ready !== false;
+  const cloudFavorites = accountLibrary?.lists.favorite;
+  const cloudLikes = accountLibrary?.lists.like;
+  const cloudFavorite = cloudFavorites?.items.some(item => item.id === id) || false;
+  const episodeLiked = cloudLikes?.items.some(item => item.id === id && item.episodeId === currentEpisodeId) || false;
+  const watch = accountLibrary?.watch;
+  const sessionId = accountLibrary?.sessionId;
+  const hasSeries = !!id;
 
   useEffect(() => subscribeLocalLibrary(setLibrary), []);
+  useEffect(() => {
+    if (!watch || !sessionId || !active || !hasSeries) return;
+    const stopFavorites = watch('favorite');
+    const stopLikes = watch('like');
+    return () => { stopFavorites(); stopLikes(); };
+  }, [watch, sessionId, active, hasSeries]);
   useEffect(() => { setScope('series'); }, [id]);
   useEffect(() => {
     if (!opened) return undefined;
@@ -72,10 +85,15 @@ export default function CommunityPanel({ seriesId, episodeId, title, cover, comp
     ? `本次展示 ${items.length} 条公开评论，公开总数 ${count(reviews.total)}；更多评论可在红果 App 查看。`
     : `本次展示 ${items.length} 条公开评论；更多评论可在红果 App 查看。`;
 
-  return <section className="community-panel" aria-label={t("公开剧评与本机收藏")}>
+  const updateCloud = async (kind, value, move = false) => {
+    const result = await accountLibrary.change({ kind, value, move, item: { id, title, cover, episodeId: currentEpisodeId } });
+    if (!result.cancelled && !result.success) showToast(result.error, 'error');
+  };
+
+  return <section className="community-panel" aria-label={t("剧评与收藏")}>
     <div className="community-heading">
       <div className="community-heading-top">
-        <div><h3>{t("剧评与收藏")}</h3>{!compact && <p>{t("公开评论，只读。收藏仅保存在本机。")}</p>}</div>
+        <div><h3>{t("剧评与收藏")}</h3></div>
         <button type="button" className="btn btn-outline community-share-btn" onClick={async () => {
           try {
             await navigator.clipboard.writeText(`https://hongguoduanju.com/detail?series_id=${encodeURIComponent(id)}`);
@@ -84,20 +102,25 @@ export default function CommunityPanel({ seriesId, episodeId, title, cover, comp
         }}>{t("复制分享链接")}</button>
       </div>
       <div className="community-actions">
-        <button type="button" className={`btn ${favorite ? 'community-favorited' : 'btn-outline'}`} aria-pressed={favorite} onClick={() => {
+        {signedIn ? <>
+          <button type="button" className={`btn ${cloudFavorite ? 'community-favorited' : 'btn-outline'}`}
+            aria-pressed={cloudFavorite} disabled={!title || !cloudFavorites?.loaded || cloudFavorites.busy}
+            onClick={() => updateCloud('favorite', !cloudFavorite)}>{t(cloudFavorite ? '已收藏到云端' : '收藏到云端')}</button>
+          {favorite && <><span className="community-local-label">{t('本机收藏')}</span>
+            <button type="button" className="btn btn-outline" disabled={cloudFavorites?.busy}
+              onClick={() => updateCloud('favorite', true, true)}>{t('移到账号收藏')}</button></>}
+        </> : <button type="button" className={`btn ${favorite ? 'community-favorited' : 'btn-outline'}`} aria-pressed={favorite} disabled={!ready || !title} onClick={() => {
           const next = !favorite;
           const updated = saveLocalSeries({ id, title, cover, favorite: next });
           setLibrary(updated);
           if (!updated.error) showToast(next ? '已收藏到本机' : '已取消本机收藏', next ? 'success' : 'info');
-        }}>{t(favorite ? '已收藏到本机' : '收藏到本机')}</button>
-        <button type="button" className={`btn community-episode-like ${episodeLiked ? 'community-favorited' : 'btn-outline'}`} aria-pressed={episodeLiked} disabled={!episodeId} onClick={() => {
-          if (!currentEpisodeId) return;
-          const nextLiked = !episodeLiked;
-          const next = episodeLiked ? likedEpisodeIds.filter(value => value !== currentEpisodeId) : [...likedEpisodeIds, currentEpisodeId];
-          const updated = saveLocalSeries({ id, title, cover, liked_episode_ids: next });
-          setLibrary(updated);
-          if (!updated.error) showToast(nextLiked ? '已点亮本集小红心' : '已取消本集小红心', nextLiked ? 'success' : 'info');
-        }}><span className="community-heart" aria-hidden="true">{t(episodeLiked ? '♥' : '♡')}</span>{t(episodeLiked ? '已点小红心（本机）' : '本集小红心（本机）')}</button>
+        }}>{t(favorite ? '已收藏到本机' : '收藏到本机')}</button>}
+        <button type="button" className={`btn community-episode-like ${episodeLiked ? 'community-favorited' : 'btn-outline'}`}
+          aria-pressed={episodeLiked} disabled={!signedIn || !currentEpisodeId || !cloudLikes?.loaded || cloudLikes.busy}
+          onClick={() => updateCloud('like', !episodeLiked)}>
+          <span className="community-heart" aria-hidden="true">{episodeLiked ? '♥' : '♡'}</span>
+          {t(signedIn ? (episodeLiked ? '取消本集点赞' : '点赞本集') : '登录后可点赞')}
+        </button>
         <button type="button" className="btn btn-outline" aria-expanded={opened && !episodeScope} aria-controls={panelId} onClick={() => {
           if (opened && !episodeScope) setOpenedSeries('');
           else { setScope('series'); setOpenedSeries(id); }
@@ -109,6 +132,13 @@ export default function CommunityPanel({ seriesId, episodeId, title, cover, comp
       </div>
     </div>
     {library.error && <p className="community-error" role="alert">{t(library.error)}</p>}
+    {accountLibrary?.statusError && <p className="community-error" role="alert">{t(accountLibrary.statusError)}</p>}
+    {signedIn && (cloudFavorites?.error || cloudLikes?.error) && <div className="community-error" role="alert">
+      <p>{t(cloudFavorites?.error || cloudLikes?.error)}</p><button type="button" className="btn btn-sm" onClick={() => {
+        if (cloudFavorites?.error) void accountLibrary.refresh('favorite');
+        if (cloudLikes?.error) void accountLibrary.refresh('like');
+      }}>{t('刷新云端')}</button>
+    </div>}
     {toast && <div className={`dm-toast dm-toast-${toast.type}`} role={toast.type === 'error' ? 'alert' : 'status'} onClick={() => showToast('')}>{t(toast.text)}</div>}
     {opened && <div id={panelId} className="community-content" aria-busy={loading}>
       {loading && <p className="community-status" role="status">{t("正在读取公开评分与评论…")}</p>}

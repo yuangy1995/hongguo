@@ -53,6 +53,7 @@ function mountApp() {
     if (name === 'react') return react;
     if (name === './i18n') return i18nStub;
     if (name.endsWith('useStealthWindow')) return () => ({ stealthMode: false });
+    if (name.endsWith('useAccountLibrary')) return () => ({});
     return name;
   } };
   context.exports = context.module.exports;

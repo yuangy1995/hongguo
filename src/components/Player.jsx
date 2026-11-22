@@ -55,7 +55,7 @@ const prefetchKey = (seriesId, vid, quality) => JSON.stringify([String(seriesId 
  *  - 「边下边看」：下一集若还在下载，显示等待态并轮询，下完自动接上
  *  - 断点续播：按 series_id 记住看到第几集、第几秒
  */
-function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accountCheckpointRef, active = true, portrait = false, actionsHidden = false, episodesOpen = false, setEpisodesOpen }) {
+function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accountCheckpointRef, accountLibrary, active = true, portrait = false, actionsHidden = false, episodesOpen = false, setEpisodesOpen }) {
   useLanguage();
   const mobile = window.electronAPI.platform === 'android';
   const enhancement = useVideoEnhancement();
@@ -1962,7 +1962,7 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
               {detail ? detail.series_title : '—'}
             </span>
             <span className="player-stat">{t(mobile ? `第 ${currentIndex} 集 · 共 ${episodes.length || 0} 集` : `已下载 ${playableCount} / ${episodes.length || 0} 集`)}</span>
-            {!mobile && <SeasonPicker seriesId={activeSeriesId} active={active && !actionsHidden} seriesList={seriesList}
+            {!mobile && <SeasonPicker seriesId={activeSeriesId} active={active && !actionsHidden} seriesList={seriesList} accountLibrary={accountLibrary}
               onSwitch={(id, newlyRegistered) => {
                 switchSeries(id, 0, true);
                 if (newlyRegistered) loadSeriesList().catch(() => {});
@@ -2500,9 +2500,9 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
       )}
 
       <div className="player-footer" hidden={actionsHidden}>
-        {/^[0-9]{6,30}$/.test(String(activeSeriesId)) && (
+        {/^[0-9]{6,30}$/.test(String(activeSeriesId)) && String(detail?.series_id) === String(activeSeriesId) && (
           <CommunityPanel seriesId={activeSeriesId} episodeId={current?.vid} title={detail?.series_title || ''} cover={detail?.cover || ''}
-            compact={!mobile} />
+            accountLibrary={accountLibrary} active={active && !actionsHidden} />
         )}
         <div className="player-footer-tools">
           {!mobile && (portrait || !toolbarCastSlot) && <CastPanel seriesId={activeSeriesId} episode={current} title={detail?.series_title} videoRef={videoRef} />}

@@ -152,6 +152,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 红果账号和云端观看记录
   getAccountStatus: () => ipcRenderer.invoke('get-account-status'),
+  getAccountLibrary: (sessionId, kind) => ipcRenderer.invoke('get-account-library', sessionId, kind),
+  changeAccountLibrary: (sessionId, change) => ipcRenderer.invoke('change-account-library', sessionId, change),
   openAccountWebLogin: () => ipcRenderer.invoke('open-account-web-login'),
   startAccountLogin: () => ipcRenderer.invoke('start-account-login'),
   pollAccountLogin: (loginId) => ipcRenderer.invoke('poll-account-login', loginId),

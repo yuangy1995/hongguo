@@ -17,6 +17,7 @@ function createAccountController({
   navigateToPlayer,
   send,
   applyProxyToSession = async () => {},
+  allowLibrary = () => false,
   progressTest,
   progressSync,
 }) {
@@ -257,8 +258,16 @@ function createAccountController({
   });
 
   ipcMain.handle('get-account-status', async () => action(async current => ({
-    ...await current.status(), progressTest: !!progressTest,
+    ...await current.status(), progressTest: !!progressTest, librarySession: current.librarySessionId?.() || '',
   })));
+  ipcMain.handle('get-account-library', (event, id, kind) => action(async current => {
+    if (!allowLibrary(event) || logoutRunning) throw new Error('当前无法读取账号列表。');
+    return { success: true, items: await current.readLibrary(id, kind) };
+  }));
+  ipcMain.handle('change-account-library', (event, id, change) => action(async current => {
+    if (!allowLibrary(event) || logoutRunning) throw new Error('当前无法修改账号列表。');
+    return { success: true, ...await current.changeLibrary(id, change || {}) };
+  }));
   ipcMain.handle('start-account-login', async () => {
     const request = ++qrRequest;
     progressCandidate = null;
@@ -292,9 +301,9 @@ function createAccountController({
     const sync = await flushProgress().catch(() => ({ success: false }));
     const result = await action(current => current.logout());
     if (result.success) {
-      await clearCookies();
       send('account-updated', { signedIn: false });
       send('watch-history-updated', {});
+      await clearCookies().catch(error => console.warn('[Account] 清除登录 Cookie 失败:', safeMessage(error)));
     }
     return { ...result, syncIncomplete: sync?.success === false };
   })().finally(() => { logoutRunning = null; }));

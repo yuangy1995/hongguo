@@ -6,6 +6,7 @@ const { signedAccountRequest, requestJson } = require('./app-source');
 const { getPlaybackDevice } = require('./playback-device');
 const { writeJsonAtomic } = require('./atomic-json');
 const { chooseAccountProgress, isSameAccountProgress, accountProgressBodies, verifyAccountProgressWrite } = require('./account-progress-sync');
+const { createAccountLibrary, ID_FIELDS } = require('./account-library');
 
 const WEB_BASE = 'https://hongguoduanju.com';
 const WEB_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
@@ -255,6 +256,38 @@ function createAccountService({
   let sessionVerification = null;
   let login = null;
   let loginGeneration = 0;
+  let librarySession = null;
+
+  function resetLibrarySession(current = null) {
+    librarySession?.controller.abort();
+    librarySession = null;
+    if (!current) return;
+    const controller = new AbortController();
+    librarySession = {
+      id: randomUUID(), controller,
+      library: createAccountLibrary({
+        cleanText, cleanCover, now, signal: controller.signal,
+        request: (apiPath, params, payload) => accountJson(current, apiPath, params, payload, undefined, controller.signal),
+      }),
+    };
+  }
+
+  async function libraryAction(id, run) {
+    const current = librarySession;
+    const checkSession = () => {
+      if (!current || current !== librarySession || current.id !== id) throw new Error('红果账号已变更，请重新登录。');
+    };
+    checkSession();
+    try {
+      const result = await run(current.library);
+      checkSession();
+      return result;
+    } catch (error) {
+      checkSession();
+      if (isExpiredSession(error)) expireAccount();
+      throw error;
+    }
+  }
 
   const publicAccount = extra => ({
     success: true, signedIn: !!profile, ...(expired ? { expired: true } : {}), account: profile ? { ...profile } : null, ...extra,
@@ -289,6 +322,7 @@ function createAccountService({
 
   function expireAccount() {
     generation++;
+    resetLibrarySession();
     credentials = null;
     profile = null;
     expired = true;
@@ -299,21 +333,24 @@ function createAccountService({
     onAccountExpired();
   }
 
-  async function accountJson(targetCredentials, apiPath, params = {}, payload, beforeWrite) {
+  async function accountJson(targetCredentials, apiPath, params = {}, payload, beforeWrite, librarySignal) {
+    librarySignal?.throwIfAborted();
     // Website authentication does not depend on anonymous App device availability.
     const identity = targetCredentials.deviceId && targetCredentials.installId && targetCredentials.cdid ? {
       device_id: targetCredentials.deviceId, iid: targetCredentials.installId, cdid: targetCredentials.cdid,
     } : await withTimeout(identityRequest(accountRequest), 10000, '账号设备初始化超时，请重试');
     if (targetCredentials !== credentials) throw new Error('账号已退出，请重新登录');
+    librarySignal?.throwIfAborted();
     beforeWrite?.();
     const signed = signedAccountRequest(apiPath, params, identity, payload);
     const deadline = Date.now() + 12000;
+    const timeout = AbortSignal.timeout(12000);
     return accountRequest(signed.url, {
       method: signed.body ? 'POST' : 'GET',
       ...(signed.body ? { data: signed.body } : {}),
       headers: { ...signed.headers, Cookie: targetCredentials.cookie },
-      preserveLargeIntegerFields: ['vid', 'video_id', 'item_id'],
-    }, deadline, AbortSignal.timeout(12000));
+      preserveLargeIntegerFields: librarySignal ? ID_FIELDS : ['vid', 'video_id', 'item_id'],
+    }, deadline, librarySignal ? AbortSignal.any([timeout, librarySignal]) : timeout);
   }
 
   async function verify(targetCredentials) {
@@ -347,6 +384,7 @@ function createAccountService({
       if (cachedProfile) {
         credentials = saved;
         profile = cachedProfile;
+        resetLibrarySession(saved);
         void verifySession(saved, token);
         return publicAccount();
       }
@@ -357,6 +395,7 @@ function createAccountService({
       if (token !== generation) return publicAccount();
       credentials = saved;
       profile = nextProfile;
+      resetLibrarySession(saved);
       verifiedAt = now();
       try { sessionStore.save({ ...saved, profile: nextProfile }); } catch {}
       return publicAccount();
@@ -410,6 +449,10 @@ function createAccountService({
       return restored.signedIn ? publicAccount() : restored;
     },
 
+    librarySessionId() { return librarySession?.id || ''; },
+    readLibrary(id, kind) { return libraryAction(id, library => library.read(kind)); },
+    changeLibrary(id, change) { return libraryAction(id, library => library.change(change)); },
+
     async completeWebLogin(cookie) {
       const attempt = ++loginGeneration;
       login = null;
@@ -420,6 +463,7 @@ function createAccountService({
       let storageWarning = '';
       try { sessionStore.save({ ...nextCredentials, profile: nextProfile }); } catch (error) { storageWarning = safeMessage(error); }
       credentials = nextCredentials; profile = nextProfile; expired = false; history = []; historyLoaded = false;
+      resetLibrarySession(nextCredentials);
       verifiedAt = now();
       generation++; restorePromise = Promise.resolve(publicAccount());
       return publicAccount({ status: 'signed-in', storageWarning });
@@ -471,6 +515,7 @@ function createAccountService({
       catch (error) { storageWarning = safeMessage(error); }
       credentials = nextCredentials;
       profile = nextProfile;
+      resetLibrarySession(nextCredentials);
       expired = false;
       verifiedAt = now();
       history = [];
@@ -492,6 +537,7 @@ function createAccountService({
       if (local) sessionStore.clear();
       loginGeneration++;
       generation++;
+      resetLibrarySession();
       credentials = null;
       profile = null;
       expired = false;

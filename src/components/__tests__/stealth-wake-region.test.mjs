@@ -34,6 +34,7 @@ function mount(file, props, api, app = false) {
       if (id === './stealthWakeRegion.mjs') return model;
       if (app && id === './theme') return { initializeTheme() {} };
       if (app && id === './components/useStealthWindow') return () => ({ stealthMode: true, toggleStealth() {}, stealthError: '' });
+      if (app && id === './components/useAccountLibrary') return () => ({ signedIn: false });
       if (app && id === './components/icons') return Object.fromEntries(['Film', 'Download', 'Settings', 'Play', 'Home', 'Search', 'Clock', 'User'].map(name => [name, name]));
       if (app && id.startsWith('./components/')) return id.split('/').at(-1);
       throw Error('Unexpected import: ' + id);
