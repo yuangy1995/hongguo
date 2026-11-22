@@ -13,6 +13,15 @@
 
 需要发新版本时，由维护者手动合并上游改动并检查本项目的功能，再通过 GitHub Actions 的「发布桌面版」启动四平台发行。
 
+## 1.0.6 正式发行
+
+1.0.6 已于 2026-11-23 00:53:29（Asia/Shanghai）公开并设为 Latest。标签 `v1.0.6` 对应源码 `a82855495ca4936c1fe5b901447b43aa50b4915a`。四平台由同一次工作流构建，共 20 份附件。发布任务核对了远端大小、SHA256、Windows 更新清单和匿名下载入口。见 [发布页](https://github.com/yuangy1995/hongguo/releases/tag/v1.0.6)及[构建和验收](https://github.com/yuangy1995/hongguo/actions/runs/45045427846)。
+
+- 双 Mac DMG 的临时签名、版本、架构和启动检查通过。Apple 芯片版使用隔离资料从红果随机样本中下载《母凭子贵后被皇家宠上天3》第 1、2 集，静音播放各约 10 秒。Intel Mac 覆盖启动。
+- Linux AppImage 在隔离资料中从红果随机选择并真实下载两集，静音播放各约 10 秒，启动、媒体工具和软件解码资源检查通过。
+- Windows x64 在 GitHub 虚拟机通过便携版真实下载队列、随机红果素材静音播放、新装、重装和从 1.80 升级检查。EXE 未签名。各平台验收记录随本轮工作流产物保留。
+- 云端收藏、点赞、预约、具体日期和本机收藏显示规则的定向检查，以及 [桌面、服务端和 Android 源码回归](https://github.com/yuangy1995/hongguo/actions/runs/45045360765)均通过。
+
 ## 1.0.5 正式发行
 
 1.0.5 已于 2026-11-21 21:43:36（Asia/Shanghai）公开并设为 Latest。标签 `v1.0.5` 对应源码 `9729fca0b096442cc10e5fcaba2696ea5d533d91`。四平台由同一次 GitHub Actions 工作流构建，共 20 份附件。发布任务已核对远端摘要和匿名下载入口。见 [发布页](https://github.com/yuangy1995/hongguo/releases/tag/v1.0.5)及[构建和验收](https://github.com/yuangy1995/hongguo/actions/runs/44909143926)。
