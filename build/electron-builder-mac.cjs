@@ -7,7 +7,6 @@ module.exports = {
   publish: updateFeed,
   mac: {
     ...build.mac,
-    extendInfo: { ...build.mac.extendInfo, LSFileQuarantineEnabled: true },
     artifactName: 'hongguo-downloader-${version}-mac-${arch}.${ext}',
   },
 };
