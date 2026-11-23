@@ -68,7 +68,7 @@
 - 后续正式Release提供macOS Apple Silicon arm64、macOS Intel x64、Windows x64、Linux x64 AppImage四平台附件，以及这些平台必要的更新清单、精确源码、对应媒体源码和SHA256。Docker、TV APK、手机APK不再发布。
 - 四个平台仍共用公开版本、GitHub标签和一次Release。附件与必要验收齐备、远端大小和SHA256核对后，一次公开并设Latest。
 - 每次发行页必须在附件列表前的醒目位置保留以下推荐；这是独立第三方项目，不计入本项目附件和平台验收：
-  > **Android手机APK／Android TV版：** 请前往 [N3urda/hongguoTV](https://github.com/N3urda/hongguoTV) 下载。该项目独立维护；版本、兼容性与测试状态以该项目发布页为准，不计入本项目的四平台附件或验收。
+  > **Android手机APK／Android TV版：** 请前往 [N3urda/hongguoTV](https://github.com/N3urda/hongguoTV) 下载。该项目独立维护。
 
 # 上游 8.1 正式发行
 
