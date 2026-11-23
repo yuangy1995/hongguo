@@ -89,7 +89,7 @@ function safeDownloadFailure(value) {
       const api=window.electronAPI;
       const fixedSeries=${JSON.stringify(process.env.HONGGUO_ACCEPTANCE_SERIES_ID || '')};
       const fixedEpisodes=${JSON.stringify(process.env.HONGGUO_ACCEPTANCE_EPISODES || '')}
-        .split(',').map(Number).filter(Number.isInteger);
+        .split(',').map(Number).filter(index => Number.isSafeInteger(index) && index > 0);
       const catalog=fixedSeries?{success:true,results:[{series_id:fixedSeries,series_title:'Release acceptance'}]}
         :await api.browseList({source:'hongguo',category:'hot-real-drama'});
       if(!catalog.success||!catalog.results?.length)throw Error('Real Hongguo catalog unavailable');
