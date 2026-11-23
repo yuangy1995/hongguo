@@ -208,7 +208,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
       if (seasonRequest.current !== pending) return;
       if (result?.official !== true || result.partial || !Array.isArray(result.results)) throw new Error();
       pending.expiresAt = Date.now() + OFFICIAL_SEASONS_TTL;
-      setSeasonPanel({ id: seriesId, results: result.results, unavailable: result.unavailable });
+      setSeasonPanel({ id: seriesId, results: result.results });
     } catch {
       if (seasonRequest.current === pending) setSeasonPanel({ id: seriesId, error: true });
     } finally {
@@ -343,6 +343,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
       const menuId = `history-actions-${row.series_id}`;
       const officialSeasons = !mobile && typeof window.electronAPI.findSeriesSeasons === 'function'
         && /^[1-9]\d{5,29}$/.test(row.series_id);
+      const sequelLabel = /^[1-9]\d{5,29}$/.test(row.series_id) ? '官方续作' : '疑似续作';
       const seasonMenuId = `history-seasons-${row.series_id}`;
       const seasons = seasonPanel?.id === row.series_id ? seasonPanel : null;
       const updateErrors = [
@@ -353,7 +354,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
       return <li className={`history-row ${!isHead ? 'history-child' : ''}`} key={row.series_id}>
       <div className="history-main">
       <button className="history-resume" onClick={() => resume(row)} disabled={!active || !!opening || !!removing} aria-label={row.vid_index > 0
-        ? t(`继续观看 ${row.series_title} 第${row.vid_index}集${hasUpdates ? `，有更新${row.unreadEpisodes ? `，新增${row.unreadEpisodes}集` : '，发现疑似续作'}` : ''}`)
+        ? t(`继续观看 ${row.series_title} 第${row.vid_index}集${hasUpdates ? `，有更新${row.unreadEpisodes ? `，新增${row.unreadEpisodes}集` : `，发现${sequelLabel}`}` : ''}`)
         : t('继续观看 {0}', [row.series_title])}>
         {row.cover ? <img className="history-cover" src={row.cover} alt="" loading="lazy" /> : <span className="history-cover history-cover-empty"><Play size={20} /></span>}
         <span className="history-copy">
@@ -384,7 +385,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
       </div>
       </div>
       {isHead && !!sequels.length && <Relations className={mobile ? "history-sequels" : "history-related"}>
-        {mobile ? <span>{t("疑似续作")}</span> : <summary>{t("疑似续作")} · {sequels.length}</summary>}
+        {mobile ? <span>{t(sequelLabel)}</span> : <summary>{t(sequelLabel)} · {sequels.length}</summary>}
         <div className="history-related-actions">{sequels.map(sequel => <button key={sequel.series_id} className="btn btn-outline btn-sm" disabled={!active || !!opening || !!removing} onClick={() => resume(sequel.origin, sequel)}>{sequel.series_title}</button>)}</div>
       </Relations>}
       {officialSeasons && <div className="history-related history-series">
@@ -410,7 +411,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
                 {!season.playable && <small>{t(season.upcoming ? '待上线' : '暂不可播放')}</small>}
               </button>;
             })}</div>
-            : <p role="status">{t(seasons.unavailable ? '暂无系列剧信息。' : '暂未找到其他季。')}</p>)}
+            : <p role="status">{t('暂未找到其他季。')}</p>)}
         </section>
       </div>}
       {isHead && !!similar.length && !officialSeasons && <Relations className={mobile ? "history-sequels" : "history-related"} title={t("名称相近，仅供核对；不会用于隐藏低季或批量归组")}>

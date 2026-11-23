@@ -884,19 +884,19 @@ async function mount(file, api, props = {}, storage = null, exportName = 'defaul
     assert.match(ui.text(), /部分查询未完成/);
     ui.unmount();
   });
-  await test('the official season picker offers a retry on network failure and hides it when season information is unavailable', async () => {
+  await test('the official season picker offers a retry on network failure and hides it when the official series list is empty', async () => {
     let attempts = 0;
     const ui = await mount('SeasonPicker', {
       findSeriesSeasons: async () => {
         if (++attempts === 1) throw new Error('NETWORK_ERROR');
-        return { official: true, results: [], unavailable: true };
+        return { official: true, results: [] };
       },
     }, { seriesId: '7550000000000000006', active: true, seriesList: [] });
     await ui.flush();
     assert.match(ui.text(), /系列剧查询失败/);
     ui.button('重新查找').props.onClick();
     await ui.flush();
-    assert.match(ui.text(), /暂无系列剧信息/);
+    assert.match(ui.text(), /暂未找到其他季/);
     assert.equal(ui.button('重新查找'), undefined);
     ui.unmount();
   });

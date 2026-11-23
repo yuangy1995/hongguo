@@ -106,7 +106,7 @@ if (process.argv[2] !== 'main') {
     try {
       await ui.flush(); await ui.flush();
       assert.equal(ui.transcodes.length, 2, 'one original and one refreshed source, then stop');
-      assert.equal(ui.prepares.length, 2); assert.deepEqual(downloads, [['A', 1, 'auto']]);
+      assert.equal(ui.prepares.length, 2); assert.deepEqual(downloads, [['A', 1, 'auto', 'v1']]);
       assert.ok(alert(ui));
     } finally { ui.unmount(); }
   });
@@ -482,7 +482,7 @@ if (process.argv[2] !== 'main') {
       await ui.flush(); select(ui).props.onChange({target:{value:'1080p'}}); await ui.flush(); ui.metadata();
       assert.equal(cleaned.length,0,'changing quality must not delete files before playback ends');
       ui.find(n=>n.type==='video').props.onEnded(); await ui.flush();
-      assert.deepEqual(cleaned,[['A',1]],'cleanup must target the ended episode, never the next one');
+      assert.deepEqual(cleaned,[['A',1,'v1']],'cleanup must target the ended episode, never the next one');
       assert.equal(ui.prepares.at(-1).vidIndex,2); assert.equal(ui.prepares.at(-1).quality,'1080p');
     } finally { ui.unmount(); }
   });
@@ -518,7 +518,7 @@ if (process.argv[2] !== 'main') {
     await check('an existing verified download exposes quality to playback fallback',async()=>{
       const h=fixture(); const file=path.join(h.root,'existing.mp4'); fs.writeFileSync(file,Buffer.alloc(200000));
       h.context.existingFile=file;
-      h.run("downloadTasks=[{id:'t',hongguoInfo:{series_id:'1',vid:'11',vid_index:1},savePath:existingFile,status:'completed',downloadQuality:'auto'}];");
+      h.run("downloadTasks=[{id:'t',hongguoInfo:{series_id:'1',vid:'11',vid_index:1},savePath:existingFile,status:'completed',downloadQuality:'auto',fileIdentity:readFileIdentity(existingFile)}];");
       assert.equal((await h.handlers['download-single-episode']({},'1',1,'1080p')).success,true);
       assert.equal(h.run('downloadTasks[0].actualQuality'),'1080p');
     });
@@ -553,7 +553,7 @@ if (process.argv[2] !== 'main') {
     await check('compatibility paths isolate quality and recovery passes it to the provider',async()=>{
       const h=fixture();
       assert.notEqual(h.context.compatPathFor('1',1,'1080p'),h.context.compatPathFor('1',1,'720p'));
-      assert.equal(path.basename(h.context.compatPathFor('1',1)),'1_001.mp4');
+      assert.match(path.basename(h.context.compatPathFor('1', 1, 'auto', '11')), /^1_vid-[a-f0-9]{64}_auto\.mp4$/);
       await h.context.fetchDecryptedEpisode('11',()=>{},'1',null,undefined,Infinity,false,'1080p');
       assert.equal(h.calls[0][2].quality,'1080p');
     });

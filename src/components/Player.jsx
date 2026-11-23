@@ -262,7 +262,7 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
     }
     media.savedAt = seconds;
     media.saving = window.electronAPI.savePlaybackPosition(media.seriesId, media.vidIndex, seconds,
-      { duration: media.element.duration, ended: actualEnd, ...(syncOnPause ? { syncOnPause } : {}) }).then(result => {
+      { episodeId: media.episodeId, duration: media.element.duration, ended: actualEnd, ...(syncOnPause ? { syncOnPause } : {}) }).then(result => {
       if (result?.success === false && media.savedAt === seconds) media.savedAt = undefined;
       return result;
     }).catch(() => {
@@ -516,7 +516,7 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
       fallbackAttemptRef.current = key;
       setPlaybackError(''); setWaitingFor(intent.vidIndex);
       // Enqueue validates quality and reuses an existing task; cancelling playback never stops that shared download.
-      const result = await window.electronAPI.downloadSingleEpisode(intent.seriesId, intent.vidIndex, quality);
+      const result = await window.electronAPI.downloadSingleEpisode(intent.seriesId, intent.vidIndex, quality, intent.vid);
       if (!isCurrentFallback(intent)) return;
       if (!result?.success) throw new Error(result?.error || '下载加入失败');
       intent.submitting = false;
@@ -920,7 +920,7 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
     async (vidIndex, force = false) => {
       const ep = episodes.find((e) => e.vid_index === vidIndex);
       if (!ep || ep.locked) return;
-      const request = { requestId: crypto.randomUUID(), seriesId: String(activeSeriesId), vidIndex,
+      const request = { requestId: crypto.randomUUID(), seriesId: String(activeSeriesId), vidIndex, vid: ep.vid,
         quality: onlineQualityRef.current?.playbackQuality || (onlineQuality === 'compat' ? 'auto' : onlineQuality), version: mediaVersion.current };
       if (compatRequestRef.current?.version === request.version && compatRequestRef.current?.vidIndex === vidIndex) return;
       autoCompatAttemptRef.current = { version: request.version, force };
@@ -1353,6 +1353,7 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
   // 先交接下一集或释放当前媒体，再清理刚看完的文件和缓存。
   const handleEnded = useCallback(async () => {
     const { currentIndex: ci, autoNext: an, activeSeriesId: sid } = stateRef.current;
+    const episodeId = loadedMediaRef.current?.episodeId;
     const next = an ? findNext(ci) : null;
     persistPosition(true, true);
     const released = autoDelete && sid ? releaseOnline() : null;
@@ -1376,9 +1377,9 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
       }
       if (an) showToast(episodes.some(ep => ep.locked) ? '已播完可播放集数，其余集数需在来源平台解锁' : '已经是最后一集');
     }
-    if (autoDelete && sid) {
+    if (autoDelete && sid && episodeId) {
       await released;
-      window.electronAPI.cleanupWatchedEpisode(sid, ci).then(async result => {
+      window.electronAPI.cleanupWatchedEpisode(sid, ci, episodeId).then(async result => {
         if (!result?.success) throw new Error(result?.error || '清理失败，请在剧库中重试');
         if (result.count > 0) showToast(`第 ${ci} 集已看完，清理文件和缓存（释放 ${fmtSize(result.freed)}）`);
         refreshCacheInfo();
@@ -1438,7 +1439,7 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
     // Software decoding emits only loadedmetadata while paused (no MediaStream is attached
     // before play), so onCanPlay never fires and the buffering overlay would block clicks.
     if (softwareDecode) setMediaBuffering(false);
-    loadedMediaRef.current = { element: v, seriesId: activeSeriesId, vidIndex: currentIndex, version: mediaVersion.current, played: false };
+    loadedMediaRef.current = { element: v, seriesId: activeSeriesId, vidIndex: currentIndex, episodeId: String(current.vid), version: mediaVersion.current, played: false };
     v.defaultPlaybackRate = playbackRateRef.current;
     v.playbackRate = playbackRateRef.current;
     const seekTo = Math.max(0, Number(pendingSeekRef.current) || 0);
@@ -1576,7 +1577,7 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
     };
   }, [active, floatingPlayer.floating, confirmAsk, mergeAsk, pickerOpen, findNext, findPrev, goToEpisode, changePlaybackRate, showToast, shortcuts, toggleFullscreen]);
 
-  const switchSeries = useCallback(async (sid, requestedIndex = 0, resume = false, autoplay = true) => {
+  const switchSeries = useCallback(async (sid, requestedIndex = 0, resume = false, autoplay = true, episodeId = '') => {
     persistPosition(true);
     const version = ++selectionVersion.current;
     selectedSeriesRef.current = String(sid);
@@ -1604,10 +1605,20 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
       if (!d || version !== selectionVersion.current) return;
       const saved = requestedIndex && !resume ? null : await window.electronAPI.getPlaybackPosition(sid);
       if (version !== selectionVersion.current) return;
+      const wantedId = episodeId || saved?.episode_id;
       const wantedIndex = requestedIndex || saved?.vid_index || 1;
-      const selected = d.episodes.find(e => e.vid_index === wantedIndex && !e.locked) || d.episodes.find(e => !e.locked);
+      const matching = d.episodes.find(e => !e.locked && (wantedId ? String(e.vid) === wantedId : e.vid_index === wantedIndex));
+      const selected = matching || d.episodes.find(e => !e.locked);
+      if (wantedId && !matching) {
+        autoplay = false;
+        pendingAutoplayRef.current = false;
+        setPlaybackRequested(false);
+        showToast('原分集暂不可播放，请重新选集');
+      }
       setCurrentIndex(selected?.vid_index || 1);
-      pendingSeekRef.current = selected?.vid_index === saved?.vid_index ? saved.currentTime || 0 : 0;
+      const sameResumeEpisode = selected && saved && (saved.episode_id
+        ? String(selected.vid) === saved.episode_id : !episodeId && selected.vid_index === saved.vid_index);
+      pendingSeekRef.current = sameResumeEpisode ? saved.currentTime || 0 : 0;
       if (autoplay && selected && !usableLocal(selected, String(sid))) {
         pendingTargetRef.current = { seriesId: String(sid), vidIndex: selected.vid_index, seekTo: pendingSeekRef.current, autoplay: pendingAutoplayRef.current };
       }
@@ -1629,7 +1640,7 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
         if (cancelled) return;
         const wanted = target?.seriesId && list.find(s => String(s.series_id) === String(target.seriesId));
         const selected = wanted || [...list].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
-        if (selected) await switchSeries(selected.series_id, wanted ? target.vidIndex : 0, !!(wanted && target.resume), !!wanted && target.autoplay !== false && navigation === navigationVersion.current);
+        if (selected) await switchSeries(selected.series_id, wanted ? target.vidIndex : 0, !!(wanted && target.resume), !!wanted && target.autoplay !== false && navigation === navigationVersion.current, wanted ? target.episodeId : undefined);
         else setLoading(false);
       } catch (e) {
         if (!cancelled) { setLoading(false); showToast('加载剧库失败: ' + e.message); }
@@ -1698,7 +1709,7 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
     const media = mediaVersion.current;
     const navigation = navigationVersion.current;
     try {
-      const res = await window.electronAPI.downloadSingleEpisode(activeSeriesId, vidIndex, downloadQuality);
+      const res = await window.electronAPI.downloadSingleEpisode(activeSeriesId, vidIndex, downloadQuality, episodes.find(episode => episode.vid_index === vidIndex)?.vid);
       if (res && res.success) {
         showToast(res.count > 0 ? `第 ${vidIndex} 集已加入下载队列` : `第 ${vidIndex} 集已在队列中`);
         if (activeRef.current && navigation === navigationVersion.current && selection === selectionVersion.current && media === mediaVersion.current
@@ -1733,7 +1744,7 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
     let firstError = '';
     for (const ep of missing) {
       try {
-        const r = await window.electronAPI.downloadSingleEpisode(activeSeriesId, ep.vid_index, downloadQuality);
+        const r = await window.electronAPI.downloadSingleEpisode(activeSeriesId, ep.vid_index, downloadQuality, ep.vid);
         if (r?.success) ok++;
         else if (!firstError) firstError = r?.error || '加入下载失败';
       } catch (error) { if (!firstError) firstError = error.message || '加入下载失败'; }
@@ -1892,7 +1903,7 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
       onClick={async () => {
         videoRef.current?.pause();
         try {
-          const result = await window.electronAPI.openEpisodeExternal(activeSeriesId, currentIndex);
+          const result = await window.electronAPI.openEpisodeExternal(activeSeriesId, currentIndex, String(current.vid));
           if (!result?.success) showToast(result?.error || '无法打开系统播放器');
         } catch { showToast('无法打开系统播放器，请稍后重试'); }
       }}>{t("系统播放器")}</button>}

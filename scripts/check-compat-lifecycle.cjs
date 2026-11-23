@@ -65,7 +65,7 @@ async function check(name, fn) { try { await fn(); console.log('PASS ' + name); 
   });
   await check('locked source remains blocked even when compatibility cache exists', async () => {
     const h = load({ permission: async () => ({ episodes: [{ vid: 'xifan:v', vid_index: 1, locked: true }] }) });
-    fs.writeFileSync(h.context.compatPathFor('xifan:S', 1), Buffer.alloc(120000));
+    fs.writeFileSync(h.context.compatPathFor('xifan:S', 1, 'auto', 'xifan:v'), Buffer.alloc(120000));
     const result = await h.handlers['transcode-for-playback']({}, { ...payload('locked'), force: false });
     assert.equal(result.success, false); assert.match(result.error, /锁定/); assert.equal(h.metrics.media, 0); assert.equal(h.children.length, 0);
   });
@@ -117,7 +117,7 @@ async function check(name, fn) { try { await fn(); console.log('PASS ' + name); 
     assert.equal(result.success, true, 'hardware failure should retry in software');
     assert.equal(result.encoder, 'libx264'); assert.equal(h.children.length, 2);
     assert.deepEqual(h.children.map(child => child.args[child.args.indexOf('-c:v') + 1]), ['h264_videotoolbox', 'libx264']);
-    assert.deepEqual(fs.readdirSync(h.context.getCompatDir()), [path.basename(h.context.compatPathFor('xifan:S', 1))]);
+    assert.deepEqual(fs.readdirSync(h.context.getCompatDir()), [path.basename(h.context.compatPathFor('xifan:S', 1, 'auto', 'xifan:v'))]);
   });
   await check('software fallback failure stops after two attempts and cleans temporary files', async () => {
     const h = load({ encoder: 'h264_nvenc', exitCodes: [1, 2] });
@@ -136,13 +136,13 @@ async function check(name, fn) { try { await fn(); console.log('PASS ' + name); 
   });
   await check('force rebuild bypasses both caches and encoder probes', async () => {
     const h = load({ encoder: 'h264_nvenc' });
-    fs.writeFileSync(h.context.compatPathFor('xifan:S', 1), Buffer.alloc(120000, 1));
+    fs.writeFileSync(h.context.compatPathFor('xifan:S', 1, 'auto', 'xifan:v'), Buffer.alloc(120000, 1));
     h.run("onlineCache.set('xifan:v', { buffer: Buffer.alloc(120000, 2) })");
     const result = await h.handlers['transcode-for-playback']({}, payload('force-rebuild'));
     assert.equal(result.success, true); assert.equal(result.cached, undefined);
     assert.equal(h.metrics.media, 1, 'force must fetch fresh source bytes'); assert.equal(h.metrics.encoder, 0, 'force must not probe hardware');
     assert.equal(result.encoder, 'libx264'); assert.equal(h.children.length, 1);
-    assert.equal(h.children[0].input[0], 0); assert.equal(fs.readFileSync(h.context.compatPathFor('xifan:S', 1))[0], 0);
+    assert.equal(h.children[0].input[0], 0); assert.equal(fs.readFileSync(h.context.compatPathFor('xifan:S', 1, 'auto', 'xifan:v'))[0], 0);
   });
   await check('force preserves downloaded original and uses it before online input', async () => {
     const h = load({ encoder: 'h264_nvenc' }), filePath = path.join(h.dir, 'downloaded.mp4');

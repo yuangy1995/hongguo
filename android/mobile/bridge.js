@@ -2,6 +2,7 @@ import '../web/globals.js';
 import { browseList as appCatalog } from '../../src/native/hongguo-app-catalog.js';
 import { browseList as webCatalog } from '../../src/native/catalog.js';
 import { searchApp } from '../../src/native/hongguo-app-search.js';
+import { fetchHongguoSeriesSeasons } from '../../src/native/hongguo-series-seasons.js';
 import { fetchPublicDetails } from '../../src/native/public-details.js';
 import { fetchEpisodeComments } from '../../src/native/episode-comments.js';
 import { createAccountService } from '../../src/native/account-session.js';
@@ -62,11 +63,22 @@ const account = createAccountService({ filePath:'account.session', safeStorage: 
 } });
 const validId = value => /^\d{6,30}$/.test(String(value));
 const seriesFor = id => state.series.find(row => row.series_id === String(id));
-const taskFor = (id, index) => state.tasks.findLast(row => row.hongguoInfo.series_id === String(id) && row.hongguoInfo.vid_index === Number(index));
+const taskFor = (id, vid) => state.tasks.findLast(row => row.hongguoInfo.series_id === String(id) && row.hongguoInfo.vid === vid);
 state.files ||= state.tasks.filter(task => task.status === 'completed' && task.token).map(task => ({
   seriesId: task.hongguoInfo.series_id, index: task.hongguoInfo.vid_index, token: task.token, quality: task.actualQuality,
 }));
-const fileFor = (id, index) => state.files.find(row => row.seriesId === String(id) && row.index === Number(index) && Native.mediaSize(row.token) > 0);
+const idsByToken = new Map();
+for (const task of state.tasks) {
+  const { series_id: id, vid } = task.hongguoInfo;
+  if (!task.token || !validId(vid)) continue;
+  const key = JSON.stringify([id, task.token]);
+  const recorded = idsByToken.get(key);
+  idsByToken.set(key, recorded === undefined || recorded === vid ? vid : '');
+}
+for (const file of state.files) {
+  if (!file.vid) file.vid = idsByToken.get(JSON.stringify([file.seriesId, file.token])) || '';
+}
+const fileFor = (id, vid) => state.files.find(row => row.seriesId === String(id) && row.vid === vid && Native.mediaSize(row.token) > 0);
 const controllers = new Map(), pausedControllers = new Set(), online = new Map(), localPlaybackUrls = new Set();
 const queue = { running: false, paused: true };
 for (const task of state.tasks) {
@@ -88,11 +100,26 @@ async function resolveSeries(input) {
   const data = { ...detail, total: detail.episodes.length,
     episodes: detail.episodes.map((row, index) => ({ vid: row.vid, vid_index: index + 1, title: `第${index + 1}集`, locked: false })) };
   const old = seriesFor(id);
+  const officialSeasons = old?.officialSeasons || state.series.find(row => row.officialSeasons?.some(member => member.series_id === id))?.officialSeasons;
+  if (officialSeasons) data.officialSeasons = officialSeasons;
   state.series = [data, ...state.series.filter(row => row.series_id !== id)];
   if (state.playback[id]) state.playback[id] = history.applyEpisodeUpdate(state.playback[id], old, data);
   save();
   return { success: true, data: clone(data) };
 }
+async function readOfficialSeasons(id) {
+  const results = await fetchHongguoSeriesSeasons(String(id));
+  if (history.setOfficialSeasons(state.series, String(id), results)) {
+    save(); emit('onWatchHistoryUpdated');
+  }
+  return results;
+}
+
+async function checkHistory(id) {
+  await resolveSeries(id);
+  if (state.settings.watch_sequels_enabled !== false) await readOfficialSeasons(id);
+}
+
 const guarded = fn => async (...args) => {
   try { return await fn(...args); }
   catch (error) { return { success: false, error: error.message, code: error.code, cancelled: error.code === 'ERR_CANCELED' }; }
@@ -102,7 +129,7 @@ async function episodes(id) {
   const series = seriesFor(id);
   if (!series) return { success: false, code: 'SERIES_NOT_FOUND', error: '请先打开剧集详情' };
   const rows = series.episodes.map(row => {
-    const task = taskFor(id, row.vid_index), file = fileFor(id, row.vid_index), complete = !!file;
+    const task = taskFor(id, row.vid), file = fileFor(id, row.vid), complete = !!file;
     return { ...row, status: complete ? 'completed' : task?.status === 'completed' ? 'missing' : task?.status || 'missing',
       progress: task?.progress || 0, taskId: task?.id || null, error: task?.error || '',
       fileUrl: complete ? `https://app.local/media/${file.token}` : null, fileSize: complete ? Number(Native.mediaSize(file.token)) : 0,
@@ -139,7 +166,7 @@ async function pump() {
           continue;
         }
         Native.persistMedia(media.token);
-        state.files.push({ seriesId: task.hongguoInfo.series_id, index: task.hongguoInfo.vid_index, token: media.token, quality: media.quality });
+        state.files.push({ seriesId: task.hongguoInfo.series_id, index: task.hongguoInfo.vid_index, vid: task.hongguoInfo.vid, token: media.token, quality: media.quality });
         Object.assign(task, { token: media.token, status: 'completed', progress: 100, size: media.bytes,
           fileSize: media.bytes, actualQuality: media.quality, savePath: media.token, endTime: Date.now() });
         save(); emit('onDownloadCompleted', clone(task));
@@ -170,8 +197,8 @@ async function enqueue(payload) {
   });
   let added = 0;
   for (const ep of selectedEpisodes) {
-    const previous = taskFor(series.series_id, ep.vid_index);
-    if (fileFor(series.series_id, ep.vid_index) || previous && ['pending','downloading'].includes(previous.status)) continue;
+    const previous = taskFor(series.series_id, ep.vid);
+    if (fileFor(series.series_id, ep.vid) || previous && ['pending','downloading'].includes(previous.status)) continue;
     const task = { id: crypto.randomUUID(), title: `${series.series_title} 第${ep.vid_index}集`,
       status: 'pending', progress: 0, startTime: Date.now(), quality: payload.quality || 'auto',
       hongguoInfo: { series_id: series.series_id, series_title: series.series_title, vid: ep.vid, vid_index: ep.vid_index, ep_title: ep.title } };
@@ -258,14 +285,17 @@ Object.assign(api, {
     if (!seriesFor(id)) await resolveSeries(id);
     const ep = seriesFor(id).episodes.find(ep => ep.vid === row.episode_id);
     if (!ep) throw new Error('来源分集与账号记录不匹配');
-    await api.savePlaybackPosition(id,ep.vid_index,row.currentTime,{duration:row.duration});
+    await api.savePlaybackPosition(id,ep.vid_index,row.currentTime,{episodeId:ep.vid,duration:row.duration});
     return api.playSeries({seriesId:String(id),vidIndex:ep.vid_index,resume:true});
   }),
-  findSeriesSequels: guarded(async id => {
+  findSeriesSequels: guarded(async (id, options) => {
     const series = seriesFor(id); if (!series) throw new Error('剧集未登记');
-    const result = await api.searchSeries(history.sequelKeyword(series));
-    return { success:true, results:history.findSequels(series,result.results || []) };
+    if (options?.localOnly !== true) await readOfficialSeasons(id);
+    return { success: true, results: history.findSequels(seriesFor(id), seriesFor(id).officialSeasons || []) };
   }),
+  findSeriesSeasons: guarded(async (id, options) => ({
+    official: true, results: options?.localOnly ? (seriesFor(id)?.officialSeasons || []) : await readOfficialSeasons(id),
+  })),
   getPlaybackPosition: async id => clone(state.playback[id] || null),
   savePlaybackPosition: guarded(async (id, index, seconds, metadata) => {
     const series = seriesFor(id); if (!series) throw new Error('剧集未登记');
@@ -273,16 +303,16 @@ Object.assign(api, {
     save(); emit('onWatchHistoryUpdated'); return success();
   }),
   getWatchHistory: async () => {
-    const rows = history.listHistory(state.series, state.playback), seen = new Set(rows.map(row => row.series_id));
+    const rows = history.listHistory(state.series, state.playback, state.settings.watch_sequels_enabled !== false), seen = new Set(rows.map(row => row.series_id));
     return { success:true, results:[...rows,...clone(state.legacyHistory).filter(row => !seen.has(row.series_id))].sort((a,b) => b.updatedAt-a.updatedAt) };
   },
   removeWatchHistory: guarded(async id => { delete state.playback[id]; state.legacyHistory = state.legacyHistory.filter(row => row.series_id !== id); save(); emit('onWatchHistoryUpdated', { removedSeriesId: id }); return success(); }),
-  acknowledgeWatchUpdates: guarded(async (id, snapshot) => { if (state.playback[id]) { state.playback[id] = history.acknowledge(state.playback[id], snapshot); save(); } return success(); }),
-  checkWatchHistoryItem: guarded(async id => { await resolveSeries(id); emit('onWatchHistoryUpdated'); return success(); }),
+  acknowledgeWatchUpdates: guarded(async (id, snapshot) => { if (state.playback[id]) { state.playback[id] = history.acknowledge(state.playback[id], snapshot, seriesFor(id)?.officialSeasons || []); save(); } return success(); }),
+  checkWatchHistoryItem: guarded(async id => { await checkHistory(id); emit('onWatchHistoryUpdated'); return success(); }),
   refreshWatchHistory: guarded(async () => {
-    const rows = history.listHistory(state.series, state.playback).slice(0, 10); let failed = 0;
+    const rows = history.listHistory(state.series, state.playback, state.settings.watch_sequels_enabled !== false).slice(0, 10); let failed = 0;
     for (let index = 0; index < rows.length; index++) {
-      try { await resolveSeries(rows[index].series_id); } catch { failed++; }
+      try { await checkHistory(rows[index].series_id); } catch { failed++; }
       emit('onWatchHistoryProgress', { checked: index + 1, total: rows.length });
     }
     emit('onWatchHistoryUpdated'); return { success: true, checked: rows.length, failed };
@@ -327,8 +357,8 @@ Object.assign(api, {
     bytes: [...online.values()].reduce((n,row) => n + (row.media?.bytes || 0), 0) }),
   clearOnlineCache: async () => { for (const id of [...online.keys()]) await api.releaseOnlinePlay({ requestId: id }); return success(); },
   hongguoDownloadBatch: guarded(enqueue),
-  downloadSingleEpisode: guarded(async (id, index, quality) => {
-    const ep = seriesFor(id)?.episodes.find(row => row.vid_index === Number(index));
+  downloadSingleEpisode: guarded(async (id, index, quality, episodeId) => {
+    const ep = seriesFor(id)?.episodes.find(row => episodeId ? row.vid === episodeId : row.vid_index === Number(index));
     if (!ep) throw new Error('分集不存在');
     return enqueue({ seriesId: id, episodes: [ep], quality });
   }),
@@ -367,19 +397,15 @@ Object.assign(api, {
     });
     return { success: true, series, totalFiles: series.reduce((n,s) => n+s.files,0), totalBytes: series.reduce((n,s) => n+s.bytes,0) };
   },
-  deleteEpisodeFile: guarded(async (id, index) => {
-    if (state.tasks.some(row => row.hongguoInfo.series_id === String(id) && row.hongguoInfo.vid_index === Number(index) && controllers.has(row.id))) throw new Error('请先停止下载');
-    for (const file of state.files.filter(row => row.seriesId === String(id) && row.index === Number(index))) Native.deleteMedia(file.token);
-    state.files = state.files.filter(row => row.seriesId !== String(id) || row.index !== Number(index));
-    for (const task of state.tasks.filter(row => row.hongguoInfo.series_id === String(id) && row.hongguoInfo.vid_index === Number(index))) {
-      if (controllers.has(task.id)) throw new Error('请先停止下载');
-      if (task.token) Native.deleteMedia(task.token); delete task.token; task.status = 'stopped'; task.progress = 0;
-    }
-    save(); emit('onDownloadQueueChanged'); return success();
+  deleteEpisodeFile: guarded(async (id, index, episodeId) => {
+    const vid = episodeId || seriesFor(id)?.episodes.find(row => row.vid_index === Number(index))?.vid;
+    if (!validId(vid)) throw new Error('无法核对本集编号，文件已保留');
+    const count = deleteDownloads(id, vid);
+    return { success: true, count };
   }),
-  cleanupWatchedEpisode: guarded(async (id, index) => {
-    const result = await api.deleteEpisodeFile(id, index); if (!result.success) return result;
-    return { success: true, deleted: true };
+  cleanupWatchedEpisode: guarded(async (id, index, episodeId) => {
+    if (state.settings.auto_delete_watched !== true) return { success: true, count: 0 };
+    return api.deleteEpisodeFile(id, index, episodeId);
   }),
   forgetSeries: guarded(async id => {
     if (state.tasks.some(task => task.hongguoInfo.series_id === id && ['pending','downloading'].includes(task.status))) throw new Error('请先停止该剧下载');
@@ -400,12 +426,31 @@ api.deleteTasksWithFiles = guarded(async (ids, deleteFiles) => {
 api.deleteTaskWithFiles = (id, files) => api.deleteTasksWithFiles([id], files);
 api.deleteTask = id => api.deleteTasksWithFiles([id], false);
 api.deleteTasks = ids => api.deleteTasksWithFiles(ids, false);
-api.deleteSeriesFiles = guarded(async id => {
-  for (const file of state.files.filter(row => row.seriesId === String(id))) {
-    const result = await api.deleteEpisodeFile(id, file.index); if (!result.success) return result;
+function deleteDownloads(id, vid) {
+  const tasks = state.tasks.filter(row => row.hongguoInfo.series_id === String(id) && (!vid || row.hongguoInfo.vid === vid));
+  if (tasks.some(task => controllers.has(task.id))) throw new Error('请先停止下载');
+  const tokens = new Set(state.files.filter(row => row.seriesId === String(id) && (!vid || row.vid === vid)).map(file => file.token));
+  for (const task of tasks) if (task.token) tokens.add(task.token);
+  const removed = new Set();
+  try {
+    for (const token of tokens) {
+      if (state.files.some(file => file.token === token && (file.seriesId !== String(id) || (vid && file.vid !== vid)))
+        || state.tasks.some(task => task.token === token && !tasks.includes(task))) continue;
+      if (Native.mediaSize(token) > 0) Native.deleteMedia(token);
+      removed.add(token);
+    }
+  } finally {
+    if (removed.size) {
+      state.files = state.files.filter(file => !removed.has(file.token));
+      for (const task of tasks) if (removed.has(task.token)) {
+        delete task.token; task.status = 'stopped'; task.progress = 0;
+      }
+      save(); emit('onDownloadQueueChanged');
+    }
   }
-  return success();
-});
+  return removed.size;
+}
+api.deleteSeriesFiles = guarded(async id => ({ success: true, count: deleteDownloads(id) }));
 api.deleteAllDownloaded = guarded(async () => {
   for (const id of [...new Set(state.files.map(file => file.seriesId))]) { const result = await api.deleteSeriesFiles(id); if (!result.success) return result; }
   return success();

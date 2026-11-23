@@ -68,7 +68,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSeriesList: (options) => ipcRenderer.invoke('get-series-list', options),
   forgetSeries: (seriesId, options) => ipcRenderer.invoke('forget-series', seriesId, options),
   removeWatchHistory: (seriesId) => ipcRenderer.invoke('remove-watch-history', seriesId),
-  cleanupWatchedEpisode: (seriesId, vidIndex) => ipcRenderer.invoke('cleanup-watched-episode', seriesId, vidIndex),
+  cleanupWatchedEpisode: (seriesId, vidIndex, episodeId) => ipcRenderer.invoke('cleanup-watched-episode', seriesId, vidIndex, episodeId),
   removeSeries: (seriesId) => ipcRenderer.invoke('remove-series', seriesId),
   purgeEmptySeries: () => ipcRenderer.invoke('purge-empty-series'),
   restoreDismissedSeries: () => ipcRenderer.invoke('restore-dismissed-series'),
@@ -128,8 +128,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSeriesProgress: () => ipcRenderer.invoke('get-series-progress'),
   warmSeriesProgress: (seriesId) => ipcRenderer.invoke('warm-series-progress', seriesId),
   getSeriesEpisodes: (seriesId) => ipcRenderer.invoke('get-series-episodes', seriesId),
-  downloadSingleEpisode: (seriesId, vidIndex, quality) =>
-    ipcRenderer.invoke('download-single-episode', seriesId, vidIndex, quality),
+  downloadSingleEpisode: (seriesId, vidIndex, quality, episodeId) =>
+    ipcRenderer.invoke('download-single-episode', seriesId, vidIndex, quality, episodeId),
   downloadFollowingEpisodes: (seriesId, vidIndex, quality) =>
     ipcRenderer.invoke('download-following-episodes', seriesId, vidIndex, quality),
   savePlaybackPosition: (seriesId, vidIndex, currentTime, metadata) =>
@@ -245,7 +245,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteTaskWithFiles: (taskId, deleteFiles) => ipcRenderer.invoke('delete-task', taskId, { deleteFiles }),
   deleteTasksWithFiles: (taskIds, deleteFiles) => ipcRenderer.invoke('delete-tasks', taskIds, { deleteFiles }),
   deleteSeriesFiles: (seriesId, options) => ipcRenderer.invoke('delete-series-files', seriesId, options),
-  deleteEpisodeFile: (seriesId, vidIndex) => ipcRenderer.invoke('delete-episode-file', seriesId, vidIndex),
+  deleteEpisodeFile: (seriesId, vidIndex, episodeId) => ipcRenderer.invoke('delete-episode-file', seriesId, vidIndex, episodeId),
   getStorageUsage: () => ipcRenderer.invoke('get-storage-usage'),
   deleteAllDownloaded: () => ipcRenderer.invoke('delete-all-downloaded'),
   stopDownload: (taskId) => ipcRenderer.invoke('stop-download', taskId),
@@ -253,7 +253,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   retryTasks: (taskIds) => ipcRenderer.invoke('retry-tasks', taskIds),
   openFolder: (taskId) => ipcRenderer.invoke('open-folder', taskId),
   showInFolder: (filePath) => ipcRenderer.invoke('show-in-folder', filePath),
-  openEpisodeExternal: (seriesId, vidIndex) => ipcRenderer.invoke('open-episode-external', seriesId, vidIndex),
+  openEpisodeExternal: (seriesId, vidIndex, episodeId) => ipcRenderer.invoke('open-episode-external', seriesId, vidIndex, episodeId),
 
   // 一键启动 / 一键暂停 / 队列状态
   pauseAll: () => ipcRenderer.invoke('pause-all'),

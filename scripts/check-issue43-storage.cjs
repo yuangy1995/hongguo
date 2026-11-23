@@ -30,7 +30,7 @@ test('permanent list removal stays out of restore but history can deliberately r
 });
 test('watched cleanup removes only the exact episode across local, memory and compatible caches',async t=>{
  const h=fixture(t),local=path.join(h.root,'watched.mp4');fs.writeFileSync(local,'watched');h.context.localFixture=local;
- h.run(`downloadTasks=[{id:'watched',status:'completed',savePath:localFixture,endTime:Date.now(),fileIdentity:readFileIdentity(localFixture),hongguoInfo:{series_id:'1',vid_index:1}}];onlineCache.set('11',{seriesId:'1',vidIndex:1,buffer:Buffer.from('cached'),size:6});onlineCache.set('12',{seriesId:'1',vidIndex:2,buffer:Buffer.from('next'),size:4})`);
+ h.run(`downloadTasks=[{id:'watched',status:'completed',savePath:localFixture,endTime:Date.now(),fileIdentity:readFileIdentity(localFixture),hongguoInfo:{series_id:'1',vid_index:1,vid:'11'}}];onlineCache.set('11',{seriesId:'1',vidIndex:1,vid:'11',buffer:Buffer.from('cached'),size:6});onlineCache.set('12',{seriesId:'1',vidIndex:2,vid:'12',buffer:Buffer.from('next'),size:4})`);
  const watched=h.run("compatPathFor('1',1)"),next=h.run("compatPathFor('1',2)");fs.writeFileSync(watched,'converted');fs.writeFileSync(next,'next');
  const result=await h.handlers['cleanup-watched-episode']({},'1',1);assert.equal(result.success,true,result.error);
  assert.equal(fs.existsSync(local),false);assert.equal(fs.existsSync(watched),false);assert.equal(fs.existsSync(next),true);
@@ -39,7 +39,7 @@ test('watched cleanup removes only the exact episode across local, memory and co
 });
 test('watched cleanup rejects invalid indexes and active work without deleting files',async t=>{
  const h=fixture(t),local=path.join(h.root,'active.mp4');fs.writeFileSync(local,'active');h.context.localFixture=local;
- h.run(`downloadTasks=[{id:'active',status:'downloading',savePath:localFixture,hongguoInfo:{series_id:'1',vid_index:1}}]`);
+ h.run(`downloadTasks=[{id:'active',status:'downloading',savePath:localFixture,hongguoInfo:{series_id:'1',vid_index:1,vid:'11'}}]`);
  for(const index of [0,NaN,1]){const result=await h.handlers['cleanup-watched-episode']({},'1',index);assert.equal(result.success,false);assert.equal(fs.existsSync(local),true);}
 });
 
@@ -51,11 +51,11 @@ test('permanent removal survives a pending history refresh',async t=>{
 });
 test('failed disk cache deletion retains its index for a real retry',async t=>{
  const h=fixture(t),dir=path.join(h.root,'cache');fs.mkdirSync(dir);const file=path.join(dir,'video.mp4');fs.writeFileSync(file,'cached');
- h.context.diskFixture={seriesId:'1',vidIndex:1,filePath:file,disk:{directory:dir,readers:1},size:6};h.run("onlineCache.set('11',diskFixture)");
+ h.context.diskFixture={seriesId:'1',vidIndex:1,vid:'11',filePath:file,disk:{directory:dir,readers:1},size:6};h.run("onlineCache.set('11',diskFixture)");
  assert.equal((await h.handlers['cleanup-watched-episode']({},'1',1)).success,false);assert.equal(h.run("onlineCache.has('11')"),true);
  h.context.diskFixture.disk.readers=0;assert.equal((await h.handlers['cleanup-watched-episode']({},'1',1)).success,true);assert.equal(fs.existsSync(file),false);
 });
 test('a pending online session protects its episode before entry is available',async t=>{
- const h=fixture(t);h.run("onlineSessions.set('pending',{seriesId:'1',vidIndex:1,entry:null})");
+ const h=fixture(t);h.run("onlineSessions.set('pending',{seriesId:'1',vidIndex:1,vid:'11',entry:null})");
  assert.equal((await h.handlers['cleanup-watched-episode']({},'1',1)).success,false);
 });

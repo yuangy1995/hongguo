@@ -16,7 +16,7 @@ function fixture({ failId = '', now = Date.now(), remoteSeries = [], seasons = [
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-history-37-'));
   const handlers = {}, queries = [], fetches = [], notifications = [];
   const seriesList = seasons.map(season => ({
-    series_id: `100000${season}`,
+    series_id: `hema:${season}`,
     series_title: `${baseTitle}${season === 1 ? '' : `第${season}季`}`,
     total: 10,
     episodes: Array.from({ length: 10 }, (_, index) => ({ vid_index: index + 1, vid: `${season}-${index + 1}` })),
@@ -68,7 +68,7 @@ function fixture({ failId = '', now = Date.now(), remoteSeries = [], seasons = [
     electron, './src/store': store, './src/native/hongguo': hongguo,
     './src/native/hongguo-search': hongguoSearch,
     './src/native/xifan': { search: async () => ({ success: true, results: [] }) },
-    './src/native/hema': { search: async () => ({ success: true, results: [] }) },
+    './src/native/hema': { search: async keyword => ({ success: true, ...(await hongguoSearch.searchHongguo(keyword)) }) },
   };
   const context = vm.createContext({
     require: name => overrides[name] || req(name), __dirname: path.dirname(source), process,
@@ -94,29 +94,29 @@ test('3.7 batch checks every season but searches the family sequel once', async 
   try {
     const result = await h.refresh({ scope: 'all' });
     assert.equal(result.checked, 3);
-    assert.deepEqual(h.fetches.sort(), ['1000001', '1000002', '1000003']);
+    assert.deepEqual(h.fetches.sort(), ['hema:1', 'hema:2', 'hema:3']);
     assert.equal(h.queries.filter(keyword => keyword.toLowerCase() === baseTitle.toLowerCase()).length, 1,
       'the same family must not repeat the base search for every season');
-    assert.equal(h.playback['1000001'].sequels.length, 0, 'already watched seasons are not new sequels');
-    assert.equal(h.playback['1000002'].sequels.length, 0);
-    assert.equal(h.playback['1000003'].sequels.length, 0);
+    assert.equal(h.playback['hema:1'].sequels.length, 0, 'already watched seasons are not new sequels');
+    assert.equal(h.playback['hema:2'].sequels.length, 0);
+    assert.equal(h.playback['hema:3'].sequels.length, 0);
   } finally { h.cleanup(); }
 });
 
 test('#97 missing lower seasons are not updates after a higher season was watched', async () => {
-  const missing = { series_id: '1000002', series_title: baseTitle + '第2季' };
-  const future = { series_id: '1000005', series_title: baseTitle + '第5季' };
+  const missing = { series_id: 'hema:2', series_title: baseTitle + '第2季' };
+  const future = { series_id: 'hema:5', series_title: baseTitle + '第5季' };
   for (const remoteSeries of [[missing], [missing, future]]) {
     const h = fixture({ seasons: [1, 3, 4], remoteSeries, notify: true });
     try {
-      h.playback['1000001'].sequels = [missing];
+      h.playback['hema:1'].sequels = [missing];
       const cached = (await h.handlers['get-watch-history']({})).results;
       assert.ok(cached.every(row => !row.sequels.some(item => item.series_id === missing.series_id)),
         'old saved candidates must be filtered before another network check');
       assert.ok(cached.every(row => !row.hasUpdates), 'a missing lower season cannot create an unread dot');
       await h.refresh({ scope: 'all' });
       const expected = remoteSeries.includes(future) ? [future.series_id] : [];
-      for (const id of ['1000001', '1000003', '1000004']) {
+      for (const id of ['hema:1', 'hema:3', 'hema:4']) {
         assert.deepEqual(h.playback[id].sequels.map(item => item.series_id), expected,
           'every record must use the highest watched season, even with gaps');
       }
@@ -131,24 +131,24 @@ test('#97 late checks use seasons watched while the network request was pending'
     let finish;
     const fetchWait = new Promise(resolve => { finish = resolve; });
     const h = fixture({ seasons: [1, 3, 4, 5], notify: true, fetchWait,
-      remoteSeries: future ? [{ series_id: '1000006', series_title: baseTitle + '第6季' }] : [] });
-    delete h.playback['1000005'];
+      remoteSeries: future ? [{ series_id: 'hema:6', series_title: baseTitle + '第6季' }] : [] });
+    delete h.playback['hema:5'];
     try {
-      const pending = single ? h.checkOne('1000001') : h.refresh({ scope: 'all' });
+      const pending = single ? h.checkOne('hema:1') : h.refresh({ scope: 'all' });
       await new Promise(resolve => setImmediate(resolve));
       assert.ok(h.fetches.length, 'the request must start before playback changes');
-      h.playback['1000005'] = { ...h.playback['1000004'], vid_index: 3, currentTime: 42, updatedAt: Date.now() };
+      h.playback['hema:5'] = { ...h.playback['hema:4'], vid_index: 3, currentTime: 42, updatedAt: Date.now() };
       finish();
       await pending;
-      const expected = future ? ['1000006'] : [];
-      for (const id of single ? ['1000001'] : ['1000001', '1000003', '1000004']) {
+      const expected = future ? ['hema:6'] : [];
+      for (const id of single ? ['hema:1'] : ['hema:1', 'hema:3', 'hema:4']) {
         assert.deepEqual(h.playback[id].sequels.map(item => item.series_id), expected,
           'a newly watched season must not be saved as a new sequel');
       }
       assert.equal(h.notifications.length, expected.length, 'only a still-unwatched future season may notify');
-      assert.equal(h.playback['1000005'].currentTime, 42, 'late checks must preserve concurrent playback');
+      assert.equal(h.playback['hema:5'].currentTime, 42, 'late checks must preserve concurrent playback');
       assert.ok((await h.handlers['get-watch-history']({})).results.every(row =>
-        row.sequels.every(item => item.series_id !== '1000005')));
+        row.sequels.every(item => item.series_id !== 'hema:5')));
     } finally { finish(); h.cleanup(); }
   }
 });
@@ -157,17 +157,17 @@ test('3.7 latest scope and single-row check touch only the requested row', async
   const latest = fixture();
   try {
     assert.equal((await latest.refresh({ scope: 'latest' })).checked, 1);
-    assert.deepEqual(latest.fetches, ['1000003']);
+    assert.deepEqual(latest.fetches, ['hema:3']);
   } finally { latest.cleanup(); }
 
   const single = fixture();
   try {
-    const result = await single.checkOne('1000001');
+    const result = await single.checkOne('hema:1');
     assert.equal(result.success, true);
-    assert.deepEqual(single.fetches, ['1000001']);
+    assert.deepEqual(single.fetches, ['hema:1']);
     assert.equal(single.queries.filter(keyword => keyword.toLowerCase() === baseTitle.toLowerCase()).length, 1,
       'single-row check still uses the latest family season for the shared sequel search');
-    assert.equal(single.playback['1000001'].sequels.length, 0, 'single-row checks also respect the highest watched season');
+    assert.equal(single.playback['hema:1'].sequels.length, 0, 'single-row checks also respect the highest watched season');
   } finally { single.cleanup(); }
 });
 
@@ -175,25 +175,25 @@ test('3.7 completed low seasons skip automatic 6-hour checks but remain manually
   const h = fixture();
   try {
     assert.equal((await h.autoRefresh()).checked, 2);
-    assert.deepEqual(h.fetches.sort(), ['1000002', '1000003']);
-    assert.equal((await h.checkOne('1000001')).success, true);
-    assert.ok(h.fetches.includes('1000001'));
+    assert.deepEqual(h.fetches.sort(), ['hema:2', 'hema:3']);
+    assert.equal((await h.checkOne('hema:1')).success, true);
+    assert.ok(h.fetches.includes('hema:1'));
   } finally { h.cleanup(); }
 });
 
 test('3.7 episode failures remain separate from sequel results', async () => {
-  const h = fixture({ failId: '1000002' });
+  const h = fixture({ failId: 'hema:2' });
   try {
     const result = await h.refresh({ scope: 'all' });
     assert.equal(result.checked, 2);
     assert.equal(result.failed, 1);
-    assert.match(h.playback['1000002'].lastEpisodeCheckError, /超时/);
-    assert.equal(h.playback['1000002'].lastSequelCheckError, '');
-    assert.equal(h.playback['1000001'].lastEpisodeCheckError, '');
+    assert.match(h.playback['hema:2'].lastEpisodeCheckError, /超时/);
+    assert.equal(h.playback['hema:2'].lastSequelCheckError, '');
+    assert.equal(h.playback['hema:1'].lastEpisodeCheckError, '');
   } finally { h.cleanup(); }
 });
 
-test('explicit season variants group safely; bare and changed titles only suggest a relation', () => {
+test('Hongguo titles by themselves are suggestions and official membership groups renamed seasons', () => {
   const { listHistory, findSequels, findSimilarSeries, familyKey } = require('../src/native/watch-history');
   const original = { series_id: '1000011', series_title: '游戏入侵：普攻加血一箭亿万伤屠戮神明' };
   const variants = ['游戏入侵：普攻加血一箭亿万伤屠戮神明二', '游戏入侵：普攻加血一箭亿万伤屠戮神明2',
@@ -203,8 +203,9 @@ test('explicit season variants group safely; bare and changed titles only sugges
   assert.deepEqual(findSequels(original, candidates), [], 'fuzzy matches must never enter confirmed sequel handling');
   for (const suffix of ['第2季', '第二季', '2季', '二部', '（第二季）', '(2部)', 'season 2']) {
     const next = { series_id: '1000030', series_title: original.series_title + suffix };
-    assert.equal(familyKey(next), familyKey(original), suffix);
-    assert.equal(findSequels(original, [next]).length, 1, suffix);
+    assert.equal(familyKey(next), '', suffix);
+    assert.equal(findSequels(original, [next]).length, 0, suffix);
+    assert.equal(findSimilarSeries(original, [next]).length, 1, suffix);
   }
   const embedded = [{ series_id: '1000040', series_title: 'AAA1BBB' }, { series_id: '1000041', series_title: 'AAA2BBB' }];
   assert.equal(findSimilarSeries(embedded[0], [embedded[1], embedded[1]]).length, 1);
@@ -220,21 +221,30 @@ test('explicit season variants group safely; bare and changed titles only sugges
     { series_id: '1000050', series_title: '完全无关的另一部短剧第二季' },
   ]), [], 'unrelated titles and other sources must not be suggested');
   assert.deepEqual(findSimilarSeries({ ...original, series_title: '甲乙' }, [{ series_id: '1000051', series_title: '甲丙' }]), [], 'short generic titles are too ambiguous');
-  assert.notEqual(familyKey({ ...original, series_title: '年轮（2024）' }), familyKey({ ...original, series_title: '年轮（2025）' }));
+  const first = { series_id: '1000100', series_title: '南天门计划：天阙', season: 1, playable: true };
+  const second = { series_id: '1000200', series_title: '镇辰', season: 2, playable: true };
+  const family = [first, second].map(entry => ({ ...entry, officialSeasons: [first, second], total: 1 }));
+  assert.equal(familyKey(family[0]), familyKey(family[1]));
+  assert.deepEqual(findSequels(family[0], [second]), [second]);
+  const seenFamily = Object.fromEntries(family.map(item => [item.series_id, { vid_index: 1, currentTime: 1, updatedAt: 100 }]));
+  const grouped = listHistory(family, seenFamily);
+  assert.equal(grouped[0].hasHigherSeason, true);
+  assert.equal(grouped[1].isLatestSeason, true);
+  assert.equal(grouped[0].hasUpdates, false, 'a watched upper season must not be an unread sequel');
   for (const suffix of ['（2024）', '(0)', '(100)', '(二〇二四)', '(二零二四)', '(一百)', '第0季']) {
     assert.deepEqual(findSequels(original, [{ series_id: '1000052', series_title: original.series_title + suffix }]), [], suffix);
   }
 });
 
 test('remote fuzzy candidates survive refresh as hints without becoming updates or hidden seasons', async () => {
-  const candidate = { series_id: '1000099', series_title: baseTitle + '二' };
+  const candidate = { series_id: 'hema:99', series_title: baseTitle + '二' };
   const h = fixture({ remoteSeries: [candidate] });
   try {
-    assert.equal((await h.checkOne('1000003')).success, true);
-    assert.deepEqual(h.playback['1000003'].similarSeries, [candidate]);
-    assert.deepEqual(h.playback['1000003'].sequels, []);
+    assert.equal((await h.checkOne('hema:3')).success, true);
+    assert.deepEqual(h.playback['hema:3'].similarSeries, [candidate]);
+    assert.deepEqual(h.playback['hema:3'].sequels, []);
     const result = await h.handlers['get-watch-history']({});
-    const row = result.results.find(item => item.series_id === '1000003');
+    const row = result.results.find(item => item.series_id === 'hema:3');
     assert.deepEqual(row.similarSeries, [candidate]);
     assert.equal(row.hasUpdates, false);
     assert.equal(row.hasHigherSeason, false);
@@ -242,15 +252,15 @@ test('remote fuzzy candidates survive refresh as hints without becoming updates 
 });
 
 test('a renamed candidate replaces its old fuzzy title and becomes a confirmed sequel', async () => {
-  const candidate = { series_id: '1000099', series_title: baseTitle + '二' };
+  const candidate = { series_id: 'hema:99', series_title: baseTitle + '二' };
   const h = fixture({ remoteSeries: [candidate] });
   try {
-    await h.checkOne('1000003');
-    assert.equal(h.playback['1000003'].similarSeries.length, 1);
+    await h.checkOne('hema:3');
+    assert.equal(h.playback['hema:3'].similarSeries.length, 1);
     candidate.series_title = baseTitle + '第四季';
     h.clearSequelCache();
-    await h.checkOne('1000003');
-    assert.deepEqual(h.playback['1000003'].similarSeries, [], 'a fresh explicit title must replace the old fuzzy entry with the same ID');
-    assert.deepEqual(h.playback['1000003'].sequels, [candidate]);
+    await h.checkOne('hema:3');
+    assert.deepEqual(h.playback['hema:3'].similarSeries, [], 'a fresh explicit title must replace the old fuzzy entry with the same ID');
+    assert.deepEqual(h.playback['hema:3'].sequels, [candidate]);
   } finally { h.cleanup(); }
 });

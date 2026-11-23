@@ -80,6 +80,26 @@ test('共享页面安卓桥：真实资料持久化、历史校验、文件与�
   assert.ok(state().series.length);
 });
 
+test('安卓下载与单集清理按分集 ID，目录重排后保留原视频和断点', async () => {
+  const id = '123456789', token = '12345678-1234-1234-1234-123456789abc.mp4';
+  const { api, files } = await bridge({
+    series: [{ series_id: id, total: 2, episodes: [{ vid: '222222', vid_index: 1 }, { vid: '111111', vid_index: 2 }] }],
+    playback: {}, settings: {},
+    tasks: [{ id: 'old', status: 'completed', token, hongguoInfo: { series_id: id, vid: '111111', vid_index: 1 } }],
+  });
+  const { episodes } = (await api.getSeriesEpisodes(id)).data;
+  assert.equal(episodes[0].status, 'missing');
+  assert.equal(episodes[1].status, 'completed');
+  assert.equal((await api.deleteEpisodeFile(id, 1, '222222')).count, 0);
+  assert.ok(files.has(token));
+  assert.equal((await api.savePlaybackPosition(id, 1, 21, { episodeId: '111111' })).success, true);
+  const record = await api.getPlaybackPosition(id);
+  assert.equal(record.episode_id, '111111');
+  assert.equal(record.vid_index, 2);
+  assert.equal((await api.deleteEpisodeFile(id, 2, '111111')).count, 1);
+  assert.ok(!files.has(token));
+});
+
 test('媒体请求不带官网Referer，403仅一次切换来源Referer；取消不重试', async () => {
   const result = await esbuild.build({ ...buildOptions, entryPoints:[path.join(__dirname,'../mobile/media.js')], format:'cjs', write:false });
   const sent=[];

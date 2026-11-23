@@ -4,6 +4,8 @@ const crypto = require('node:crypto');
 
 const ID = /^[a-f0-9-]{36}$/;
 const SERIES = /^\d{1,30}$/;
+const stagingNames = new Set(['input.mp4', 'output.mp4', 'merged.mp4']);
+const fileObject = stat => `${stat.dev}:${stat.ino}:${stat.birthtimeNs}`;
 const statuses = new Set(['queued', 'running', 'completed', 'failed', 'cancelled', 'interrupted']);
 function fail(message, status = 400, code) { const error = Object.assign(new Error(message), { status }); if (code) error.code = code; return error; }
 function safeError(error) {
@@ -60,24 +62,68 @@ class Storage {
   }
   cleanupTemporary() {
     this.checkRoot();
-    let entries;
-    try { entries = fs.readdirSync(this.root, { withFileTypes: true }); }
-    catch { throw mountChanged('下载挂载已变化，请恢复原挂载后重启服务'); }
-    for (const entry of entries) {
-      if (!entry.isDirectory() || !/_\d{1,30}$/.test(entry.name)) continue;
-      const directory = path.join(this.root, entry.name);
-      let children;
-      try { children = fs.readdirSync(directory, { withFileTypes: true }); }
-      catch { continue; }
-      for (const child of children) {
-        if (!/^\.download-[A-Za-z0-9]{6}$/.test(child.name)) continue;
-        const temporary = path.join(directory, child.name);
-        try {
-          const stat = fs.lstatSync(temporary);
-          if (stat.isDirectory() && !stat.isSymbolicLink()) fs.rmSync(temporary, { recursive: true, force: true, maxRetries: 2 });
-        } catch {}
+    for (const task of this.tasks) {
+      if (Array.isArray(task.temporary)) {
+        task.temporary = task.temporary.filter(receipt => !this.removeTemporary(task, receipt));
       }
     }
+  }
+  temporaryDirectory(task, receipt) {
+    this.checkRoot();
+    if (!/^\.download-[A-Za-z0-9]{6}$/.test(receipt?.name) || receipt.taskId !== task.id) return null;
+    const series = path.join(this.root, `${safeTitle(task.seriesTitle)}_${numericId(task.seriesId)}`);
+    const directory = path.join(series, receipt.name);
+    if (fs.realpathSync(series) !== series || !fs.lstatSync(series).isDirectory()) return null;
+    const stat = fs.lstatSync(directory, { bigint: true });
+    if (!stat.isDirectory() || fileObject(stat) !== receipt.identity) return null;
+    return directory;
+  }
+  removeTemporary(task, receipt) {
+    try {
+      const directory = this.temporaryDirectory(task, receipt);
+      if (!directory) return false;
+      for (const name of fs.readdirSync(directory)) {
+        if (!stagingNames.has(name) || !receipt.files?.[name] || this.temporaryDirectory(task, receipt) !== directory) continue;
+        const file = path.join(directory, name);
+        const stat = fs.lstatSync(file, { bigint: true });
+        if (stat.isFile() && fileObject(stat) === receipt.files[name]) fs.unlinkSync(file);
+      }
+      if (this.temporaryDirectory(task, receipt) !== directory) return false;
+      fs.rmdirSync(directory);
+      return true;
+    } catch (error) {
+      if (error.code === 'MOUNT_CHANGED') throw error;
+      return error.code === 'ENOENT' && !fs.existsSync(path.join(this.root, `${safeTitle(task.seriesTitle)}_${task.seriesId}`, receipt?.name || ''));
+    }
+  }
+  createTemporary(task) {
+    const prior = Array.isArray(task.temporary) ? task.temporary : [];
+    if (prior.length >= 100) throw fail('保留的临时目录过多，请检查下载挂载', 409);
+    const directory = fs.mkdtempSync(path.join(this.directory(task), '.download-'));
+    const receipt = { taskId: task.id, name: path.basename(directory),
+      identity: fileObject(fs.lstatSync(directory, { bigint: true })), files: {} };
+    try { this.update(task, { temporary: [...prior, receipt] }); }
+    catch (error) { this.removeTemporary(task, receipt); throw error; }
+    const track = (name, stat) => {
+      if (!stagingNames.has(name) || this.temporaryDirectory(task, receipt) !== directory) throw mountChanged('任务临时目录已变化');
+      const actual = fs.lstatSync(path.join(directory, name), { bigint: true });
+      if (!actual.isFile() || (stat && fileObject(stat) !== fileObject(actual))) throw fail('任务临时文件已变化', 409);
+      const identity = fileObject(actual);
+      if (receipt.files[name] === identity) return;
+      const old = receipt.files[name];
+      if (old) throw fail('任务临时文件已变化', 409);
+      receipt.files[name] = identity;
+      try { this.save(); } catch (error) { delete receipt.files[name]; throw error; }
+    };
+    return { directory, track,
+      check: name => {
+        if (!receipt.files[name]) throw fail('任务临时文件无法核对', 409);
+        track(name);
+      },
+      cleanup: () => {
+        if (this.removeTemporary(task, receipt)) this.update(task, { temporary: task.temporary.filter(item => item !== receipt) });
+      },
+    };
   }
   directory(task) {
     this.checkRoot();
@@ -177,7 +223,7 @@ class Storage {
     try { fs.fsyncSync(dir); } finally { fs.closeSync(dir); }
   }
   add(tasks) { if (this.tasks.length + tasks.length > 10000) throw fail('任务已达上限，请备份后维护任务库', 409); this.tasks.push(...tasks); try { this.save(); } catch (error) { this.tasks.splice(-tasks.length); throw error; } }
-  update(task, changes) { const old = { ...task }; Object.assign(task, changes, { updatedAt: new Date().toISOString() }); try { this.save(); } catch (error) { Object.assign(task, old); throw error; } }
+  update(task, changes) { const old = { ...task }; Object.assign(task, changes, { updatedAt: new Date().toISOString() }); try { this.save(); } catch (error) { for (const key of Object.keys(task)) if (!(key in old)) delete task[key]; Object.assign(task, old); throw error; } }
   get(id) { const task = this.tasks.find(item => item.id === id); if (!task) throw fail('任务不存在', 404); return task; }
 }
 module.exports = { Storage, fail, safeError, assertFields, numericId, safeTitle };

@@ -52,7 +52,7 @@ test('account library confirms mobile favorites, exact episode likes and reserva
     { item_id: '1010', expected_rec_text: '815万期待', sub_info: '即将上线，火速预约' },
     { item_id: '1011', schedule_publish_time: 0, expected_publish_time: -1 },
     { item_id: '1012', sub_title_list: [{ content: '即将上线' }], expected_publish_time: upcomingRow.schedule_publish_time },
-    { item_id: '1013', sub_title_list: [{ content: '11月30日上线' }], expected_publish_time: upcomingRow.schedule_publish_time },
+    { item_id: '1013', sub_title_list: [{ content: '11月30日上线' }], expected_publish_time: Date.UTC(2026, 11, 15, 10, 45) },
     { item_id: '1014', sub_title_list: [{ content: '12月上线' }] },
     { item_id: '1015', sub_title_list: [{ content: '即将上线' }], expected_publish_time: Date.UTC(2026, 10, 20, 16) / 1000 },
     { item_id: '1016', sub_title_list: [{ content: '即将上线' }], expected_publish_time: Date.UTC(2026, 10, 19, 16) / 1000 },
@@ -160,7 +160,7 @@ test('account library confirms mobile favorites, exact episode likes and reserva
   assert.equal(upcoming[0].reservationId, reservationId);
   assert.deepEqual(upcoming.map(item => item.scheduled), [
     '预计12月15日上线', '12月18日上线', '预计12月15日上线', '预计12月10日上线', '即将上线', '',
-    '预计12月15日上线', '11月30日上线', '12月上线', '原预计11月21日上线', '原预计11月20日上线', '预计12月15日上线',
+    '预计12月15日上线', '预计12月15日 18:45上线', '12月上线', '原预计11月21日上线', '原预计11月20日上线', '预计12月15日上线',
     '原预计11月20日 18:30上线', '预计11月23日 19:45上线',
   ]);
   const reserve = { kind: 'reservation', reservationId, value: true };
@@ -630,4 +630,16 @@ for (const action of ['cancelLogin', 'logout']) test(`${action} prevents a pendi
     entered();await gate;return webPayload({user_id_str:'42',name:'Fixture'});
   }});
   try {const qr=await service.startLogin();const pending=service.pollLogin(qr.loginId);await waiting;await service[action](qr.loginId);release();assert.equal((await pending).status,'cancelled');assert.equal((await service.status()).signedIn,false);assert.equal(fs.existsSync(filePath),false);}finally{release();fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test('a newer catalog clears outdated completion even when the local viewing event is newer', () => {
+  const local = [{ series_id: '1000001', vid_index: 10, total: 10, completed: true, updatedAt: 200 }];
+  const cloud = { series_id: '1000001', episode_id: '9000011', vid_index: 11, total: 11,
+    currentTime: 10, duration: 90, updatedAt: 250 };
+  assert.equal(mergeAccountWatchHistory(local, [cloud], {}, '42')[0].completed, false);
+  const older = mergeAccountWatchHistory(local, [{ ...cloud, updatedAt: 100 }], {}, '42')[0];
+  assert.equal(older.completed, false);
+  assert.equal(older.total, 11);
+  assert.equal(older.vid_index, 10);
+  assert.equal(mergeAccountWatchHistory(local, [{ ...cloud, currentTime: 90 }], {}, '42')[0].completed, true);
 });

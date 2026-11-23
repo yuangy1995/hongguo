@@ -64,8 +64,14 @@ async function download(task, store, signal, update) {
   const info = await hongguo.fetchPlayUrlSingle(task.vid, task.seriesId, { quality: task.quality, signal });
   throwIfAborted(signal);
   if (!info?.url || info.locked || info.vid !== task.vid) throw Object.assign(fail(info?.error || '未取得完整可用片源'), { code: info?.code, sources: info?.sources });
-  const work = fs.mkdtempSync(path.join(store.directory(task), '.download-'));
-  const input = path.join(work, 'input.mp4'), output = path.join(work, 'output.mp4');
+  const work = store.createTemporary(task);
+  const input = path.join(work.directory, 'input.mp4'), output = path.join(work.directory, 'output.mp4');
+  const reserve = (file, name) => {
+    const fd = fs.openSync(file, 'wx', 0o600);
+    try { work.track(name, fs.fstatSync(fd, { bigint: true })); }
+    catch (error) { fs.closeSync(fd); throw error; }
+    return fd;
+  };
   try {
     let response;
     try {
@@ -80,19 +86,33 @@ async function download(task, store, signal, update) {
     if (response.status !== 200 || /text\/|json/i.test(response.headers['content-type'] || '') || size > MAX_BYTES) { response.data.destroy(); throw fail('片源响应不是完整视频或超过 1 GiB 上限'); }
     let received = 0;
     const meter = new Transform({ transform(chunk, encoding, callback) { received += chunk.length; if (received > MAX_BYTES) callback(fail('视频超过 1 GiB 上限')); else { update(size > 0 ? Math.min(75, Math.floor(received / size * 75)) : 0); callback(null, chunk); } } });
-    await pipeline(response.data, meter, fs.createWriteStream(input, { flags: 'wx', mode: 0o600 }), { signal });
+    let fd;
+    try { fd = reserve(input, 'input.mp4'); }
+    catch (error) { response.data.destroy(); throw error; }
+    await pipeline(response.data, meter, fs.createWriteStream(input, { fd }), { signal });
+    work.check('input.mp4');
     if (!received || size > 0 && received !== size) throw fail('视频传输不完整');
     const key = info.contentKey || (info.spadeA ? hongguo.deriveKey(info.spadeA)?.toString('hex') : null);
     if ((info.spadeA && !key) || (key && !/^[a-f\d]{32}$/i.test(key))) throw fail('解密信息无效');
-    if (info.codec === 'bytevc2') await convertBytevc2({ executable: tools.librempeg, input, output, contentKey: key, duration: info.duration, signal, maxBytes: MAX_BYTES, onProgress: seconds => update(75 + Math.floor(Math.min(1, seconds / info.duration) * 20)) });
-    else if (key) await run(tools.ffmpeg, ['-v', 'error', '-xerror', '-nostdin', '-protocol_whitelist', 'file,pipe', '-decryption_key', key, '-i', input, '-map', '0:v:0', '-map', '0:a?', '-c', 'copy', '-movflags', '+faststart', '-f', 'mp4', output], signal, 120000);
-    else fs.renameSync(input, output);
+    const converted = info.codec === 'bytevc2' || key;
+    if (info.codec === 'bytevc2') {
+      await convertBytevc2({ executable: tools.librempeg, input, output, contentKey: key, duration: info.duration,
+        signal, maxBytes: MAX_BYTES, onOutputCreated: stat => work.track('output.mp4', stat),
+        onProgress: seconds => update(75 + Math.floor(Math.min(1, seconds / info.duration) * 20)) });
+    } else if (key) {
+      fs.closeSync(reserve(output, 'output.mp4'));
+      await run(tools.ffmpeg, ['-y', '-v', 'error', '-xerror', '-nostdin', '-protocol_whitelist', 'file,pipe',
+        '-decryption_key', key, '-i', input, '-map', '0:v:0', '-map', '0:a?', '-c', 'copy', '-movflags', '+faststart', '-f', 'mp4', output], signal, 120000);
+    }
+    const media = converted ? output : input;
+    const mediaName = path.basename(media);
+    work.check(mediaName);
     update(96);
-    const actual = await verify(output, task.quality, signal, Number(info.duration) || 0);
+    const actual = await verify(media, task.quality, signal, Number(info.duration) || 0);
     if (info.width && info.height && (actual.w !== Number(info.width) || actual.h !== Number(info.height))) throw fail('实际画面尺寸与片源不一致');
-    signal.throwIfAborted(); store.output(task);
-    publishMergedOutput(output, destination);
-  } finally { fs.rmSync(work, { recursive: true, force: true }); }
+    signal.throwIfAborted(); store.output(task); work.check(mediaName);
+    publishMergedOutput(media, destination);
+  } finally { work.cleanup(); }
 }
 async function merge(task, store, signal, update) {
   const inputs = task.taskIds.map(id => store.get(id)).sort((a, b) => a.episodeIndex - b.episodeIndex);
@@ -105,17 +125,18 @@ async function merge(task, store, signal, update) {
   const duration = infos.reduce((sum, info) => sum + info.duration, 0);
   const output = store.output(task);
   if (fs.existsSync(output)) { await verify(output, 'auto', signal, duration); return; }
-  const staging = fs.mkdtempSync(path.join(store.directory(task), '.download-'));
-  const job = { ...task, output: path.join(staging, 'merged.mp4'), startTime: Date.now(), totalBytes: ordered.reduce((sum, item) => sum + fs.statSync(item.path).size, 0) };
+  const staging = store.createTemporary(task);
+  const job = { ...task, output: path.join(staging.directory, 'merged.mp4'), startTime: Date.now(), totalBytes: ordered.reduce((sum, item) => sum + fs.statSync(item.path).size, 0) };
   const abort = () => { job.cancelled = true; stopMergeChildren(job); };
   signal.addEventListener('abort', abort, { once: true });
   try {
     signal.throwIfAborted();
-    await runMerge({ task: job, ordered, outDir: store.directory(task), ffmpegPath: tools.ffmpeg, ffprobePath: tools.ffprobe, precheckedInfos: infos,
+    await runMerge({ task: job, ordered, outDir: staging.directory, ffmpegPath: tools.ffmpeg, ffprobePath: tools.ffprobe, precheckedInfos: infos,
       probe, pickEncoder: async () => 'libx264', compatible: true, update: () => update(Math.min(98, job.progress || 0)) });
+    staging.track('merged.mp4');
     await verify(job.output, 'auto', signal, duration);
-    signal.throwIfAborted(); store.output(task);
+    signal.throwIfAborted(); store.output(task); staging.check('merged.mp4');
     publishMergedOutput(job.output, output);
-  } finally { signal.removeEventListener('abort', abort); fs.rmSync(staging, { recursive: true, force: true }); }
+  } finally { signal.removeEventListener('abort', abort); staging.cleanup(); }
 }
 module.exports = { series, download, merge, verify, mediaGuard, tools };

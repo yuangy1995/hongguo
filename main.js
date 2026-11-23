@@ -539,7 +539,7 @@ function saveSeriesRegistry() {
  * 登记/更新一部短剧。data 需含 series_id 与 episodes。
  * 已有的不覆盖 episodes（避免接口异常时把好数据冲掉），仅补全标题与封面。
  */
-function upsertSeriesRegistry(data) {
+function upsertSeriesRegistry(data, { bindPlayback = true } = {}) {
   if (!data || !data.series_id || !Array.isArray(data.episodes) || data.episodes.length === 0) return;
   const sid = String(data.series_id);
   const idx = seriesRegistry.findIndex((s) => String(s.series_id) === sid);
@@ -561,8 +561,22 @@ function upsertSeriesRegistry(data) {
     dismissed: false, // 用户主动移除过；再次登记时自动恢复显示
     forgotten: false,
   };
-  if (idx === -1) seriesRegistry.unshift(entry);
-  else seriesRegistry[idx] = { ...seriesRegistry[idx], ...entry, dismissed: false };
+  if (idx === -1) {
+    const known = seriesRegistry.find(series => series.officialSeasons?.some(member => member.series_id === sid));
+    if (known) entry.officialSeasons = known.officialSeasons;
+    seriesRegistry.unshift(entry);
+  }
+  else {
+    const previous = seriesRegistry[idx];
+    const record = bindPlayback ? store.getPlayback?.()?.[sid] : null;
+    if (record && (!record.episode_id || (record.completedEpisode && !record.completedEpisodeId))) {
+      const bound = watchHistory.bindPlaybackEpisodes(record, previous);
+      if (bound.episode_id !== record.episode_id || bound.completedEpisodeId !== record.completedEpisodeId) {
+        store.updatePlayback(map => { map[sid] = bound; });
+      }
+    }
+    seriesRegistry[idx] = { ...previous, ...entry, dismissed: false };
+  }
   saveSeriesRegistry();
   return seriesRegistry.find(item => String(item.series_id) === sid);
 }
@@ -1889,9 +1903,33 @@ ipcMain.handle('search-series-more', async (event, keyword, options = {}) => {
   }
 });
 
+const officialSeasonRequests = new Map();
+
+async function loadOfficialSeasons(seriesId) {
+  if (officialSeasonRequests.has(seriesId)) return officialSeasonRequests.get(seriesId);
+  const request = fetchHongguoSeriesSeasons(seriesId).then(results => {
+    if (watchHistory.setOfficialSeasons(seriesRegistry, seriesId, results)) {
+      saveSeriesRegistry();
+      sendToRenderer('watch-history-updated', {});
+    }
+    return results;
+  }).finally(() => officialSeasonRequests.delete(seriesId));
+  officialSeasonRequests.set(seriesId, request);
+  return request;
+}
+
 ipcMain.handle('find-series-sequels', async (_event, seriesId, options = {}) => {
   const entry = seriesRegistry.find(item => String(item.series_id) === String(seriesId));
   if (!entry) return { success: false, results: [], error: '未找到该剧档案，请先打开剧集详情。' };
+  if (watchHistory.sourceOf(String(entry.series_id)) === 'hongguo') {
+    try {
+      if (options?.localOnly !== true) await loadOfficialSeasons(String(entry.series_id));
+      const current = seriesRegistry.find(item => item.series_id === entry.series_id);
+      return { success: true, results: watchHistory.findSequels(current, current.officialSeasons || []) };
+    } catch (error) {
+      return { success: false, partial: true, results: [], error: error.message };
+    }
+  }
   const deadline = Date.now() + 22000;
   return seriesSearch.findSeriesSequels(entry, seriesRegistry.filter(item => !item.forgotten),
     (kw, call) => searchAtSource(kw, { source: watchHistory.sourceOf(String(entry.series_id)), deadline, ...(call || {}) }),
@@ -1902,10 +1940,9 @@ ipcMain.handle('find-series-seasons', async (_event, seriesId, options = {}) => 
   const sid = typeof seriesId === 'string' || Number.isSafeInteger(seriesId) ? String(seriesId) : '';
   const source = watchHistory.sourceOf(sid);
   if (source === 'hongguo') {
-    if (options?.localOnly === true) return { official: true, results: [] };
+    if (options?.localOnly === true) return { official: true, results: seriesRegistry.find(item => item.series_id === sid)?.officialSeasons || [] };
     try {
-      const results = await fetchHongguoSeriesSeasons(sid);
-      if (results === null) return { official: true, results: [], unavailable: true };
+      const results = await loadOfficialSeasons(sid);
       return { official: true, results };
     } catch (error) {
       console.warn('[Series] 官方系列剧读取失败:', error.code || error.message);
@@ -1958,8 +1995,10 @@ ipcMain.handle('get-series-list', async (event, options) => {
   if (options?.downloadedOnly !== true) return list;
   const downloaded = [];
   for (const series of list) {
-    const { scan } = await getSeriesView(String(series.series_id));
-    if (scan.ordered.length) downloaded.push(series);
+    const id = String(series.series_id);
+    const { scan, baseEpisodes } = await getSeriesView(id);
+    if (baseEpisodes.some(episode => scan.byEpisode.has(String(episode.vid)))
+      || await hasUnregisteredSeriesMedia(id, series, scan.dir)) downloaded.push(series);
   }
   return downloaded;
 });
@@ -2055,7 +2094,7 @@ function rescanDownloadsFromDisk() {
           aweme_id: ep ? ep.vid : '',
         },
         hongguoInfo: {
-          vid: ep ? ep.vid : '',
+          vid: '',
           series_id: sid,
           series_title: s.series_title,
           vid_index: f.vid_index,
@@ -2385,8 +2424,8 @@ function isRecordedMediaFile(target, episode) {
     if (downloadTasks.some(task => taskMatches(task)
       && (!episode || (hasCompleteTaskFile(task)
         && String(task.hongguoInfo?.series_id) === String(episode.seriesId)
-        && Number(task.hongguoInfo?.vid_index) === Number(episode.vidIndex)
-        && (!episode.vid || String(task.hongguoInfo?.vid) === String(episode.vid)))))) return true;
+        && recordedEpisodeId(task) === episodeIdAt(episode.seriesId, episode.vidIndex, episode.vid)
+        && !!recordedEpisodeId(task))))) return true;
     return !episode && mergeTasks.some(task => matches(task.output));
   } catch (_) { return false; }
 }
@@ -2410,11 +2449,12 @@ ipcMain.handle('show-in-folder', async (event, filePath) => {
   }
 });
 
-ipcMain.handle('open-episode-external', async (_event, seriesId, vidIndex) => {
+ipcMain.handle('open-episode-external', async (_event, seriesId, vidIndex, episodeId) => {
   try {
-    const task = downloadTasks.find(item => item.status === 'completed'
+    const vid = episodeIdAt(seriesId, vidIndex, episodeId);
+    const task = vid && downloadTasks.find(item => item.status === 'completed'
       && String(item.hongguoInfo?.series_id) === String(seriesId)
-      && Number(item.hongguoInfo?.vid_index) === Number(vidIndex) && hasCompleteTaskFile(item));
+      && recordedEpisodeId(item) === vid && hasCompleteTaskFile(item));
     if (!task || !/\.mp4$/i.test(task.savePath)
       || !isRecordedMediaFile(task.savePath, { seriesId, vidIndex, vid: task.hongguoInfo.vid })) {
       return { success: false, error: '请先完整下载本集，再使用系统播放器打开' };
@@ -2598,13 +2638,6 @@ async function resolveSeriesDirAsync(seriesId, seriesTitle, tasks, deadline) {
   return null;
 }
 
-async function readDirectoryIdentityAsync(directory) {
-  const real = await fsp.realpath(directory);
-  const stat = await fsp.stat(real, { bigint: true });
-  if (!stat.isDirectory()) throw new Error('下载目录不可用');
-  return { directory: real, device: Number(stat.dev), ino: Number(stat.ino) };
-}
-
 async function directoryIdentityMismatch(identity, file) {
   try {
     const stat = await fsp.lstat(identity.directory);
@@ -2677,97 +2710,52 @@ async function completeTaskFileForList(task, conflicts) {
   } catch (_) { return failed('stat-error'); }
 }
 
-async function scanSeriesEpisodes(seriesId, seriesTitle, tasks, entry) {
+async function scanSeriesEpisodes(seriesId, seriesTitle, tasks) {
   const conflicts = pathConflicts(downloadTasks);
-  const byIndex = new Map(), failures = new Map();
+  const byEpisode = new Map(), failures = new Map();
   for (let offset = 0; offset < tasks.length; offset += 6) {
     const batch = tasks.slice(offset, offset + 6);
     const checked = await Promise.all(batch.map(task => completeTaskFileForList(task, conflicts)));
     batch.forEach((task, index) => {
       const complete = checked[index];
-      const idx = Number(task.hongguoInfo?.vid_index) || 0;
-      if (!complete || complete.error) {
-        if (idx && task.status === 'completed') failures.set(task.id, complete?.error || 'incomplete');
+      const vid = recordedEpisodeId(task);
+      if (!vid || !complete || complete.error || !ownsEpisodeFiles(task.savePath, tasks)) {
+        if (task.status === 'completed') failures.set(task.id, complete?.error || 'ownership');
         return;
       }
-      if (!idx || !ownsEpisodeFiles(task.savePath, tasks)) {
-        if (idx && task.status === 'completed') failures.set(task.id, 'ownership');
-        return;
+      const previous = byEpisode.get(vid);
+      if (!previous || (task.startTime || 0) > (previous.startTime || 0)) {
+        byEpisode.set(vid, { path: task.savePath, size: complete.size, identity: complete.identity, task });
       }
-      const previous = byIndex.get(idx);
-      if (!previous || (task.startTime || 0) > (previous.startTime || 0)) byIndex.set(idx, {
-        vid_index: idx, startTime: task.startTime || 0, path: task.savePath,
-        filename: task.filename || path.basename(task.savePath), size: complete.size,
-        identity: complete.identity, task,
-      });
     });
   }
-
-  const deadline = Date.now() + SERIES_SCAN_REACHABILITY_MS;
-  const dir = await resolveSeriesDirAsync(seriesId, seriesTitle, tasks, deadline);
-  let names = [], scanFailed = 0, dirIdentity = null;
-  if (dir) {
-    try {
-      const stat = await withDeadline(fsp.lstat(dir), deadline);
-      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error();
-      dirIdentity = await withDeadline(readDirectoryIdentityAsync(dir), deadline);
-      names = await withDeadline(fsp.readdir(dir), deadline);
-    } catch (_) { scanFailed = 1; }
-  } else {
-    scanFailed = 1;
-  }
-
-  const sharedDirectory = dir && (downloadTasks.some(task => String(task.hongguoInfo?.series_id) !== seriesId
-      && task.savePath && path.dirname(task.savePath) === dir)
-    || mergeTasks.some(task => String(task.seriesId) !== seriesId && task.output && path.dirname(task.output) === dir));
-  const registeredPaths = new Set([...downloadTasks.map(task => task.savePath), ...mergeTasks.map(task => task.output)].filter(Boolean));
-  const episodeNames = new Map();
-  const formats = new Set([getCurrentSettings().name_format, '剧名 集数', '剧名 集数 标题', '剧名']);
-  const ambiguousTitle = sharedDirectory && (seriesRegistry.some(series => String(series.series_id) !== seriesId
-      && sanitizeFolderName(series.series_title) === sanitizeFolderName(seriesTitle))
-    || downloadTasks.some(task => String(task.hongguoInfo?.series_id) !== seriesId && task.savePath
-      && path.dirname(task.savePath) === dir
-      && sanitizeFolderName(task.hongguoInfo?.series_title || '') === sanitizeFolderName(seriesTitle)));
-  if (!ambiguousTitle) for (const episode of entry?.episodes || []) {
-    for (const nameFormat of formats) {
-      if (sharedDirectory && !/剧名|\bseries_title\b/.test(nameFormat || '')) continue;
-      episodeNames.set(uniqueEpisodeFilename({ name_format: nameFormat }, seriesTitle, episode), Number(episode.vid_index));
-    }
-  }
-  const candidates = names.map(name => {
-    if (!/\.mp4$/i.test(name) || name.includes('合集')) return null;
-    const idx = episodeNames.get(name) || 0;
-    const full = dir && path.join(dir, name);
-    if (!idx || !full || byIndex.has(idx) || registeredPaths.has(full) || !ownsEpisodeFiles(full, tasks)) return null;
-    return { idx, full, name };
-  }).filter(Boolean);
-  for (let offset = 0; offset < candidates.length; offset += 6) {
-    const batch = candidates.slice(offset, offset + 6);
-    const checked = await Promise.all(batch.map(async item => {
-      try {
-        const stat = await fsp.lstat(item.full);
-        return stat.isFile() && !stat.isSymbolicLink() && stat.size > 1024 * 100 ? stat.size : null;
-      } catch (_) { return null; }
-    }));
-    batch.forEach((item, index) => {
-      if (checked[index] != null) byIndex.set(item.idx, {
-        vid_index: item.idx, path: item.full, filename: item.name, size: checked[index], identity: null, task: null,
-      });
-    });
-  }
-  return {
-    dir, dirIdentity, scanFailed, failures, ordered: [...byIndex.values()].sort((a, b) => a.vid_index - b.vid_index),
-  };
+  const dir = await resolveSeriesDirAsync(seriesId, seriesTitle, tasks, Date.now() + SERIES_SCAN_REACHABILITY_MS);
+  return { dir, failures, byEpisode };
 }
 
-function seriesEpisodeBase(seriesId, entry, tasks) {
-  return entry && entry.episodes.length
-    ? entry.episodes
-    : tasks.map(task => ({
-        vid: task.hongguoInfo.vid,
-        vid_index: task.hongguoInfo.vid_index,
-        title: task.hongguoInfo.ep_title || '',
-      }));
+function recordedEpisodeId(task) {
+  // Disk rescans from older versions guessed IDs from filenames and episode numbers.
+  if (task.batchId === 'rescanned' || String(task.id).startsWith('rescanned_')) return '';
+  return String(task.hongguoInfo?.vid || '');
+}
+
+function episodeIdAt(seriesId, vidIndex, episodeId) {
+  if (typeof episodeId === 'string' && episodeId) return episodeId;
+  const entry = seriesRegistry.find(item => String(item.series_id) === String(seriesId));
+  return String(entry?.episodes?.find(item => Number(item.vid_index) === Number(vidIndex))?.vid || '');
+}
+
+function seriesEpisodeBase(entry, tasks) {
+  if (entry?.episodes?.length) return entry.episodes;
+  const byIndex = new Map();
+  for (const task of tasks) {
+    const vid = recordedEpisodeId(task), { vid_index, ep_title } = task.hongguoInfo;
+    if (!vid) continue;
+    const previous = byIndex.get(vid_index);
+    if (previous !== undefined && previous?.vid !== vid) byIndex.set(vid_index, null);
+    else byIndex.set(vid_index, { vid, vid_index, title: ep_title || '' });
+  }
+  return [...byIndex.values()].filter(Boolean);
 }
 
 function getSeriesView(seriesId) {
@@ -2783,8 +2771,8 @@ function getSeriesView(seriesId) {
       at: Date.now(),
       entry: seriesEntry,
       seriesTitle,
-      baseEpisodes: seriesEpisodeBase(seriesId, seriesEntry, tasks),
-      scan: await scanSeriesEpisodes(seriesId, seriesTitle, tasks, seriesEntry),
+      baseEpisodes: seriesEpisodeBase(seriesEntry, tasks),
+      scan: await scanSeriesEpisodes(seriesId, seriesTitle, tasks),
     };
   })().finally(() => { if (seriesEpisodeJobs.get(seriesId) === jobEntry) seriesEpisodeJobs.delete(seriesId); });
   jobEntry.promise = job;
@@ -2793,18 +2781,20 @@ function getSeriesView(seriesId) {
 }
 
 async function seriesEpisodesData(seriesId, { withUrls = true } = {}) {
+  const revision = seriesProgressRevision;
   const view = await getSeriesView(seriesId);
   const { entry, seriesTitle, baseEpisodes, scan } = view;
   const tasks = downloadTasks.filter(task => task.hongguoInfo && String(task.hongguoInfo.series_id) === seriesId);
-  const taskByIndex = new Map();
+  const taskByEpisode = new Map();
   for (const task of tasks) {
-    const index = Number(task.hongguoInfo.vid_index);
-    const previous = taskByIndex.get(index);
-    if (!previous || (task.startTime || 0) > (previous.startTime || 0)) taskByIndex.set(index, task);
+    const vid = recordedEpisodeId(task);
+    if (!vid) continue;
+    const previous = taskByEpisode.get(vid);
+    if (!previous || (task.startTime || 0) > (previous.startTime || 0)) taskByEpisode.set(vid, task);
   }
-  const scannedByIndex = new Map(scan.ordered.map(item => [Number(item.vid_index), item]));
   const episodes = baseEpisodes.map(episode => {
-    const idx = Number(episode.vid_index), task = taskByIndex.get(idx), scanned = scannedByIndex.get(idx);
+    const vid = String(episode.vid || '');
+    const idx = Number(episode.vid_index), task = taskByEpisode.get(vid), scanned = scan.byEpisode.get(vid);
     let status = 'missing', fileUrl = null, progress = 0, fileSize = 0, savePath = null;
     let candidate = null;
     if (task?.savePath) {
@@ -2843,16 +2833,8 @@ async function seriesEpisodesData(seriesId, { withUrls = true } = {}) {
       await Promise.all(episodes.slice(offset, offset + 6).map(async episode => {
         const candidate = episode.candidate;
         if (episode.status !== 'completed' || !candidate) return;
-        const validate = candidate.task
-          ? () => downloadTasks.includes(candidate.task) && candidate.task.savePath === candidate.path
-            && hasCompleteTaskFile(candidate.task)
-          : () => {
-              try {
-                if (!scan.dirIdentity) return false;
-                validateDirectoryIdentity(scan.dirIdentity, candidate.path);
-                return isRegularFile(candidate.path);
-              } catch (_) { return false; }
-            };
+        const validate = () => downloadTasks.includes(candidate.task) && candidate.task.savePath === candidate.path
+          && recordedEpisodeId(candidate.task) === String(episode.vid) && hasCompleteTaskFile(candidate.task);
         try {
           const identity = candidate.identity || await readFileIdentityAsync(candidate.path);
           candidate.identity = identity;
@@ -2872,11 +2854,45 @@ async function seriesEpisodesData(seriesId, { withUrls = true } = {}) {
     web_accessible_episodes: entry?.web_accessible_episodes ?? null,
     total: episodes.length, completedCount, episodes,
   };
-  const revision = seriesProgressRevision;
   if (revision === seriesProgressRevision) {
     seriesProgressCache.set(seriesId, { at: Date.now(), completed: completedCount, total: episodes.length });
   }
   return data;
+}
+
+function seriesEpisodeNames(seriesId, title, entry, dir) {
+  const colocated = downloadTasks.filter(task => String(task.hongguoInfo?.series_id) !== seriesId
+    && task.savePath && path.dirname(task.savePath) === dir);
+  const sharedDirectory = colocated.length > 0 || mergeTasks.some(task => String(task.seriesId) !== seriesId && task.output && path.dirname(task.output) === dir);
+  const names = new Map();
+  if (sharedDirectory && (seriesRegistry.some(series => String(series.series_id) !== seriesId
+    && sanitizeFolderName(series.series_title) === sanitizeFolderName(title))
+    || colocated.some(task => sanitizeFolderName(task.hongguoInfo?.series_title || '') === sanitizeFolderName(title)))) return { names, sharedDirectory };
+  const formats = new Set([getCurrentSettings().name_format, '剧名 集数', '剧名 集数 标题', '剧名']);
+  for (const episode of entry?.episodes || []) {
+    for (const name_format of formats) {
+      if (sharedDirectory && !/剧名|\bseries_title\b/.test(name_format || '')) continue;
+      names.set(uniqueEpisodeFilename({ name_format }, title, episode), Number(episode.vid_index));
+    }
+  }
+  return { names, sharedDirectory };
+}
+
+async function hasUnregisteredSeriesMedia(seriesId, series, dir) {
+  if (!dir) return false;
+  const end = Date.now() + SERIES_SCAN_REACHABILITY_MS;
+  const { names } = seriesEpisodeNames(seriesId, series.series_title, series, dir);
+  const registered = new Set([...downloadTasks.map(task => task.savePath), ...mergeTasks.map(task => task.output)]);
+  try {
+    for (const name of await withDeadline(fsp.readdir(dir), end)) {
+      if (!names.has(name) || !/\.mp4$/i.test(name) || name.includes('合集')) continue;
+      const file = path.join(dir, name);
+      if (registered.has(file) || !ownsEpisodeFiles(file, [])) continue;
+      const stat = await withDeadline(fsp.lstat(file), end);
+      if (stat.isFile() && stat.size > 1024 * 100) return true;
+    }
+  } catch (_) {}
+  return false;
 }
 
 /**
@@ -2891,6 +2907,8 @@ function collectSeriesEpisodeFiles(seriesId, seriesTitle) {
   );
   const dir = resolveSeriesDir(sid, seriesTitle, tasks);
 
+  const entry = seriesRegistry.find(series => String(series.series_id) === sid);
+  const indexes = new Map((entry?.episodes || []).map(episode => [String(episode.vid), Number(episode.vid_index)]));
   const byIndex = new Map();
   const exists = (p) => {
     try { const stat = fs.lstatSync(p); return stat.isFile() && stat.size > 1024 * 100; } catch (_) { return false; }
@@ -2899,7 +2917,8 @@ function collectSeriesEpisodeFiles(seriesId, seriesTitle) {
   // 1) 任务记录优先（命名模板可能与默认不同）
   for (const t of tasks) {
     if (!hasCompleteTaskFile(t) || !ownsEpisodeFiles(t.savePath, tasks)) continue;
-    const idx = Number(t.hongguoInfo.vid_index) || 0;
+    const vid = recordedEpisodeId(t);
+    const idx = indexes.size && vid ? indexes.get(vid) : Number(t.hongguoInfo.vid_index) || 0;
     if (!idx) continue;
     const prev = byIndex.get(idx);
     if (!prev || (t.startTime || 0) > (prev.startTime || 0)) {
@@ -2910,22 +2929,9 @@ function collectSeriesEpisodeFiles(seriesId, seriesTitle) {
   // 2) 目录扫描兜底：把目录里符合命名规律的剧集文件按集号补进来。
   //    不依赖「已登记的分集」——磁盘上可能存在没有任务记录的孤儿文件
   //    （跨会话下载、任务被清理等），这些同样应该合并进去。
-  const sharedDirectory = dir && (downloadTasks.some(task => String(task.hongguoInfo?.series_id) !== sid && task.savePath && path.dirname(task.savePath) === dir)
-    || mergeTasks.some(task => String(task.seriesId) !== sid && task.output && path.dirname(task.output) === dir));
   const registeredPaths = new Set([...downloadTasks.map(task => task.savePath), ...mergeTasks.map(task => task.output)].filter(Boolean));
   const episodePaths = new Set(tasks.map(task => task.savePath).filter(file => ownsEpisodeFiles(file, tasks)));
-  const episodeNames = new Map();
-  const formats = new Set([getCurrentSettings().name_format, '剧名 集数', '剧名 集数 标题', '剧名']);
-  const entry = seriesRegistry.find(series => String(series.series_id) === sid);
-  // 同名档案共用目录时，文件名无法证明归属，只信明确任务记录。
-  const ambiguousTitle = sharedDirectory && (seriesRegistry.some(series => String(series.series_id) !== sid && sanitizeFolderName(series.series_title) === sanitizeFolderName(seriesTitle))
-    || downloadTasks.some(task => String(task.hongguoInfo?.series_id) !== sid && task.savePath && path.dirname(task.savePath) === dir && sanitizeFolderName(task.hongguoInfo?.series_title || '') === sanitizeFolderName(seriesTitle)));
-  if (!ambiguousTitle) for (const episode of entry?.episodes || []) {
-    for (const name_format of formats) {
-      if (sharedDirectory && !/剧名|\bseries_title\b/.test(name_format || '')) continue;
-      episodeNames.set(uniqueEpisodeFilename({ name_format }, seriesTitle, episode), Number(episode.vid_index));
-    }
-  }
+  const { names: episodeNames, sharedDirectory } = seriesEpisodeNames(sid, seriesTitle, entry, dir);
   let names = [], scanFailed = 0, dirIdentity = null;
   if (dir) {
     try {
@@ -3210,6 +3216,7 @@ function navigateToPlayer(payload) {
     payload: {
       seriesId: payload?.seriesId ? String(payload.seriesId) : '',
       vidIndex: Number(payload?.vidIndex) || 0,
+      ...(payload?.episodeId ? { episodeId: payload.episodeId } : {}),
       resume: payload?.resume === true,
     },
   });
@@ -3231,7 +3238,7 @@ ipcMain.handle('play-series', async (event, payload) => {
     try { entry.dismissed = false; entry.forgotten = false; saveSeriesRegistry(); }
     catch (error) { entry.dismissed = true; entry.forgotten = wasForgotten; return { success: false, error: error.message }; }
   }
-  return navigateToPlayer({ seriesId, vidIndex: episode?.vid_index ?? vidIndex, resume: !episodeId && payload?.resume === true });
+  return navigateToPlayer({ seriesId, vidIndex: episode?.vid_index ?? vidIndex, episodeId, resume: payload?.resume === true });
 });
 
 // ===== 在线播放 =====
@@ -3781,7 +3788,7 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
             }
           };
           const prepared = await withMediaRecovery(sourceVid,seriesId,{playInfo:checkedPlayInfo,quality,allowLowerQuality,force,signal:controller.signal},async playInfo => {
-            const entry = {quality,codec:playInfo.codec === 'bytevc2' ? 'h264' : playInfo.codec || '',size:0,lastUsed:Date.now(),seriesId:String(seriesId||''),vidIndex:Number(vidIndex)||0};
+            const entry = {vid:sourceVid,quality,codec:playInfo.codec === 'bytevc2' ? 'h264' : playInfo.codec || '',size:0,lastUsed:Date.now(),seriesId:String(seriesId||''),vidIndex:Number(vidIndex)||0};
             if (playInfo.format === 'hls') await prepareHlsEntry(playInfo,entry,controller.signal,received => progress(received,0));
             else if (!prefetch && !playInfo.spadeA && !playInfo.contentKey && playInfo.codec !== 'bytevc2') return {...entry,playInfo};
             else {
@@ -3852,7 +3859,9 @@ async function clearSeriesPlaybackCache(sid) {
   if (!base) throw new Error('兼容缓存文件名无效，已停止清理');
   const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const namePattern = new RegExp(`^${escaped}_(\\d{3,})(?:_(?:720p|1080p))?\\.mp4(?:\\.part)?$`);
+  const episodePattern = new RegExp(`^${escaped}_vid-[a-f0-9]{64}_(?:auto|720p|1080p)\\.mp4(?:\\.part)?$`);
   const ownsName = name => {
+    if (episodePattern.test(name)) return true;
     const match = namePattern.exec(name);
     const index = match ? Number(match[1]) : 0;
     return !!match && Number.isSafeInteger(index) && index > 0 && match[1] === String(index).padStart(3, '0');
@@ -3972,14 +3981,13 @@ function compatSeriesStem(seriesId) {
   return `${safe || 'series'}-${hash}`;
 }
 
-function compatFileName(seriesId, vidIndex, quality = 'auto') {
+function compatPathFor(seriesId, vidIndex, quality = 'auto', episodeId) {
   if (!['string', 'number'].includes(typeof vidIndex) || !/^[1-9]\d*$/.test(String(vidIndex))
     || !Number.isSafeInteger(Number(vidIndex))) throw new Error('集数必须是有效正整数');
-  return `${compatSeriesStem(seriesId)}_${String(Number(vidIndex)).padStart(3, '0')}${quality === 'auto' ? '' : `_${playbackQuality(quality)}`}.mp4`;
-}
-
-function compatPathFor(seriesId, vidIndex, quality = 'auto') {
-  return path.join(getCompatDir(), compatFileName(seriesId, vidIndex, quality));
+  const vid = episodeIdAt(seriesId, vidIndex, episodeId);
+  if (!vid) throw new Error('缺少可核对的分集编号');
+  const identity = createHash('sha256').update(JSON.stringify([String(seriesId), vid])).digest('hex');
+  return path.join(getCompatDir(), `${compatSeriesStem(seriesId)}_vid-${identity}_${quality}.mp4`);
 }
 
 function compatCacheStatus() {
@@ -4090,7 +4098,7 @@ function cancelCompatJob(job) {
 ipcMain.handle('cancel-transcode-for-playback', async (_event, payload = {}) => {
   if (!payload.seriesId || payload.vidIndex == null) return { success: false };
   let key;
-  try { key = compatPathFor(payload.seriesId, payload.vidIndex, playbackQuality(payload.quality, payload.vid || payload.seriesId)); }
+  try { key = compatPathFor(payload.seriesId, payload.vidIndex, playbackQuality(payload.quality, payload.vid || payload.seriesId), payload.vid); }
   catch (error) { return { success: false, error: error.message }; }
   const request = payload.requestId ? compatRequests.get(String(payload.requestId)) : null;
   // An old request must never fall back to cancelling the newest job for this episode.
@@ -4106,7 +4114,7 @@ ipcMain.handle('cancel-transcode-for-playback', async (_event, payload = {}) => 
 ipcMain.handle('transcode-for-playback', async (event, payload = {}) => {
   if (!payload.seriesId || payload.vidIndex == null) return { success: false, error: '缺少剧集信息' };
   let key;
-  try { key = compatPathFor(payload.seriesId, payload.vidIndex, playbackQuality(payload.quality, payload.vid || payload.seriesId)); }
+  try { key = compatPathFor(payload.seriesId, payload.vidIndex, playbackQuality(payload.quality, payload.vid || payload.seriesId), payload.vid); }
   catch (error) { return { success: false, error: error.message }; }
   const requestId = String(payload.requestId || randomUUID());
   const existing = compatRequests.get(requestId);
@@ -4162,7 +4170,7 @@ async function transcodeForPlayback(payload, job = { controller: new AbortContro
     const { seriesId, vidIndex, filePath, force } = payload || {};
     const quality = playbackQuality(payload.quality, payload.vid || seriesId);
     if (!seriesId || vidIndex == null) return { success: false, error: '缺少剧集信息' };
-    const out = compatPathFor(seriesId, vidIndex, quality);
+    const out = compatPathFor(seriesId, vidIndex, quality, payload.vid);
     job.files ||= new Set();
     if (filePath) job.files.add(filePath);
     if (filePath && fs.existsSync(filePath) && !isInsideMediaRoot(filePath) && !isRecordedMediaFile(filePath, payload)) {
@@ -4171,8 +4179,8 @@ async function transcodeForPlayback(payload, job = { controller: new AbortContro
     if (!(filePath && fs.existsSync(filePath)) && (/^(xifan|hema|reelshort|dramabox|custom):/.test(String(seriesId)) || /^(xifan|hema|reelshort|dramabox|custom):/.test(String(payload.vid)))) {
       const current = await hongguo.fetchEpisodeList(seriesId);
       checkCancelled();
-      const episode = current.episodes.find(ep => Number(ep.vid_index) === Number(vidIndex));
-      if (!episode || (payload.vid && payload.vid !== episode.vid)) return { success: false, error: '分集来源不匹配' };
+      const episode = current.episodes.find(ep => String(ep.vid) === episodeIdAt(seriesId, vidIndex, payload.vid));
+      if (!episode) return { success: false, error: '分集来源不匹配' };
       if (episode.locked) return { success: false, error: '该集已锁定，请在来源平台解锁' };
     }
 
@@ -4663,11 +4671,11 @@ ipcMain.handle('hongguo-download-batch', async (event, payload) => {
 });
 
 // 播放器里「下载本集」：按 series_id + vid_index 补单集
-ipcMain.handle('download-single-episode', async (event, seriesId, vidIndex, quality) => {
+ipcMain.handle('download-single-episode', async (event, seriesId, vidIndex, quality, episodeId) => {
   try {
     const entry = seriesRegistry.find((s) => String(s.series_id) === String(seriesId));
     if (!entry) return { success: false, error: '未找到该剧档案，请先解析一次' };
-    const ep = entry.episodes.find((e) => Number(e.vid_index) === Number(vidIndex));
+    const ep = entry.episodes.find(e => String(e.vid) === episodeIdAt(seriesId, vidIndex, episodeId));
     if (!ep) return { success: false, error: '未找到该集' };
     const count = await enqueueEpisodes({
       seriesId: entry.series_id,
@@ -4696,6 +4704,7 @@ const historyService = createHistoryService({
   upsertSeriesRegistry,
   saveSeriesRegistry,
   searchAtSource,
+  loadOfficialSeasons,
   send: (...args) => sendToRenderer(...args),
   safeErrorText,
   accountHistory: rows => ({
@@ -5165,17 +5174,32 @@ async function deleteSeriesFiles(seriesId, options) {
 ipcMain.handle('delete-series-files', (_event, seriesId, options) => deleteSeriesFiles(seriesId, options));
 
 /** 删除单集本地文件（看完即删用） */
-async function deleteEpisodeFile(seriesId, vidIndex, validateBeforeDelete) {
+async function deleteEpisodeFile(seriesId, vidIndex, episodeId, validateBeforeDelete) {
   try {
     const sid = String(seriesId);
     const idx = Number(vidIndex);
     if (!sid || !Number.isSafeInteger(idx) || idx < 1) return { success: false, error: '剧集信息无效', count: 0, freed: 0 };
-    const tasks = downloadTasks.filter(task => String(task.hongguoInfo?.series_id) === sid && Number(task.hongguoInfo?.vid_index) === idx);
+    const vid = episodeIdAt(sid, idx, episodeId);
+    if (!vid) return { success: false, error: '无法核对本集编号，文件已保留', count: 0, freed: 0 };
+    const tasks = downloadTasks.filter(task => String(task.hongguoInfo?.series_id) === sid && recordedEpisodeId(task) === vid);
     if (tasks.some(isTaskInFlight) || mergeTasks.some(task => task.seriesId === sid && task.status === 'running')) return { success: false, error: '该集正在下载或合并，暂不删除', count: 0, freed: 0 };
-    const entry = seriesRegistry.find(item => String(item.series_id) === sid);
-    const scanned = collectSeriesEpisodeFiles(sid, entry?.series_title || '');
-    const paths = [...tasks.map(task => task.savePath), ...scanned.ordered.filter(episode => episode.vid_index === idx).map(episode => episode.path),
-      ...(scanned.dir ? [...scanned.episodeNames].filter(([, index]) => index === idx).map(([name]) => path.join(scanned.dir, name)) : [])];
+    if (!tasks.length) {
+      const series = seriesRegistry.find(item => item.series_id === sid);
+      const episode = series?.episodes?.find(item => String(item.vid) === vid);
+      if (episode) {
+        const dir = resolveSeriesDir(sid, series.series_title, []);
+        const formats = new Set([getCurrentSettings().name_format, '剧名 集数', '剧名 集数 标题', '剧名']);
+        const unverified = dir && [...formats].some(name_format => {
+          const file = path.join(dir, uniqueEpisodeFilename({ name_format }, series.series_title, episode));
+          return !downloadTasks.some(task => task.savePath === file) && episodeFileFamilyExists(file);
+        });
+        if (unverified) return { success: false, count: 0, freed: 0, error: '文件缺少可验证的分集身份，已保留' };
+      }
+    }
+    const paths = tasks.map(task => task.savePath).filter(Boolean);
+    if (new Set(paths).size < paths.length) {
+      return { success: false, count: 0, freed: 0, error: '同一文件关联多条任务记录，已保留' };
+    }
     const ownedPaths = paths.filter(file => {
       const baseFile = file.replace(/\.enc\.tmp(?:\.decoded)?$/, '');
       return ownsRecordedMediaFile(baseFile) || episodeFileFamilyExists(baseFile);
@@ -5198,28 +5222,30 @@ async function deleteEpisodeFile(seriesId, vidIndex, validateBeforeDelete) {
   }
 }
 
-ipcMain.handle('delete-episode-file', (_event, seriesId, vidIndex) => deleteEpisodeFile(seriesId, vidIndex));
+ipcMain.handle('delete-episode-file', (_event, seriesId, vidIndex, episodeId) => deleteEpisodeFile(seriesId, vidIndex, episodeId));
 
 /** 前端先释放看完的媒体；只清本集，不影响预缓存的下一集。 */
-ipcMain.handle('cleanup-watched-episode', async (_event, seriesId, vidIndex) => {
+ipcMain.handle('cleanup-watched-episode', async (_event, seriesId, vidIndex, episodeId) => {
   try {
     const sid = String(seriesId), idx = Number(vidIndex);
     if (!sid || !Number.isSafeInteger(idx) || idx < 1) return { success: false, error: '剧集信息无效' };
-    if (downloadTasks.some(task => String(task.hongguoInfo?.series_id) === sid && Number(task.hongguoInfo?.vid_index) === idx && task.nasDestination))
+    const vid = episodeIdAt(sid, idx, episodeId);
+    if (!vid) return { success: false, error: '无法核对本集编号，文件已保留' };
+    if (downloadTasks.some(task => String(task.hongguoInfo?.series_id) === sid && recordedEpisodeId(task) === vid && task.nasDestination))
       return { success: true, count: 0, freed: 0, skipped: true };
-    if (downloadTasks.some(task => String(task.hongguoInfo?.series_id) === sid && Number(task.hongguoInfo?.vid_index) === idx && task.nasWarning))
+    if (downloadTasks.some(task => String(task.hongguoInfo?.series_id) === sid && recordedEpisodeId(task) === vid && task.nasWarning))
       return { success: false, error: '本集尚未完成 NAS 整理，本地视频已保留；请再次点击「下载到 NAS」重试' };
     if (getCurrentSettings().auto_delete_watched !== true)
       return { success: true, count: 0, freed: 0, skipped: true };
-    const matches = entry => entry && String(entry.seriesId) === sid && Number(entry.vidIndex) === idx;
-    const compatFiles = ['auto', '720p', '1080p'].map(quality => compatPathFor(sid, idx, quality));
-    if ([...onlineSessions.values()].some(session => matches(session.entry || session)) || compatFiles.some(file => compatPreparing.has(file))) {
+    const matches = entry => entry && String(entry.seriesId) === sid && String(entry.vid) === vid;
+    const compatFiles = ['auto', '720p', '1080p'].map(quality => compatPathFor(sid, idx, quality, vid));
+    if ([...onlineSessions.values()].some(session => matches(session)) || compatFiles.some(file => compatPreparing.has(file))) {
       return { success: false, error: '该集仍在播放或准备，稍后再清理' };
     }
     const autoDeleteCheck = () => {
       if (getCurrentSettings().auto_delete_watched !== true) throw new Error('自动删除已关闭，本集文件已保留');
     };
-    const result = await deleteEpisodeFile(sid, idx, autoDeleteCheck);
+    const result = await deleteEpisodeFile(sid, idx, vid, autoDeleteCheck);
     if (!result.success) return result;
     try { autoDeleteCheck(); } catch (_) { return result; }
     for (const [key, entry] of [...onlineCache]) {

@@ -148,7 +148,7 @@ const checks = [
         assert.match(result.error || '', /集数/);
       }
     }
-    assert.equal(h.context.compatPathFor('1', 2), h.context.compatPathFor('1', '2'));
+    assert.equal(h.context.compatPathFor('1', 2, 'auto', '12'), h.context.compatPathFor('1', '2', 'auto', '12'));
   }],
   ['cache trimming retains temporary inputs and active files under budget pressure', async () => {
     const h = fixture(), dir = h.context.getCompatDir(), current = path.join(dir, '1_001.mp4');
@@ -232,7 +232,7 @@ const checks = [
     const h = fixture('darwin', { childProcess: { spawn: (_file, args) => { output = args.at(-1); fs.writeFileSync(output, 'partial'); return child; } } });
     const input = path.join(h.root, 'original.mp4'); fs.writeFileSync(input, 'original');
     h.context.resolveFfmpeg = () => '/fixture/ffmpeg'; h.context.probeDuration = async () => 1;
-    const pending = h.handlers['transcode-for-playback']({}, { seriesId: '1', vidIndex: 1, filePath: input, force: true });
+    const pending = h.handlers['transcode-for-playback']({}, { seriesId: '1', vidIndex: 1, vid: '11', filePath: input, force: true });
     for (let i = 0; i < 10; i++) await Promise.resolve();
     assert.ok(output);
     let prevented = false; h.app.emit('before-quit', { preventDefault: () => prevented = true });
@@ -272,7 +272,7 @@ const checks = [
     } } });
     const input = path.join(h.root, 'original.mp4'); fs.writeFileSync(input, 'original');
     h.context.resolveFfmpeg = () => '/fixture/ffmpeg'; h.context.probeDuration = async () => 1;
-    const pending = h.handlers['transcode-for-playback']({}, { seriesId: '1', vidIndex: 1, filePath: input, force: true });
+    const pending = h.handlers['transcode-for-playback']({}, { seriesId: '1', vidIndex: 1, vid: '11', filePath: input, force: true });
     await flush(); assert.ok(output);
     try {
       h.app.emit('before-quit', { preventDefault() {} });
@@ -299,9 +299,9 @@ const checks = [
   ['predecessor and cache-clear waits share the quit deadline and late cleanup cannot quit', async () => {
     const clock = timers(), h = fixture('darwin', clock); let release;
     h.context.oldJob = { cancelled: true, controller: new AbortController(), promise: new Promise(resolve => release = resolve) };
-    h.run("compatPreparing.set(compatPathFor('1',1),oldJob)");
+    h.run("compatPreparing.set(compatPathFor('1',1,'auto','11'),oldJob)");
     const clearing = h.handlers['clear-compat-cache']({});
-    const retry = h.handlers['transcode-for-playback']({}, { seriesId: '1', vidIndex: 1 });
+    const retry = h.handlers['transcode-for-playback']({}, { seriesId: '1', vidIndex: 1, vid: '11' });
     await flush();
     try {
       h.app.emit('before-quit', { preventDefault() {} }); await clock.expire();

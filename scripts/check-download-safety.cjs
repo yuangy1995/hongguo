@@ -138,7 +138,7 @@ async function crashedTemporary(overrides = {}) {
         if (name === path.dirname(temporary.input) && ++calls === gateAt) { enter(); await released; }
         return lstat(name,...args);
       };
-      const args = channel === 'delete-task' ? ['one',{deleteFiles:true}] : channel === 'delete-episode-file' ? ['S',1] : ['S'];
+      const args = channel === 'delete-task' ? ['one',{deleteFiles:true}] : channel === 'delete-episode-file' ? ['S',1,'one'] : ['S'];
       const deletion = h.handlers[channel]({},...args);
       try {
         await Promise.race([entered,new Promise((_,reject) => { timer = setTimeout(() => reject(new Error('cleanup gate was not reached')),1000); })]);
@@ -164,7 +164,7 @@ async function crashedTemporary(overrides = {}) {
     const usage = await h.handlers['get-storage-usage']({});
     assert.equal(usage.totalBytes, 240000, 'crash residue must be counted as releasable storage');
     assert.equal(usage.totalFiles, 2);
-    const args = channel === 'delete-task' ? ['one', {deleteFiles:true}] : channel === 'delete-episode-file' ? ['S',1] : ['S'];
+    const args = channel === 'delete-task' ? ['one', {deleteFiles:true}] : channel === 'delete-episode-file' ? ['S',1,'one'] : ['S'];
     const result = await h.handlers[channel]({}, ...args);
     assert.equal(result.success, true, result.error); assert.equal(result.freed, 240000);
     assert.equal(fs.existsSync(path.dirname(temporary.input)), false);
@@ -303,7 +303,7 @@ async function crashedTemporary(overrides = {}) {
       h.set('downloadTasks', [one]);
       const args = channel === 'delete-task' ? ['one', { deleteFiles: true }]
         : channel === 'delete-tasks' ? [['one'], { deleteFiles: true }]
-        : channel === 'delete-episode-file' ? ['S', 1] : ['S'];
+        : channel === 'delete-episode-file' ? ['S', 1, 'one'] : ['S'];
       const result = await h.handlers[channel]({}, ...args);
       assert.equal(result.success, false, channel);
       assert.equal(fs.existsSync(one.savePath), true, channel + ' must preserve a foreign mount file');
@@ -323,7 +323,7 @@ async function crashedTemporary(overrides = {}) {
       one.directoryIdentity = { directory:fs.realpathSync(h.dir), device:fs.statSync(h.dir).dev+1 };
       h.set('downloadTasks',[one]);
       const args = channel === 'delete-task' ? ['one',{deleteFiles:true}] : channel === 'delete-tasks' ? [['one'],{deleteFiles:true}]
-        : channel === 'delete-episode-file' ? ['S',1] : ['S'];
+        : channel === 'delete-episode-file' ? ['S',1,'one'] : ['S'];
       const result = await h.handlers[channel]({},...args);
       assert.equal(result.success,false,channel);
       assert.equal(fs.existsSync(one.savePath),true,channel);
@@ -359,7 +359,7 @@ async function crashedTemporary(overrides = {}) {
       };
       const args = channel === 'delete-task' ? ['one', {deleteFiles:true}]
         : channel === 'delete-tasks' ? [['one'], {deleteFiles:true}]
-        : ['delete-episode-file', 'cleanup-watched-episode'].includes(channel) ? ['S', 1] : ['S'];
+        : ['delete-episode-file', 'cleanup-watched-episode'].includes(channel) ? ['S', 1, 'one'] : ['S'];
       const result = await h.handlers[channel]({}, ...args);
       assert.equal(fs.existsSync(replacement), true, 'foreign video must survive the async cleanup window');
       assert.equal(fs.existsSync(path.join(h.dir + '.original', one.filename)), true);
@@ -381,10 +381,10 @@ async function crashedTemporary(overrides = {}) {
         fs.symlinkSync(foreign, dir, process.platform === 'win32' ? 'junction' : 'dir');
         return result;
       };
-      const args = ['delete-episode-file', 'cleanup-watched-episode'].includes(channel) ? ['S', 1] : ['S'];
-      const result = await h.handlers[channel]({}, ...args);
+      const single = ['delete-episode-file', 'cleanup-watched-episode'].includes(channel);
+      const result = await h.handlers[channel]({}, 'S', 1, 'one');
       assert.equal(fs.existsSync(path.join(foreign, filename)), true);
-      assert.equal(fs.existsSync(path.join(dir + '.original', filename)), true);
+      assert.equal(fs.existsSync(path.join(single ? dir : dir + '.original', filename)), true);
       assert.equal(result.success, false);
       assert.equal(result.freed, 0);
     });
@@ -425,7 +425,7 @@ async function crashedTemporary(overrides = {}) {
       fs.renameSync(one.savePath, original);
       file(one.savePath);
       const args = channel === 'delete-task' ? ['one', { deleteFiles: true }]
-        : channel === 'delete-episode-file' ? ['S', 1] : ['S'];
+        : channel === 'delete-episode-file' ? ['S', 1, 'one'] : ['S'];
       const result = await h.handlers[channel]({}, ...args);
       assert.equal(result.success, false, channel);
       assert.equal(result.freed, 0, `${channel} ${JSON.stringify(result)}`);
@@ -1075,6 +1075,24 @@ async function crashedTemporary(overrides = {}) {
     const added = await h.context.enqueueEpisodes({ seriesId: 'S', seriesTitle: 'Short', episodes: [series()[0].episodes[0]] });
     assert.equal(added, 1); assert.equal(h.run('downloadTasks.length'), 1); assert.equal(h.run('downloadTasks[0].status'), 'pending');
   });
+  await check('download status and removal follow the video ID after catalogue reorder', async () => {
+    const h = load(), one = task('one', h.dir);
+    file(one.savePath);
+    one.directoryIdentity = h.context.readDirectoryIdentity(h.dir);
+    one.fileIdentity = h.context.readFileIdentity(one.savePath);
+    h.set('downloadTasks', [one]);
+    h.set('seriesRegistry', [{ ...series()[0], episodes: [{ vid: 'replacement', vid_index: 1 }, { vid: 'one', vid_index: 2 }] }]);
+    const { data } = await h.handlers['get-series-episodes']({}, 'S');
+    assert.equal(data.episodes[0].status, 'missing');
+    assert.equal(data.episodes[0].fileUrl, null);
+    assert.equal(data.episodes[1].status, 'completed');
+    assert.equal(typeof data.episodes[1].fileUrl, 'string');
+    const skipped = await h.handlers['delete-episode-file']({}, 'S', 1, 'replacement');
+    assert.equal(skipped.count, 0);
+    assert.equal(fs.existsSync(one.savePath), true);
+    assert.equal((await h.handlers['delete-episode-file']({}, 'S', 2, 'one')).count, 1);
+    assert.equal(fs.existsSync(one.savePath), false);
+  });
   await check('issue167 metadata-only identity drift keeps a completed file playable', async () => {
     const h = load(); h.set('seriesRegistry', series());
     const one = task('one', h.dir); file(one.savePath);
@@ -1311,7 +1329,7 @@ async function crashedTemporary(overrides = {}) {
     const h = load();
     const outside = path.join(root, 'foreign.mp4');
     fs.writeFileSync(outside, Buffer.alloc(1200));
-    const result = await h.handlers['transcode-for-playback']({}, { seriesId: 'S', vidIndex: 1, filePath: outside });
+    const result = await h.handlers['transcode-for-playback']({}, { seriesId: 'S', vidIndex: 1, vid: 'one', filePath: outside });
     assert.equal(result.success, false);
     assert.match(result.error, /下载目录/);
     const inside = path.join(h.dir, 'local.mp4');
@@ -1343,7 +1361,7 @@ async function crashedTemporary(overrides = {}) {
     const one = task('one', oldDir); file(one.savePath);
     const merged = path.join(oldDir, 'merged.mp4'); file(merged);
     h.set('downloadTasks', [one]); h.set('mergeTasks', [{ output: merged, status: 'completed' }]);
-    file(h.context.compatPathFor('S', 1));
+    file(h.context.compatPathFor('S', 1, 'auto', 'one'));
     assert.equal((await h.handlers['show-in-folder']({}, one.savePath)).success, true, 'old registered episode must remain revealable');
     assert.equal((await h.handlers['show-in-folder']({}, merged)).success, true, 'old registered merge must remain revealable');
     const playable = await h.handlers['transcode-for-playback']({}, { seriesId: 'S', vidIndex: 1, vid: 'one', filePath: one.savePath });
@@ -1356,7 +1374,7 @@ async function crashedTemporary(overrides = {}) {
     const one = task('one', oldDir); file(one.savePath); h.set('downloadTasks', [one]);
     const sibling = path.join(oldDir, 'unregistered.mp4'); file(sibling);
     assert.equal((await h.handlers['show-in-folder']({}, sibling)).success, false);
-    for (const identity of [{ seriesId: 'other', vidIndex: 1, vid: 'one' }, { seriesId: 'S', vidIndex: 2, vid: 'one' }, { seriesId: 'S', vidIndex: 1, vid: 'other' }]) {
+    for (const identity of [{ seriesId: 'other', vidIndex: 1, vid: 'one' }, { seriesId: 'S', vidIndex: 1, vid: 'other' }]) {
       const result = await h.handlers['transcode-for-playback']({}, { ...identity, filePath: one.savePath });
       assert.equal(result.success, false); assert.match(result.error, /下载目录/);
     }

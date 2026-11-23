@@ -55,7 +55,7 @@ test('account controller scopes resume positions and registers the existing IPC 
   assert.equal((await handlers.get('get-account-status')({})).success, true);
   assert.deepEqual(await handlers.get('play-account-history')({}, '1000001'), { success: true });
   assert.deepEqual(navigation, { seriesId: '1000001', vidIndex: 1, resume: true });
-  assert.deepEqual(controller.takeResumePosition('1000001'), { vid_index: 1, currentTime: 12, updatedAt: 1 });
+  assert.deepEqual(controller.takeResumePosition('1000001'), { episode_id: 'v1', vid_index: 1, currentTime: 12, updatedAt: 1 });
   assert.equal(controller.takeResumePosition('1000001'), null);
   assert.equal((await handlers.get('start-account-login')({})).success, true);
   assert.equal(partitionProxied, 1);
@@ -133,7 +133,7 @@ test('automatic sync uses newer timestamps, owns its queued writes and resumes t
   assert.equal(playback['1000003'].accountSyncPending['99'].currentTime, 60);
   assert.deepEqual(await handlers.get('play-account-history')({}, '1000001', { merged: true }), { success: true });
   assert.deepEqual(navigation, { seriesId: '1000001', vidIndex: 1, resume: true });
-  assert.deepEqual(controller.takeResumePosition('1000001'), { vid_index: 1, currentTime: 25, updatedAt: 300 });
+  assert.deepEqual(controller.takeResumePosition('1000001'), { episode_id: '2000001', vid_index: 1, currentTime: 25, updatedAt: 300 });
   playback['1000001'] = { ...oldPosition, updatedAt: 400 };
   assert.deepEqual(await handlers.get('play-account-history')({}, '1000001', { merged: true }), { success: true });
   assert.equal(navigation.vidIndex, 2);
@@ -143,7 +143,7 @@ test('automatic sync uses newer timestamps, owns its queued writes and resumes t
   assert.equal(playback['1000002'].currentTime, 33, 'signing out preserves the desktop checkpoint');
   delete playback['1000001'];
   assert.deepEqual(await handlers.get('play-account-history')({}, '1000001', { merged: true }), { success: true });
-  assert.deepEqual(controller.takeResumePosition('1000001'), { vid_index: 1, currentTime: 25, updatedAt: 300 });
+  assert.deepEqual(controller.takeResumePosition('1000001'), { episode_id: '2000001', vid_index: 1, currentTime: 25, updatedAt: 300 });
   accountId = '42';
   t.mock.timers.tick(29999);
   assert.equal(pullCount, 2);

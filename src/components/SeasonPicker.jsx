@@ -161,7 +161,7 @@ export default function SeasonPicker({ seriesId, active, seriesList, onSwitch, a
         {(!current || current.pending) && <p role="status">{t(hongguo ? "正在读取官方系列剧…" : "正在查找各季…")}</p>}
         {current?.partial && <p role="status">{t(hongguo ? "系列剧查询失败。" : current.error || "部分查询未完成，可稍后重试。")}</p>}
         {current && !current.pending && !current.partial && !current.results.some(item => item.series_id !== seriesId) &&
-          <p role="status">{t(current.unavailable ? "暂无系列剧信息。" : "暂未找到其他季。")}</p>}
+          <p role="status">{t("暂未找到其他季。")}</p>}
         {supportsReservations && accountLibrary?.signedIn && pendingReservations?.error && !reservations?.loaded &&
           <p role="status">{t("预约状态暂时无法读取。")} <button type="button" className="btn btn-outline btn-sm"
             onClick={() => accountLibrary.refresh('pendingReservations')}>{t("重新读取")}</button></p>}

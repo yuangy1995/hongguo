@@ -174,6 +174,18 @@ if (require.main === module) (async () => {
       if (!resume) assert.equal(ui.saves.length, beforeUnmount, 'hidden player cleanup must not restore removed history');
     }
   });
+  await test('resume follows the saved episode ID and does not autoplay a replacement', async () => {
+    const moved = mount({ local: true, saved: { episode_id: 'v2', vid_index: 1, currentTime: 24 } });
+    await moved.flush(); moved.metadata();
+    assert.equal(moved.find(node => node.type === 'video').props.src, 'file:///mock-2.mp4');
+    assert.equal(moved.media.currentTime, 24);
+    moved.unmount();
+    const missing = mount({ local: true, saved: { episode_id: 'missing-vid', vid_index: 1, currentTime: 24 } });
+    await missing.flush(); missing.metadata();
+    assert.equal(missing.mediaCalls.play, 0);
+    assert.equal(missing.media.currentTime, 0);
+    missing.unmount();
+  });
   await test('history completion forwards valid media duration and the ended event without auto-delete', async () => {
     const ui = mount({ local: true, episodeCount: 1 }); await ui.flush(); ui.metadata();
     ui.media.currentTime = 100;

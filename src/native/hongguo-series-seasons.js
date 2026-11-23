@@ -9,17 +9,16 @@ const text = value => typeof value === 'string' ? value.trim() : '';
 const flag = value => [true, 1, '1', 'true'].includes(value);
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 
-function parseSeriesSeasons(payload) {
-  // The season endpoint can return this envelope for titles without series information.
-  if (payload?.code === 101116 && payload.message === 'SERVICE_ERROR' && payload.data === null) return null;
+function parseSeriesSeasons(payload, seriesId) {
   if (payload?.code !== 0 && payload?.code !== '0') throw new Error('红果未确认系列剧查询，请稍后重试。');
   if (payload.data == null) return [];
   if (!Array.isArray(payload.data)) throw new Error('官方系列剧列表格式已变化。');
-  const seasons = new Map();
+  const lists = [];
   for (const block of payload.data) {
     if (!object(block)) throw new Error('官方系列剧列表格式已变化。');
     if (block.video_data == null) continue;
     if (!Array.isArray(block.video_data)) throw new Error('官方系列剧列表格式已变化。');
+    const seasons = new Map();
     for (const row of block.video_data) {
       if (!object(row)) throw new Error('官方系列剧列表格式已变化。');
       const detail = { ...row, ...row.video_detail };
@@ -29,7 +28,8 @@ function parseSeriesSeasons(payload) {
       const label = Array.isArray(detail.secondary_info_list)
         ? detail.secondary_info_list.map(item => text(item?.content).replace(/\s+/g, '')).find(item => /^第[1-9]\d*季$/.test(item))
         : undefined;
-      const season = label ? Number(label.slice(1, -1)) : Number(detail.season_index);
+      const index = Number(detail.season_index);
+      const season = Number.isSafeInteger(index) && index > 0 ? index : label ? Number(label.slice(1, -1)) : null;
       const firstVideo = exactId(detail.first_vid_str || detail.first_vid || detail.vid_str || detail.vid);
       const episodeCount = Number(detail.episode_cnt ?? detail.episode_count);
       const subscription = detail.subscribe_item;
@@ -44,8 +44,11 @@ function parseSeriesSeasons(payload) {
         ...(upcoming && validId(itemId) ? { reservationId: itemId } : {}),
       });
     }
+    if (seasons.size) lists.push(seasons);
   }
-  return [...seasons.values()];
+  const matched = seriesId ? lists.find(list => list.has(seriesId)) : lists[0];
+  if (!matched && lists.length) throw new Error('官方系列剧列表未包含当前剧集，请稍后重试。');
+  return matched ? [...matched.values()] : [];
 }
 
 async function fetchHongguoSeriesSeasons(seriesId, { request = requestJson, identity = getPlaybackDevice } = {}) {
@@ -63,7 +66,7 @@ async function fetchHongguoSeriesSeasons(seriesId, { request = requestJson, iden
     method: 'GET', headers: signed.headers,
     preserveLargeIntegerFields: ['series_id', 'vid', 'first_vid', 'item_id'],
   }, deadline, signal);
-  return parseSeriesSeasons(payload);
+  return parseSeriesSeasons(payload, seriesId);
 }
 
 module.exports = { fetchHongguoSeriesSeasons, parseSeriesSeasons };

@@ -84,8 +84,6 @@ function reservationTimestamp(value) {
 function reservationSchedule(row, cleanText, now) {
   const subtitles = Array.isArray(row.sub_title_list) ? row.sub_title_list.map(entry => entry?.content) : [];
   const hints = [...subtitles, row.expected_rec_text, row.publish_time_text, row.sub_info].map(cleanText);
-  const published = hints.find(text => exactReleaseDate.test(text));
-  if (published) return published;
   const today = shanghaiDayFormatter.format(now);
   const timestamps = [row.schedule_publish_time, row.expected_publish_time].map(reservationTimestamp).filter(Boolean);
   const upcoming = timestamps.find(time => time >= now || shanghaiDayFormatter.format(time) === today);
@@ -95,7 +93,8 @@ function reservationSchedule(row, cleanText, now) {
     const clock = reservationTimeFormatter.format(timestamp);
     return `${upcoming ? '预计' : '原预计'}${date}${clock === '00:00' ? '' : ` ${clock}`}上线`;
   }
-  return hints.find(text => approximateReleaseDate.test(text))
+  return hints.find(text => exactReleaseDate.test(text))
+    || hints.find(text => approximateReleaseDate.test(text))
     || hints.map(text => text.match(genericReleaseStatus)?.[1]).find(Boolean) || '';
 }
 

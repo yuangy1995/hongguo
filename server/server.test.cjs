@@ -190,15 +190,29 @@ test('missing, zero-size and non-regular completed artifacts become interrupted'
     assert.equal(listed.body.tasks.find(item => item.id === task.id).file, undefined);
   }
 });
-test('startup removes stale download staging directories only', () => {
+test('startup cleans verified staging and keeps unregistered directories and replaced files', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-server-cleanup-'));
-  const data = path.join(root, 'data'), downloads = path.join(root, 'downloads'), series = path.join(downloads, '测试_123');
-  fs.mkdirSync(data); fs.mkdirSync(series, { recursive: true });
-  const stale = path.join(series, '.download-A1B2C3'); fs.mkdirSync(stale); fs.writeFileSync(path.join(stale, 'input.mp4'), 'partial');
-  const userDir = path.join(series, '.download-notes'); fs.mkdirSync(userDir);
-  const keep = path.join(series, '.download-note'); fs.writeFileSync(keep, 'keep');
-  new Storage(data, downloads);
-  assert.equal(fs.existsSync(stale), false); assert.equal(fs.readFileSync(keep, 'utf8'), 'keep');
-  assert.equal(fs.existsSync(userDir), true);
-  fs.rmSync(root, { recursive: true, force: true });
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const data = path.join(root, 'data'), downloads = path.join(root, 'downloads');
+  const storage = new Storage(data, downloads);
+  const task = { id: '11111111-1111-4111-8111-111111111111', type: 'download', status: 'running',
+    seriesId: '123', seriesTitle: '测试', vid: '456', episodeIndex: 1, quality: 'auto' };
+  storage.add([task]);
+  const owned = storage.createTemporary(task);
+  const changed = storage.createTemporary(task);
+  for (const stage of [owned, changed]) {
+    fs.writeFileSync(path.join(stage.directory, 'input.mp4'), 'partial');
+    stage.track('input.mp4');
+  }
+  const replaced = path.join(changed.directory, 'input.mp4');
+  fs.renameSync(replaced, path.join(changed.directory, 'renamed.mp4'));
+  fs.writeFileSync(replaced, 'user file');
+  const foreign = path.join(storage.directory(task), '.download-A1B2C3');
+  fs.mkdirSync(foreign);
+  fs.writeFileSync(path.join(foreign, 'input.mp4'), 'unregistered');
+  const restarted = new Storage(data, downloads);
+  assert.equal(fs.existsSync(owned.directory), false);
+  assert.equal(fs.readFileSync(replaced, 'utf8'), 'user file');
+  assert.equal(fs.readFileSync(path.join(foreign, 'input.mp4'), 'utf8'), 'unregistered');
+  assert.equal(restarted.get(task.id).temporary.length, 1);
 });

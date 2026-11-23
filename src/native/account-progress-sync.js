@@ -74,9 +74,13 @@ function mergeAccountWatchHistory(localRows, cloudRows, playback, accountId) {
     const id = String(cloud.series_id);
     const local = rows.get(id);
     if (!exactId(id) || !Number.isFinite(cloud.updatedAt) || cloud.updatedAt <= 0
-      || Number(playback[id]?.accountHidden?.[accountId]) >= cloud.updatedAt
-      || (local && local.updatedAt >= cloud.updatedAt)) continue;
+      || Number(playback[id]?.accountHidden?.[accountId]) >= cloud.updatedAt) continue;
     const total = Math.max(local?.total || 0, cloud.total || 0);
+    const localCompleted = local?.completed === true && local.total === total;
+    if (local && local.updatedAt >= cloud.updatedAt) {
+      if (total > local.total) rows.set(id, { ...local, total, completed: false });
+      continue;
+    }
     rows.set(id, {
       ...local,
       ...cloud,
@@ -84,8 +88,10 @@ function mergeAccountWatchHistory(localRows, cloudRows, playback, accountId) {
       account: true,
       hasLocal: !!local,
       total,
-      completed: !!local?.completed || (total > 0 && cloud.vid_index === total
-        && cloud.duration > 0 && cloud.currentTime >= cloud.duration - 1),
+      completed: localCompleted || (total > 0 && cloud.vid_index === total
+        && cloud.duration > 0 && cloud.currentTime > 0
+        && cloud.currentTime >= cloud.duration - Math.min(1, cloud.duration * 0.01)
+        && cloud.currentTime <= cloud.duration + 1),
     });
   }
   return [...rows.values()].sort((a, b) => b.updatedAt - a.updatedAt);

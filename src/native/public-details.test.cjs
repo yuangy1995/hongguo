@@ -90,3 +90,12 @@ test('跨站跨剧与普通跳转、HTTP错误和超时不误报来源未开放'
   failure = { code: 'ECONNABORTED' };
   assert.match((await fetchPublicDetails(SID, VID)).error, /超时/);
 });
+
+test('public reviews use the matching series and exact episode among multiple loader blocks', () => {
+  const blocks = { otherSeries: { seriesDetail: { series_id: '7503745441910017000' }, vid: VID },
+    otherEpisode: { seriesDetail: { series_id: SID }, vid: '7503780574541122600' },
+    matching: { seriesDetail: { series_id: SID }, vid: VID,
+      episodeSocialInfo: { reviews: { reviews: [{ content: '本集评论' }] } } } };
+  const page = `window._ROUTER_DATA=${JSON.stringify({ loaderData: blocks })};`;
+  assert.equal(parsePublicDetails(page, SID, VID).episode_reviews.items[0].content, '本集评论');
+});

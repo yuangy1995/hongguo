@@ -6,13 +6,13 @@ const handler = source.match(/ipcMain\.handle\('open-episode-external',[\s\S]*?\
 assert.ok(handler, 'downloaded episodes need an external-player entry');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-external-'));
 const opened = [], handlers = {};
-const context = vm.createContext({ fs, path, downloadTasks: [], mergeTasks: [], readFileIdentity, sameFileObject,
+const context = vm.createContext({ fs, path, downloadTasks: [], mergeTasks: [], seriesRegistry: [{ series_id: '123456', episodes: [{ vid_index: 1, vid: '987654' }] }], readFileIdentity, sameFileObject,
   shell: { openPath: async file => { opened.push(file); return context.openError || ''; } },
   ipcMain: { handle: (name, fn) => { handlers[name] = fn; } },
   pathInside: (dir, file) => { const rel = path.relative(fs.realpathSync(dir), fs.realpathSync(file)); return !rel.startsWith('..') && !path.isAbsolute(rel); },
 });
 vm.runInContext(source.match(/function isRecordedMediaFile\([\s\S]*?\n\}/)[0], context);
-for (const name of ['fileIdentityMatches', 'fileIdentityStillSameObject', 'legacyFileMatches', 'isRegularFile']) {
+for (const name of ['fileIdentityMatches', 'fileIdentityStillSameObject', 'legacyFileMatches', 'isRegularFile', 'episodeIdAt', 'recordedEpisodeId']) {
   vm.runInContext(source.match(new RegExp(`function ${name}\\([\\s\\S]*?\\n\\}`))[0], context);
 }
 vm.runInContext(source.match(/function hasCompleteTaskFile\([\s\S]*?\n\}/)[0], context);
@@ -27,6 +27,10 @@ const open = (sid = '123456', index = 1) => handlers['open-episode-external']({}
     context.downloadTasks.push(task);
     assert.equal((await open()).success, true); assert.deepEqual(opened, [file]);
     assert.equal((await open('123456', 2)).success, false);
+    context.seriesRegistry[0].episodes = [{ vid_index: 1, vid: '987655' }, { vid_index: 2, vid: '987654' }];
+    assert.equal((await open()).success, false, 'replacement episode must not open the previous file');
+    assert.equal((await open('123456', 2)).success, true, 'original file follows the episode ID');
+    context.seriesRegistry[0].episodes = [{ vid_index: 1, vid: '987654' }];
     assert.equal((await open('../../outside', 1)).success, false);
     task.status = 'pending'; assert.equal((await open()).success, false); task.status = 'completed';
     task.pathConflict = true; assert.equal((await open()).success, false); task.pathConflict = false;
@@ -37,10 +41,10 @@ const open = (sid = '123456', index = 1) => handlers['open-episode-external']({}
     const outside = path.join(root, 'outside'); fs.mkdirSync(outside);
     const target = path.join(outside, 'outside.mp4'); fs.writeFileSync(target, Buffer.alloc(110000));
     task.savePath = file; fs.symlinkSync(target, file); assert.equal((await open()).success, false);
-    assert.equal(opened.length, 2, 'only valid registered videos may reach the OS');
+    assert.equal(opened.length, 3, 'only valid registered videos may reach the OS');
     const player = fs.readFileSync(path.join(__dirname, '../src/components/Player.jsx'), 'utf8');
     const preload = fs.readFileSync(path.join(__dirname, '../preload.js'), 'utf8');
-    assert.match(player, /openEpisodeExternal\(activeSeriesId, currentIndex\)/);
+    assert.match(player, /openEpisodeExternal\(activeSeriesId, currentIndex, String\(current\.vid\)\)/);
     assert.match(preload, /openEpisodeExternal:.*invoke\('open-episode-external'/);
     console.log('PASS external player: registered complete MP4 only; wrong episode, pending, conflicts, missing file, executable and symlink rejected; OS errors and UI bridge');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }

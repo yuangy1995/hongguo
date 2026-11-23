@@ -38,12 +38,12 @@ function createAccountController({
   const canSync = () => !syncStopped && (progressSync?.canSync?.() ?? true);
 
   function makePosition(series, record, metadata, accountId) {
-    const episode = series.episodes.find(item => item.vid_index === record.vid_index);
+    const episode = series.episodes.find(item => record.episode_id ? String(item.vid) === record.episode_id : item.vid_index === record.vid_index);
     if (!accountId || !/^\d{6,30}$/.test(String(series.series_id)) || !episode || episode.locked
       || !Number.isFinite(metadata?.duration) || metadata.duration <= 0 || record.currentTime < 0) return null;
     return {
       accountId, series_id: String(series.series_id), series_title: series.series_title,
-      episode_id: String(episode.vid), vid_index: record.vid_index, currentTime: record.currentTime,
+      episode_id: String(episode.vid), vid_index: Number(episode.vid_index), currentTime: record.currentTime,
       updatedAt: record.updatedAt, duration: metadata.duration, total: series.episodes.length,
     };
   }
@@ -408,7 +408,7 @@ function createAccountController({
         }
       }
       const episode = entry.episodes.find(item => String(item.vid) === String(row.episode_id))
-        || (options?.merged !== true && row.vid_index > 0 ? entry.episodes.find(item => Number(item.vid_index) === row.vid_index) : null);
+        || (!row.episode_id && options?.merged !== true && row.vid_index > 0 ? entry.episodes.find(item => Number(item.vid_index) === row.vid_index) : null);
       if (!episode) return { success: false, error: 'APP 进度对应的分集已变化，请先在 APP 中重新打开这部剧' };
       if (episode.locked) return { success: false, error: 'APP 进度对应的分集暂不可播放' };
       if (entry.dismissed) {
@@ -417,6 +417,7 @@ function createAccountController({
         saveSeriesRegistry();
       }
       resumePositions.set(sid, {
+        episode_id: String(episode.vid),
         vid_index: Number(episode.vid_index),
         currentTime: Math.max(0, Number(row.currentTime) || 0),
         updatedAt: Number(row.updatedAt) || Date.now(),

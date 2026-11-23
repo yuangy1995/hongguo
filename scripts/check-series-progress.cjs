@@ -83,20 +83,23 @@ function series() {
   h.set('seriesRegistry', series());
   h.set('downloadTasks', [one]);
 
-  let readdirCalls = 0;
-  const realReaddir = h.fsPromises.readdir;
-  h.fsPromises.readdir = async (...args) => { readdirCalls++; return realReaddir(...args); };
+  let fileChecks = 0;
+  const realLstat = h.fsPromises.lstat;
+  h.fsPromises.lstat = async (file, ...args) => {
+    if (file === one.savePath) fileChecks++;
+    return realLstat(file, ...args);
+  };
 
   const initial = await h.handlers['get-series-progress']({});
   assert.equal(initial.progress.S.completed, 0);
   assert.equal(initial.progress.S.total, 2);
   assert.equal(initial.pending.join(','), 'S');
-  assert.equal(readdirCalls, 0, 'initial badge load must not touch disk');
+  assert.equal(fileChecks, 0, 'initial badge load must not touch disk');
 
   const warmed = await h.handlers['warm-series-progress']({}, 'S');
   assert.equal(warmed.progress.completed, 1);
   assert.equal(warmed.progress.total, 2);
-  assert.equal(readdirCalls, 1);
+  assert.equal(fileChecks, 1);
   const cached = await h.handlers['get-series-progress']({});
   assert.equal(cached.progress.S.completed, 1);
   assert.equal(cached.progress.S.total, 2);
@@ -106,7 +109,7 @@ function series() {
   assert.equal(detail.success, true);
   assert.equal(detail.data.completedCount, 1);
   assert.match(detail.data.episodes[0].fileUrl, /^hongguo-local:\/\/f\//);
-  assert.equal(readdirCalls, 2, 'opening episode details must revalidate the filesystem');
+  assert.equal(fileChecks, 2, 'opening episode details must revalidate the filesystem');
 
   h.run('saveDownloadTasks()');
   const invalidated = await h.handlers['get-series-progress']({});
@@ -131,12 +134,15 @@ function series() {
   fs.unlinkSync(heldTask.savePath);
   delete heldTask.fileIdentity;
   const releases = [];
-  held.fsPromises.readdir = () => new Promise(resolve => { releases.push(resolve); });
+  const originalLstat = held.fsPromises.lstat;
+  held.fsPromises.lstat = (file, ...args) => file === heldTask.savePath
+    ? new Promise(resolve => { releases.push(() => resolve(originalLstat(file, ...args))); })
+    : originalLstat(file, ...args);
   const pending = held.handlers['warm-series-progress']({}, 'S');
   let ticked = false;
   await new Promise(resolve => setTimeout(() => { ticked = true; resolve(); }, 20));
   assert.equal(ticked, true, 'a slow network directory must yield the main event loop');
-  assert.equal(releases.length, 1, 'the scan must reach the held readdir');
+  assert.equal(releases.length, 1, 'the scan must reach the held file identity check');
 
   fs.writeFileSync(heldTask.savePath, Buffer.alloc(120000, 2));
   heldTask.fileIdentity = req('./src/native/file-identity').readFileIdentity(heldTask.savePath);

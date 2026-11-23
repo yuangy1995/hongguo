@@ -296,9 +296,9 @@ test('official season lookup can serve a history entry without a local archive',
   let handler;
   vm.runInNewContext(handlerSource, {
     ipcMain: { handle: (_, fn) => { handler = fn; } },
-    visibleSeries: () => [],
+    visibleSeries: () => [], console: { warn() {} },
     watchHistory: require('../src/native/watch-history'),
-    fetchHongguoSeriesSeasons: async id => { calls.push(id); return seasons(id); },
+    loadOfficialSeasons: async id => { calls.push(id); return seasons(id); },
   });
   const id = '7500000000000000001';
   const result = await handler({}, id);
@@ -307,20 +307,19 @@ test('official season lookup can serve a history entry without a local archive',
   assert.equal((await handler({}, Number(id))).unsupported, true);
   assert.equal((await handler({}, 'hema:1')).unsupported, true);
   assert.deepEqual(calls, [id]);
-  seasons = () => null;
-  const unavailable = await handler({}, id);
-  assert.equal(unavailable.unavailable, true);
-  assert.equal(unavailable.results.length, 0);
-  assert.equal(unavailable.partial, undefined);
+  seasons = () => { throw new Error('SERVICE_ERROR'); };
+  const uncertain = await handler({}, id);
+  assert.equal(uncertain.results.length, 0);
+  assert.equal(uncertain.partial, true);
 });
 
-for (const unavailable of [false, true]) test(`history offers a retry only on lookup failure, unavailable=${unavailable}`, async () => {
+test('history offers a retry on lookup failure, and handles a fresh empty result', async () => {
   let attempts = 0;
   const ui = mountHistoryNavigation({
     getWatchHistory: async () => ({ success: true, results: [{ series_id: '7500000000000000001', series_title: '单独一部剧' }] }),
     findSeriesSeasons: async () => {
       if (++attempts === 1) return { official: true, partial: true, results: [] };
-      return { official: true, results: [], unavailable };
+      return { official: true, results: [] };
     },
   });
   await ui.flush();
@@ -330,7 +329,7 @@ for (const unavailable of [false, true]) test(`history offers a retry only on lo
   assert.ok(node('系列剧查询失败。'));
   await node('重新查找').props.onClick();
   await ui.flush();
-  assert.ok(node(unavailable ? '暂无系列剧信息。' : '暂未找到其他季。'));
+  assert.ok(node('暂未找到其他季。'));
   assert.equal(node('系列剧查询失败。'), undefined);
   assert.equal(node('重新查找'), undefined);
   ui.unmount();

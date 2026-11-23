@@ -15,7 +15,7 @@ store.init(dataFile);
 const sid = '1000001';
 const series = (total = 3) => ({ series_id: sid, series_title: '春日来信', total,
   episodes: Array.from({ length: total }, (_, i) => ({ vid: `video${i + 1}`, vid_index: i + 1 })) });
-const sequel = { series_id: '1000002', series_title: '春日来信第二季' };
+const sequel = { series_id: '1000002', series_title: '冬夜回信' };
 const clone = value => JSON.parse(JSON.stringify(value));
 const app = new EventEmitter();
 Object.assign(app, { getVersion: () => 'test', getPath: () => root,
@@ -38,7 +38,12 @@ const hongguoSearch = { searchHongguo: async keyword => {
 } };
 const context = vm.createContext({ require: name => name === 'electron' ? electron
   : name === './src/native/hongguo' ? native : name === './src/store' ? store
-    : name === './src/native/hongguo-search' ? hongguoSearch
+    : name === './src/native/hongguo-series-seasons' ? { fetchHongguoSeriesSeasons: async () => {
+      const result = await search();
+      if (!result.success) throw new Error(result.error);
+      return [{ series_id: sid, series_title: '春日来信', season: 1, playable: true },
+        ...result.results.map((entry, index) => ({ ...entry, season: index + 2, playable: true }))];
+    } } : name === './src/native/hongguo-search' ? hongguoSearch
       : name === './src/native/hongguo-app-search' ? { searchApp: async () => { throw new Error('fixture App search unavailable'); } }
       : name === './src/native/hongguo-app-new' ? { searchNewReleasesDetailed: async () => ({ results: [], partial: false }) } : req(name),
   __dirname: path.dirname(file), process, Buffer, URL, Response, Request, Headers, AbortController,
@@ -88,11 +93,26 @@ async function check(name, fn) {
     assert.equal(history[0].vid_index, 2);
     assert.equal(history[0].currentTime, 17.5);
   });
+  await check('same episode ID resumes at its new ordinal after catalogue insertion', async () => {
+    await ipc('save-playback-position', sid, 2, 17, { episodeId: 'video2' });
+    fetchDetail = async () => ({ ...series(4), episodes: [
+      { vid: 'inserted', vid_index: 1 },
+      ...series().episodes.map(episode => ({ ...episode, vid_index: episode.vid_index + 1 })),
+    ] });
+    await ipc('search-resolve', sid);
+    const row = (await rows())[0];
+    assert.equal(row.episode_id, 'video2');
+    assert.equal(row.vid_index, 3);
+    assert.equal(row.currentTime, 17);
+    await ipc('save-playback-position', sid, 2, 19, { episodeId: 'video2' });
+    assert.equal((await ipc('get-playback-position', sid)).vid_index, 3);
+  });
   await check('removed history remains absent after retained player unload until fresh playback', async () => {
     const { mount } = require('./check-player-resume.cjs');
     for (const replay of [false, true]) {
       const ui = mount({ local: true, seriesId: sid, apiOverrides: {
-        savePlaybackPosition: (...args) => ipc('save-playback-position', ...args),
+        savePlaybackPosition: (id, index, time, metadata) => ipc('save-playback-position', id, index, time,
+          { ...metadata, episodeId: `video${index}` }),
       } });
       try {
         await ui.flush(); ui.metadata(); ui.media.currentTime = 42;

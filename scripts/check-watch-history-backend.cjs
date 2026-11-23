@@ -43,7 +43,7 @@ function load(sid, { partial = false } = {}) {
   return { queries, run: () => handlers['refresh-watch-history']({}), record: () => playback[sid], cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 
-for (const [sourceName, sid] of [['hongguo', '1000002'], ['xifan', 'xifan:1:2'], ['hema', 'hema:2']]) test(`background ${sourceName} refresh fills next missing season with bounded same-source searches`, async () => {
+for (const [sourceName, sid] of [['xifan', 'xifan:1:2'], ['hema', 'hema:2']]) test(`background ${sourceName} refresh fills next missing season with bounded same-source searches`, async () => {
   const h = load(sid);
   try {
     const result = await h.run();
@@ -62,7 +62,7 @@ for (const sid of ['custom:fixture:2', 'unknown:2']) test(`background refresh sk
 });
 
 test('partial background sequel lookup keeps local candidates and exposes incomplete check', async () => {
-  const h = load('1000002', { partial: true });
+  const h = load('hema:2', { partial: true });
   try {
     const result = await h.run(); assert.equal(result.checked, 1); assert.equal(result.failed, 1);
     assert.match(h.record().lastCheckError, /续作检查.*未完成/);

@@ -16,22 +16,28 @@ function listHistory(series, playback, showSequels = true) {
   }
   return watched.map(item => {
     const record = playback[item.series_id];
-    const sequels = showSequels && Array.isArray(record.sequels)
-      ? findSequels(item, record.sequels, latestByFamily.get(familyKey(item)) || 0) : [];
+    const candidates = sourceOf(String(item.series_id)) === 'hongguo' ? item.officialSeasons : record.sequels;
+    const sequels = showSequels && Array.isArray(candidates)
+      ? findSequels(item, candidates, latestByFamily.get(familyKey(item)) || 0) : [];
     const confirmedIds = new Set(sequels.map(candidate => String(candidate.series_id)));
     const seen = new Set(record.seenSequelIds || []);
     const unreadSequelIds = sequels.filter(candidate => !seen.has(candidate.series_id)).map(candidate => candidate.series_id);
     const total = Math.max(totalEpisodes(item), record.knownTotal || 0);
     const family = familyKey(item), season = seasonOf(item);
+    const episode = playbackEpisode(item, record);
+    const finalEpisode = item.episodes?.find(entry => Number(entry.vid_index) === total);
     return {
       series_id: item.series_id, series_title: item.series_title, cover: item.cover || '',
-      total, completed: total > 0 && Number.isInteger(record.completedEpisode) && record.completedEpisode >= total,
-      vid_index: record.vid_index, currentTime: record.currentTime, updatedAt: record.updatedAt,
+      total, completed: total > 0 && (record.completedEpisodeId
+        ? !!finalEpisode && String(finalEpisode.vid) === record.completedEpisodeId
+        : record.completedEpisode === total),
+      vid_index: episode?.vid_index || record.vid_index, episode_id: record.episode_id || episode?.vid || '',
+      currentTime: record.currentTime, updatedAt: record.updatedAt,
       unreadEpisodes: record.unreadEpisodes || 0, sequels, unreadSequelIds,
-      similarSeries: showSequels ? findSimilarSeries(item, [...(Array.isArray(record.similarSeries) ? record.similarSeries : []), ...watched])
+      similarSeries: showSequels ? findSimilarSeries(item, [...(record.similarSeries || []), ...(record.sequels || []), ...watched])
         .filter(candidate => !confirmedIds.has(candidate.series_id)) : [],
       hasUpdates: record.unreadEpisodes > 0 || unreadSequelIds.length > 0,
-      family, season, isLatestSeason: !!family && season === latestByFamily.get(family),
+      family, season, isLatestSeason: !family || season === latestByFamily.get(family),
       hasHigherSeason: !!family && season < latestByFamily.get(family),
       lastCheckedAt: record.lastCheckedAt || 0, lastCheckError: record.lastCheckError || '',
       lastEpisodeCheckError: record.lastEpisodeCheckError || '', lastSequelCheckError: record.lastSequelCheckError || '',
@@ -39,24 +45,42 @@ function listHistory(series, playback, showSequels = true) {
   }).sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
+function playbackEpisode(series, record) {
+  return series?.episodes?.find(episode => record.episode_id
+    ? String(episode.vid) === record.episode_id : Number(episode.vid_index) === record.vid_index);
+}
+
+function bindPlaybackEpisodes(record, series) {
+  const episode = playbackEpisode(series, record);
+  const completed = !record.completedEpisodeId && Number.isInteger(record.completedEpisode)
+    ? playbackEpisode(series, { vid_index: record.completedEpisode }) : null;
+  return { ...record,
+    ...(episode?.vid && !record.episode_id ? { episode_id: String(episode.vid) } : {}),
+    ...(completed?.vid ? { completedEpisodeId: String(completed.vid) } : {}) };
+}
+
 function recordPlayback(previous, series, index, time, now = Date.now(), metadata = {}) {
   if (!Number.isInteger(index) || index < 1 || !Number.isFinite(time) || time < 0) throw new Error('无效的播放进度');
+  const episodeId = typeof metadata?.episodeId === 'string' ? metadata.episodeId : '';
+  const episode = playbackEpisode(series, { episode_id: episodeId, vid_index: index });
+  if (episodeId && (!episode || episode.locked)) throw new Error('播放分集已变化，请重新打开剧集');
+  const currentIndex = Number(episode?.vid_index) || index;
   const baseline = previous?.knownTotal ?? totalEpisodes(series);
   const duration = metadata?.duration;
   const completed = metadata?.ended === true && Number.isFinite(duration) && duration > 0
     && time >= duration - Math.min(1, duration * 0.01) && time <= duration + 1
-    && index === Math.max(totalEpisodes(series), baseline);
-  return { ...previous, vid_index: index, currentTime: time, updatedAt: now, watched: true,
-    ...(completed ? { completedEpisode: Math.max(Number.isInteger(previous?.completedEpisode) ? previous.completedEpisode : 0, index) } : {}),
+    && currentIndex === Math.max(totalEpisodes(series), baseline, Number(previous?.completedEpisode) || 0);
+  return { ...previous, vid_index: currentIndex, episode_id: String(episode?.vid || ''),
+    currentTime: time, updatedAt: now, watched: true,
+    ...(completed ? { completedEpisode: currentIndex, completedEpisodeId: String(episode?.vid || '') } : {}),
     knownTotal: baseline, acknowledgedTotal: previous?.acknowledgedTotal ?? baseline };
 }
 
 function applyEpisodeUpdate(record, oldSeries, freshSeries, now = Date.now()) {
-  // Never roll back a newer cached episode list just because a slower refresh returned less.
   const baseline = Math.max(Number(record.knownTotal) || 0, totalEpisodes(oldSeries));
   const knownTotal = Math.max(baseline, totalEpisodes(freshSeries));
   const acknowledgedTotal = record.acknowledgedTotal ?? baseline;
-  return { ...record, knownTotal, acknowledgedTotal,
+  return { ...bindPlaybackEpisodes(record, oldSeries), knownTotal, acknowledgedTotal,
     unreadEpisodes: Math.max(0, knownTotal - acknowledgedTotal), lastCheckedAt: now,
     lastEpisodeCheckError: '', lastCheckError: record.lastSequelCheckError || '' };
 }
@@ -89,20 +113,52 @@ function sourceOf(id) {
   return null;
 }
 
+function officialMember(series) {
+  return series?.officialSeasons?.find(item => item.series_id === String(series.series_id));
+}
+
+function setOfficialSeasons(registry, seriesId, members) {
+  if (!members.some(member => member.series_id === seriesId)) return false;
+  const ids = new Set(members.map(member => member.series_id));
+  let changed = false;
+  for (const entry of registry) {
+    if (!ids.has(String(entry.series_id)) || JSON.stringify(entry.officialSeasons) === JSON.stringify(members)) continue;
+    entry.officialSeasons = members;
+    changed = true;
+  }
+  return changed;
+}
+
 function familyKey(series) {
-  const parsed = seasonTitle(series?.series_title);
   const source = sourceOf(String(series?.series_id || ''));
+  if (source === 'hongguo') {
+    if (!officialMember(series)?.season) return '';
+    const first = [...series.officialSeasons].filter(member => member.season)
+      .sort((a, b) => a.season - b.season || a.series_id.localeCompare(b.series_id))[0];
+    return first ? `hongguo-series:${first.series_id}` : '';
+  }
+  const parsed = seasonTitle(series?.series_title);
   if (!source || !parsed.base || parsed.invalid) return '';
   return `${source}\u0000${parsed.base}`;
 }
 
 function seasonOf(series) {
+  if (sourceOf(String(series?.series_id || '')) === 'hongguo') return officialMember(series)?.season || 0;
   const parsed = seasonTitle(series?.series_title);
   return parsed.invalid ? 0 : parsed.season;
 }
 
-// shortcut: independent sequels have no authoritative relation; only exact base titles with higher explicit seasons qualify.
 function findSequels(series, candidates, afterSeason = 0) {
+  if (sourceOf(String(series.series_id)) !== 'hongguo') return findTitleSequels(series, candidates, afterSeason);
+  const current = officialMember(series);
+  if (!current?.season) return [];
+  const candidateIds = new Set(candidates.map(item => String(item.series_id)));
+  return series.officialSeasons.filter(member => member.playable && candidateIds.has(member.series_id)
+    && member.season > Math.max(current.season, afterSeason))
+    .sort((a, b) => a.season - b.season).slice(0, 10);
+}
+
+function findTitleSequels(series, candidates, afterSeason = 0) {
   const current = seasonTitle(series.series_title);
   const source = sourceOf(String(series.series_id));
   if (!current.base || current.invalid || !source) return [];
@@ -138,15 +194,16 @@ function similarTitles(left, right) {
 
 function findSimilarSeries(series, candidates) {
   const current = seasonTitle(series?.series_title), family = familyKey(series);
-  if (!family) return [];
+  const source = sourceOf(String(series?.series_id || ''));
+  if (!source || !current.base || current.invalid) return [];
   const normalize = title => title.replace(/[\p{P}\p{S}]/gu, '').replace(/[零〇一二三四五六七八九十百两\d]+/g, '#');
-  const title = normalize(current.base), source = sourceOf(String(series.series_id));
+  const title = normalize(current.base);
   const seen = new Set([String(series.series_id)]), results = [];
   const latest = new Map(candidates.map(candidate => [String(candidate?.series_id || ''), candidate]));
   for (const candidate of latest.values()) {
     const id = String(candidate?.series_id || ''), next = seasonTitle(candidate?.series_title);
-    if (seen.has(id) || sourceOf(id) !== source || next.invalid || familyKey(candidate) === family) continue;
-    if (!similarTitles(title, normalize(next.base))) continue;
+    if (seen.has(id) || sourceOf(id) !== source || next.invalid || (family && familyKey(candidate) === family) || series.officialSeasons?.some(member => member.series_id === id)) continue;
+    if (title !== normalize(next.base) && !similarTitles(title, normalize(next.base))) continue;
     seen.add(id);
     results.push({ series_id: id, series_title: String(candidate.series_title) });
     if (results.length === 5) break;
@@ -154,14 +211,14 @@ function findSimilarSeries(series, candidates) {
   return results;
 }
 
-function acknowledge(record, snapshot) {
+function acknowledge(record, snapshot, sequels = record.sequels || []) {
   const knownTotal = record.knownTotal || 0;
   const visibleTotal = snapshot ? Number(snapshot.total) || 0 : knownTotal;
   const acknowledgedTotal = Math.max(record.acknowledgedTotal || 0, Math.min(knownTotal, visibleTotal));
-  const knownIds = new Set((record.sequels || []).map(item => item.series_id));
+  const knownIds = new Set(sequels.map(item => item.series_id));
   const visibleIds = snapshot ? (Array.isArray(snapshot.sequelIds) ? snapshot.sequelIds : []) : [...knownIds];
   return { ...record, acknowledgedTotal, unreadEpisodes: Math.max(0, knownTotal - acknowledgedTotal),
     seenSequelIds: [...new Set([...(record.seenSequelIds || []), ...visibleIds.filter(id => knownIds.has(id))])] };
 }
 
-module.exports = { listHistory, recordPlayback, applyEpisodeUpdate, seasonTitle, sourceOf, familyKey, seasonOf, findSequels, findSimilarSeries, sequelKeyword, acknowledge };
+module.exports = { listHistory, recordPlayback, applyEpisodeUpdate, bindPlaybackEpisodes, playbackEpisode, seasonTitle, sourceOf, familyKey, seasonOf, setOfficialSeasons, findSequels, findTitleSequels, findSimilarSeries, sequelKeyword, acknowledge };

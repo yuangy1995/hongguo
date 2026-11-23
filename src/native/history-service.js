@@ -22,6 +22,7 @@ function createHistoryService({
   upsertSeriesRegistry,
   saveSeriesRegistry,
   searchAtSource,
+  loadOfficialSeasons,
   send,
   safeErrorText,
   onNotificationClick,
@@ -98,6 +99,7 @@ function createHistoryService({
   }
 
   function sequelResult(series, end, retryFailed = false) {
+    const official = watchHistory.sourceOf(String(series.series_id)) === 'hongguo';
     const key = watchHistory.familyKey(series) || `series:${series.series_id}`;
     const now = Date.now();
     let cached = sequelCache.get(key);
@@ -108,12 +110,17 @@ function createHistoryService({
     if (cached && cached.expires > now) return Promise.resolve(cached.result);
     if (sequelPending.has(key)) return sequelPending.get(key);
     const task = (async () => {
-      const searchDeadline = Math.min(end || deadline(SEQUEL_TIMEOUT), deadline(SEQUEL_TIMEOUT));
+      const limit = official ? 19000 : SEQUEL_TIMEOUT;
+      const searchDeadline = Math.min(end || deadline(limit), deadline(limit));
       const registry = getSeriesRegistry().filter(item => !item.forgotten);
-      const local = watchHistory.findSequels(series, registry);
+      const local = watchHistory.findSequels(series, official ? (series.officialSeasons || []) : registry);
       let result;
       try {
-        result = await timeout(seriesSearch.findSeriesSequels(series, registry,
+        if (official) {
+          const candidates = await timeout(loadOfficialSeasons(String(series.series_id)),
+            Math.max(1, searchDeadline - Date.now()), '官方系列剧查询超时');
+          result = { success: true, candidates };
+        } else result = await timeout(seriesSearch.findSeriesSequels(series, registry,
           (keyword, call) => searchAtSource(keyword, {
             source: watchHistory.sourceOf(String(series.series_id)), deadline: searchDeadline, ...(call || {}),
           }), { deadline: searchDeadline }), Math.max(1000, searchDeadline - Date.now()), '续作搜索超时');
@@ -129,7 +136,7 @@ function createHistoryService({
     return task;
   }
 
-  function context(items, allRows, force, end, retryFailed = false) {
+  function context(items, allRows, force, end, retryFailed = false, notifiedSequelIds = new Set()) {
     const family = familyRows(allRows, items[0]);
     const latest = family.reduce((best, row) => watchHistory.seasonOf(row) > watchHistory.seasonOf(best) ? row : best, family[0]);
     const sequelDue = new Set();
@@ -142,7 +149,7 @@ function createHistoryService({
     const latestSeries = getSeriesRegistry().find(item => String(item.series_id) === String(latest.series_id));
     const sequelPromise = sequelDue.size && latestSeries && watchHistory.sourceOf(String(latestSeries.series_id))
       ? sequelResult(latestSeries, end, retryFailed) : null;
-    return { sequelDue, sequelPromise, deadline: end, notifiedSequelIds: new Set() };
+    return { sequelDue, sequelPromise, deadline: end, notifiedSequelIds };
   }
 
   async function checkRow(row, runContext) {
@@ -178,14 +185,14 @@ function createHistoryService({
           }
           next.lastCheckError = next.lastSequelCheckError ? `续作检查未完成：${next.lastSequelCheckError}` : '';
           newEpisodes = next.knownTotal > (previousRecord.knownTotal ?? currentSeries.total ?? currentSeries.episodes?.length ?? 0);
-          knownSequels = new Set((previousRecord.sequels || []).map(item => item.series_id));
+          knownSequels = new Set((previousRecord.sequels || []).filter(item => watchHistory.sourceOf(sid) !== 'hongguo' || item.playable === true).map(item => item.series_id));
           rowCandidates = sequelResponse
             ? watchHistory.findSequels(currentSeries, sequelResponse.candidates || sequelResponse.results || [], latestSeason)
             : [];
           if (fresh.episodes.length >= (currentSeries.episodes?.length || 0)) {
             const wasDismissed = currentSeries.dismissed === true;
             const wasForgotten = currentSeries.forgotten === true;
-            upsertSeriesRegistry(fresh);
+            upsertSeriesRegistry(fresh, { bindPlayback: false });
             if (wasDismissed) {
               Object.assign(getSeriesRegistry().find(item => String(item.series_id) === sid), { dismissed: true, forgotten: wasForgotten });
               saveSeriesRegistry();
@@ -203,7 +210,7 @@ function createHistoryService({
           try {
             const title = currentSeries.series_title || fresh.series_title || '短剧';
             const notification = new Notification({ title: `${title} 有更新`,
-              body: newEpisodes ? `已更新至 ${next.knownTotal} 集，打开观看记录继续看。` : '发现疑似新一季，打开观看记录查看。' });
+              body: newEpisodes ? `已更新至 ${next.knownTotal} 集，打开观看记录继续看。` : watchHistory.sourceOf(sid) === 'hongguo' ? '官方系列剧有新一季，打开观看记录查看。' : '发现疑似新一季，打开观看记录查看。' });
             notification.on('click', onNotificationClick);
             notification.show();
           } catch (error) { console.warn('[History] 系统通知不可用:', error.message); }
@@ -243,11 +250,12 @@ function createHistoryService({
       });
       const end = deadline(BATCH_BUDGET);
       const processed = new Set();
+      const notifiedSequelIds = new Set();
       let checked = 0, failed = 0, skipped = 0;
       send('watch-history-progress', { phase: 'start', total: eligible.length, checked, failed, current: '', remaining: eligible.length });
       await runPool(grouped, GROUP_CONCURRENCY, async group => {
         if (Date.now() >= end) return;
-        const groupContext = context(group, allRows, selected.force, end, selected.force);
+        const groupContext = context(group, allRows, selected.force, end, selected.force, notifiedSequelIds);
         await runPool(group, EPISODE_CONCURRENCY, async row => {
           const result = await checkRow(row, groupContext);
           processed.add(String(row.series_id));
@@ -298,7 +306,10 @@ function createHistoryService({
     try {
       const sid = String(seriesId);
       store.updatePlayback(map => {
-        if (map[sid]) map[sid] = watchHistory.acknowledge(map[sid], snapshot);
+        if (!map[sid]) return;
+        const series = getSeriesRegistry().find(item => String(item.series_id) === sid);
+        const sequels = watchHistory.sourceOf(sid) === 'hongguo' ? (series?.officialSeasons || []) : undefined;
+        map[sid] = watchHistory.acknowledge(map[sid], snapshot, sequels);
       });
       send('watch-history-updated', {});
       return { success: true };

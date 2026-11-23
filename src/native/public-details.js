@@ -20,10 +20,12 @@ function reviews(value, max = 50) {
 
 function parsePublicDetails(html, seriesId, vid = '', options = {}) {
   const router = readRouterData(html);
-  const data = Object.values(router.loaderData || {}).find(value => value?.seriesDetail && value.isSuccess !== false);
-  if (!data) throw new Error('来源页面未返回公开剧集信息');
-  if (String(data.seriesDetail.series_id) !== seriesId) throw new Error('来源页面剧集不匹配');
-  if (vid && String(data.vid) !== vid) throw new Error('来源页面分集不匹配');
+  const blocks = Object.values(router.loaderData || {}).filter(value => value?.seriesDetail && value.isSuccess !== false);
+  if (!blocks.length) throw new Error('来源页面未返回公开剧集信息');
+  const series = blocks.filter(value => String(value.seriesDetail.series_id_str || value.seriesDetail.series_id) === seriesId);
+  if (!series.length) throw new Error('来源页面剧集不匹配');
+  const data = vid ? series.find(value => String(value.vid_str || value.vid) === vid) : series[0];
+  if (!data) throw new Error('来源页面分集不匹配');
   const social = data.seriesSocialInfo || {};
   return { success: true, series_id: seriesId, episode_id: vid || null,
     ...publicMetadata(data.seriesDetail),
