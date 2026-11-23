@@ -1857,19 +1857,21 @@ ipcMain.handle('find-series-sequels', async (_event, seriesId, options = {}) => 
 });
 
 ipcMain.handle('find-series-seasons', async (_event, seriesId, options = {}) => {
-  const entry = visibleSeries().find(item => String(item.series_id) === String(seriesId));
-  if (!entry) return { unsupported: true, results: [] };
-  const source = watchHistory.sourceOf(String(entry.series_id));
+  const sid = typeof seriesId === 'string' || Number.isSafeInteger(seriesId) ? String(seriesId) : '';
+  const source = watchHistory.sourceOf(sid);
   if (source === 'hongguo') {
     if (options?.localOnly === true) return { official: true, results: [] };
     try {
-      const results = await fetchHongguoSeriesSeasons(String(entry.series_id));
+      const results = await fetchHongguoSeriesSeasons(sid);
+      if (results === null) return { official: true, results: [], unavailable: true };
       return { official: true, results };
     } catch (error) {
       console.warn('[Series] 官方系列剧读取失败:', error.code || error.message);
-      return { official: true, results: [], partial: true, error: '官方系列剧暂时无法读取，请稍后重试。' };
+      return { official: true, results: [], partial: true };
     }
   }
+  const entry = visibleSeries().find(item => String(item.series_id) === sid);
+  if (!entry) return { unsupported: true, results: [] };
   const deadline = Date.now() + 22000;
   return seriesSearch.findSeriesSeasons(entry, visibleSeries(),
     (kw, call) => searchAtSource(kw, { deadline, ...call, source }),

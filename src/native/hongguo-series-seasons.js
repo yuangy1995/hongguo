@@ -10,7 +10,10 @@ const flag = value => [true, 1, '1', 'true'].includes(value);
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 
 function parseSeriesSeasons(payload) {
+  // The season endpoint can return this envelope for titles without series information.
+  if (payload?.code === 101116 && payload.message === 'SERVICE_ERROR' && payload.data === null) return null;
   if (payload?.code !== 0 && payload?.code !== '0') throw new Error('红果未确认系列剧查询，请稍后重试。');
+  if (payload.data == null) return [];
   if (!Array.isArray(payload.data)) throw new Error('官方系列剧列表格式已变化。');
   const seasons = new Map();
   for (const block of payload.data) {

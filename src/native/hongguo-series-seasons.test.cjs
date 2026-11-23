@@ -38,8 +38,12 @@ test('the official selector looks up the exact ID and preserves provider order a
   assert.equal(cards[2].reservationId, reservationId);
 });
 
-test('the selector distinguishes an official empty list from an error', () => {
-  assert.deepEqual(parseSeriesSeasons({ code: 0, data: [] }), []);
+test('the selector distinguishes missing series information, an empty list, and errors', () => {
+  for (const payload of [{ code: 0, data: [] }, { code: 0, data: null }, { code: '0' }]) {
+    assert.deepEqual(parseSeriesSeasons(payload), []);
+  }
+  assert.equal(parseSeriesSeasons({ code: 101116, message: 'SERVICE_ERROR', data: null }), null);
   assert.throws(() => parseSeriesSeasons({ code: 0, data: {} }), /格式/);
-  assert.throws(() => parseSeriesSeasons({ code: 7, data: [] }), /未确认/);
+  assert.throws(() => parseSeriesSeasons({ code: 101116, message: 'SERVICE_ERROR', data: [] }), /未确认/);
+  assert.throws(() => parseSeriesSeasons({ code: 101117, message: 'SERVICE_ERROR', data: null }), /未确认/);
 });

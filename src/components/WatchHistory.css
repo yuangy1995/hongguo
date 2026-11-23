@@ -33,6 +33,14 @@
 .history-time { font-size: 12px; color: var(--text-secondary); }
 .history-update { font-size: 12px; font-weight: 600; color: var(--accent); }
 .history-action { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-size: 13px; white-space: nowrap; }
+.history-series { align-self: flex-start; }
+.desktop-mist .history-seasons-menu[popover] { width: min(380px, calc(100vw - 24px)); }
+.history-seasons-menu p { margin: 0 0 8px; color: var(--text-secondary); }
+.history-seasons-menu p:last-child { margin-bottom: 0; }
+.history-seasons-list { display: grid; gap: 5px; }
+.history-seasons-list > .btn { display: grid; justify-items: start; text-align: start; white-space: normal; overflow-wrap: anywhere; }
+.history-seasons-list small { color: var(--text-secondary); }
+.history-seasons-list [aria-current="true"] { opacity: 1; color: var(--accent-text); background: var(--accent-soft); }
 .history-sequels { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 8px 4px 92px; color: var(--text-secondary); }
 .history-check-error { margin: 12px 8px 0 92px; color: var(--text-secondary); overflow-wrap: anywhere; }
 .history-error { display: flex; gap: 16px; justify-content: space-between; align-items: center; color: var(--danger); margin: 12px 0 20px; }

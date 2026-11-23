@@ -884,6 +884,22 @@ async function mount(file, api, props = {}, storage = null, exportName = 'defaul
     assert.match(ui.text(), /部分查询未完成/);
     ui.unmount();
   });
+  await test('the official season picker offers a retry on network failure and hides it when season information is unavailable', async () => {
+    let attempts = 0;
+    const ui = await mount('SeasonPicker', {
+      findSeriesSeasons: async () => {
+        if (++attempts === 1) throw new Error('NETWORK_ERROR');
+        return { official: true, results: [], unavailable: true };
+      },
+    }, { seriesId: '7550000000000000006', active: true, seriesList: [] });
+    await ui.flush();
+    assert.match(ui.text(), /系列剧查询失败/);
+    ui.button('重新查找').props.onClick();
+    await ui.flush();
+    assert.match(ui.text(), /暂无系列剧信息/);
+    assert.equal(ui.button('重新查找'), undefined);
+    ui.unmount();
+  });
   await test('the official season picker exposes a separate reservation action during refresh and shows confirmed state', async () => {
     const current = { season: 6, series_id: '7550000000000000006', series_title: '当前剧集', playable: true };
     const next = { season: 7, series_id: '7550000000000000007', series_title: '下一季', playable: false, upcoming: true, reservationId: '7550000000000000019' };

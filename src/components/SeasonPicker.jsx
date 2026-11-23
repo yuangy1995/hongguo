@@ -62,9 +62,10 @@ export default function SeasonPicker({ seriesId, active, seriesList, onSwitch, a
         }
         const result = await lookup(seriesId);
         if (cancelled) return;
-        const results = result.partial ? (hongguo ? known : mergeSeasons(known, result.results)) : result.results;
+        const incomplete = result.partial || result.unavailable;
+        const results = incomplete ? (hongguo ? known : mergeSeasons(known, result.results)) : result.results;
         const complete = { ...result, results, seriesId, attempt, time: Date.now() };
-        if (!result.unsupported) cache.current = complete;
+        if (!result.unsupported && !result.unavailable) cache.current = complete;
         setSnapshot(complete);
       } catch {
         if (!cancelled) setSnapshot(current => ({ ...current, pending: false, partial: true }));
@@ -158,13 +159,14 @@ export default function SeasonPicker({ seriesId, active, seriesList, onSwitch, a
       </div>
       <div className="player-season-feedback">
         {(!current || current.pending) && <p role="status">{t(hongguo ? "正在读取官方系列剧…" : "正在查找各季…")}</p>}
-        {current?.partial && <p role="status">{t(current.error || (hongguo ? "官方系列剧暂时无法读取，请稍后重试。" : "部分查询未完成，可稍后重试。"))}</p>}
-        {current && !current.pending && !current.partial && !current.results.some(item => item.series_id !== seriesId) && <p role="status">{t("暂未找到其他季。")}</p>}
+        {current?.partial && <p role="status">{t(hongguo ? "系列剧查询失败。" : current.error || "部分查询未完成，可稍后重试。")}</p>}
+        {current && !current.pending && !current.partial && !current.results.some(item => item.series_id !== seriesId) &&
+          <p role="status">{t(current.unavailable ? "暂无系列剧信息。" : "暂未找到其他季。")}</p>}
         {supportsReservations && accountLibrary?.signedIn && pendingReservations?.error && !reservations?.loaded &&
           <p role="status">{t("预约状态暂时无法读取。")} <button type="button" className="btn btn-outline btn-sm"
             onClick={() => accountLibrary.refresh('pendingReservations')}>{t("重新读取")}</button></p>}
         {openError && <p role="alert">{t(openError)}</p>}
-        {current && !current.pending && (current.partial || current.results.length <= 1) &&
+        {current && !current.pending && (current.partial || (!hongguo && current.results.length <= 1)) &&
           <button type="button" className="btn btn-outline btn-sm" disabled={!!opening} onClick={() => setAttempt(value => value + 1)}>{t("重新查找")}</button>}
       </div>
     </section>

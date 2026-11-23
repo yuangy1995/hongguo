@@ -8,6 +8,7 @@ const PREFERENCES_KEY = 'hongguo:watch-history-preferences';
 const ACCOUNT_VIEW_KEY = 'hongguo:account-history-view';
 const CARD_SIZE_KEY = 'hongguo:history-card-size';
 const CARD_SIZES = ['small', 'standard', 'large'];
+const OFFICIAL_SEASONS_TTL = 10 * 60 * 1000;
 
 export default function WatchHistory({ active = true, onNavigate }) {
   useLanguage();
@@ -75,6 +76,8 @@ export default function WatchHistory({ active = true, onNavigate }) {
   const request = useRef(0);
   const openingRef = useRef(false);
   const openingRequest = useRef(0);
+  const seasonRequest = useRef(null);
+  const [seasonPanel, setSeasonPanel] = useState(null);
   const groups = groupHistory(rows, decisions);
   const groupById = new Map(groups.flatMap(items => items.map(row => [row.series_id, items])));
   const suggestionsByGroup = new Map(groups.map(items => [items, historyGroupSuggestions(items)]));
@@ -109,7 +112,11 @@ export default function WatchHistory({ active = true, onNavigate }) {
 
   useLayoutEffect(() => {
     setOpening(''); openingRef.current = false;
-    return () => { openingRequest.current++; openingRef.current = false; };
+    if (!active) {
+      document.querySelector?.('.history-seasons-menu:popover-open')?.hidePopover?.();
+      setSeasonPanel(null);
+    }
+    return () => { openingRequest.current++; openingRef.current = false; seasonRequest.current = null; };
   }, [active]);
   useEffect(() => {
     if (active) {
@@ -189,7 +196,27 @@ export default function WatchHistory({ active = true, onNavigate }) {
     finally { setRemoving(''); }
   };
 
-  const resume = async (row, sequel = null) => {
+  const loadSeasons = async seriesId => {
+    if (!active) return;
+    const previous = seasonRequest.current;
+    if (previous?.id === seriesId && (previous.pending || previous.expiresAt > Date.now())) return;
+    const pending = { id: seriesId, pending: true };
+    seasonRequest.current = pending;
+    setSeasonPanel({ id: seriesId, loading: true });
+    try {
+      const result = await window.electronAPI.findSeriesSeasons(seriesId);
+      if (seasonRequest.current !== pending) return;
+      if (result?.official !== true || result.partial || !Array.isArray(result.results)) throw new Error();
+      pending.expiresAt = Date.now() + OFFICIAL_SEASONS_TTL;
+      setSeasonPanel({ id: seriesId, results: result.results, unavailable: result.unavailable });
+    } catch {
+      if (seasonRequest.current === pending) setSeasonPanel({ id: seriesId, error: true });
+    } finally {
+      pending.pending = false;
+    }
+  };
+
+  const resume = async (row, sequel = null, acknowledge = true) => {
     if (!active || openingRef.current) return;
     const version = ++openingRequest.current;
     openingRef.current = true;
@@ -213,8 +240,8 @@ export default function WatchHistory({ active = true, onNavigate }) {
           : await window.electronAPI.playSeries({ seriesId: row.series_id, vidIndex: row.vid_index, resume: true });
         if (!result?.success) throw new Error(result?.error || '打开播放器失败');
       }
-      // An unconfirmed title match must not clear the original show's update markers.
-      if (sequel && row.similarSeries?.some(item => item.series_id === sequel.series_id)) return;
+      // Opening a season from the catalogue or a similar title leaves the original updates unread.
+      if (!acknowledge || (sequel && row.similarSeries?.some(item => item.series_id === sequel.series_id))) return;
       const group = groupById.get(row.series_id) || [row];
       const acknowledgedRows = sequel || visibleRows.find(item => groupById.get(item.series_id) === group) === row
         ? group.filter(item => item === row || item.sequels?.some(candidate => !sequel || candidate.series_id === sequel.series_id))
@@ -314,6 +341,10 @@ export default function WatchHistory({ active = true, onNavigate }) {
       const { sequels, similarSeries: similar, hasUnreadSequels } = suggestionsByGroup.get(group);
       const hasUpdates = row.unreadEpisodes > 0 || (isHead && hasUnreadSequels);
       const menuId = `history-actions-${row.series_id}`;
+      const officialSeasons = !mobile && typeof window.electronAPI.findSeriesSeasons === 'function'
+        && /^[1-9]\d{5,29}$/.test(row.series_id);
+      const seasonMenuId = `history-seasons-${row.series_id}`;
+      const seasons = seasonPanel?.id === row.series_id ? seasonPanel : null;
       const updateErrors = [
         ["分集更新检查未完成：", row.lastEpisodeCheckError],
         ["续作检查未完成：", row.lastSequelCheckError],
@@ -356,7 +387,33 @@ export default function WatchHistory({ active = true, onNavigate }) {
         {mobile ? <span>{t("疑似续作")}</span> : <summary>{t("疑似续作")} · {sequels.length}</summary>}
         <div className="history-related-actions">{sequels.map(sequel => <button key={sequel.series_id} className="btn btn-outline btn-sm" disabled={!active || !!opening || !!removing} onClick={() => resume(sequel.origin, sequel)}>{sequel.series_title}</button>)}</div>
       </Relations>}
-      {isHead && !!similar.length && <Relations className={mobile ? "history-sequels" : "history-related"} title={t("名称相近，仅供核对；不会用于隐藏低季或批量归组")}>
+      {officialSeasons && <div className="history-related history-series">
+        <button type="button" className="btn btn-outline btn-sm" popovertarget={seasonMenuId}
+          disabled={!active || !!opening || !!removing} onClick={() => loadSeasons(row.series_id)}>{t('系列剧')}</button>
+        <section className="desktop-popover history-seasons-menu" id={seasonMenuId} popover="auto" role="dialog" aria-label={t('系列剧')}>
+          {seasons?.loading && <p role="status">{t('正在读取官方系列剧…')}</p>}
+          {seasons?.error && <>
+            <p role="status">{t('系列剧查询失败。')}</p>
+            <button type="button" className="btn btn-outline btn-sm" onClick={() => loadSeasons(row.series_id)}>{t('重新查找')}</button>
+          </>}
+          {seasons?.results && (seasons.results.some(season => season.series_id !== row.series_id)
+            ? <div className="history-seasons-list">{seasons.results.map(season => {
+              const selected = season.series_id === row.series_id;
+              return <button type="button" key={season.series_id} className="btn btn-outline" aria-current={selected ? 'true' : undefined}
+                disabled={selected || !season.playable || !active || !!opening || !!removing} onClick={event => {
+                  event.currentTarget.closest('.history-seasons-menu')?.hidePopover?.();
+                  const existing = rows.find(item => item.series_id === season.series_id);
+                  if (existing) void resume(existing);
+                  else void resume(row, season, false);
+                }}>
+                {season.series_title}
+                {!season.playable && <small>{t(season.upcoming ? '待上线' : '暂不可播放')}</small>}
+              </button>;
+            })}</div>
+            : <p role="status">{t(seasons.unavailable ? '暂无系列剧信息。' : '暂未找到其他季。')}</p>)}
+        </section>
+      </div>}
+      {isHead && !!similar.length && !officialSeasons && <Relations className={mobile ? "history-sequels" : "history-related"} title={t("名称相近，仅供核对；不会用于隐藏低季或批量归组")}>
         {mobile ? <span>{t("疑似同剧（仅提示）")}</span> : <summary>{t("疑似同剧（仅提示）")} · {similar.length}</summary>}
         <div className="history-related-actions">{similar.map(candidate => <button key={candidate.series_id} className="btn btn-outline btn-sm" disabled={!active || !!opening || !!removing} onClick={() => resume(candidate.origin, candidate)}>{candidate.series_title}</button>)}
         {similar.filter(candidate => rows.some(item => item.series_id === candidate.series_id)).map(candidate => <button key={`group:${candidate.series_id}`} className="btn btn-outline btn-sm" onClick={() => decide(candidate.series_id, row.series_id)}>{t("确认《")}{candidate.series_title}{t("》为同剧")}</button>)}</div>

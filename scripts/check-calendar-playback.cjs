@@ -207,7 +207,7 @@ test('calendar suppresses repeated playback clicks until resolution completes', 
   assert.equal(app.resolutions.length, 1); assert.equal(app.requests.length, 2);
 });
 
-function mountHistoryNavigation() {
+function mountHistoryNavigation(overrides = {}) {
   const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/components/WatchHistory.jsx'), 'utf8'), { loader: 'jsx', format: 'cjs' }).code;
   const slots = [], effects = [], layoutEffects = [], cleanups = [], calls = [], pending = deferred();
   const props = { active: true }; let cursor = 0, tree;
@@ -228,6 +228,7 @@ function mountHistoryNavigation() {
     playSeries: async payload => { calls.push(['play', payload.seriesId]); return calls.filter(c => c[0] === 'play').length === 1 ? { success: false, code: 'SERIES_NOT_FOUND' } : { success: true }; },
     searchResolve: async () => { calls.push(['resolve']); await pending.promise; return { success: true, data: { episodes: [{ vid_index: 1 }] } }; },
     acknowledgeWatchUpdates: async () => { calls.push(['ack']); return { success: true }; },
+    ...overrides,
   };
   const module = { exports: {} };
   vm.runInNewContext(source, { module, exports: module.exports, require: name => name === '../i18n' ? i18nStub : name === './historyGroups.mjs' ? require('../src/components/historyGroups.mjs') : name === 'react' ? react : {}, window: { electronAPI: api }, document: { querySelector: () => null } });
@@ -239,8 +240,92 @@ function mountHistoryNavigation() {
   const find = predicate => { const visit = node => { if (!node || typeof node !== 'object') return; if (predicate(node)) return node; return node.children?.map(visit).find(Boolean); }; return visit(tree); };
   const flush = async () => { for (let i = 0; i < 8; i++) { await Promise.resolve(); render(); } };
   render();
-  return { props, api, calls, pending, flush, commit: render, open: () => find(node => node.type === 'button' && node.children.includes('续作')).props.onClick(), unmount: () => cleanups.forEach(fn => fn?.()) };
+  return { props, api, calls, pending, find, flush, commit: render, open: () => find(node => node.type === 'button' && node.children.includes('续作')).props.onClick(), unmount: () => cleanups.forEach(fn => fn?.()) };
 }
+
+test('history reads official seasons on demand and opens a confirmed season without clearing the original update', async () => {
+  const current = { series_id: '7500000000000000001', series_title: '我合成了全世界第2季', unreadEpisodes: 1,
+    similarSeries: [{ series_id: '7500000000000000011', series_title: '同名搜索结果' }] };
+  const first = { series_id: '7500000000000000002', series_title: '我合成了全世界第1季', playable: true };
+  const upcoming = { series_id: '7500000000000000003', series_title: '我合成了全世界啊第4季', upcoming: true, playable: false };
+  const calls = [], lookup = deferred();
+  const ui = mountHistoryNavigation({
+    getWatchHistory: async () => ({ success: true, results: [current] }),
+    findSeriesSeasons: async id => { calls.push(['lookup', id]); return lookup.promise; },
+    playSeries: async ({ seriesId, vidIndex }) => { calls.push(['play', seriesId, vidIndex]); return { success: true }; },
+    acknowledgeWatchUpdates: async id => { calls.push(['ack', id]); return { success: true }; },
+  });
+  await ui.flush();
+  assert.deepEqual(calls, []);
+  const textNode = label => ui.find(node => node.children.includes(label));
+  const seasonButton = label => ui.find(node => node.type === 'button' && node.children.includes(label));
+  const trigger = textNode('系列剧');
+  assert.equal(trigger.props.popovertarget, `history-seasons-${current.series_id}`);
+  assert.equal(textNode('疑似同剧（仅提示）'), undefined);
+  assert.equal(textNode('同名搜索结果'), undefined);
+  const reading = trigger.props.onClick();
+  await trigger.props.onClick();
+  ui.commit();
+  assert.ok(textNode('正在读取官方系列剧…'));
+  assert.deepEqual(calls, [['lookup', current.series_id]]);
+  lookup.resolve({ official: true, results: [first, { ...current, playable: true }, upcoming] });
+  await reading; await ui.flush();
+  assert.equal(seasonButton(current.series_title).props['aria-current'], 'true');
+  assert.equal(seasonButton(upcoming.series_title).props.disabled, true);
+  assert.ok(textNode('待上线'));
+  seasonButton(first.series_title).props.onClick({ currentTarget: { closest: () => null } });
+  await ui.flush();
+  assert.deepEqual(calls, [['lookup', current.series_id], ['play', first.series_id, 1]]);
+  assert.ok(ui.find(node => node.props.className === 'history-dot'));
+  ui.unmount();
+});
+
+test('official season lookup can serve a history entry without a local archive', async () => {
+  const handlerSource = mainSource.slice(mainSource.indexOf("ipcMain.handle('find-series-seasons'"), mainSource.indexOf('// 搜索选中某部剧后'));
+  const calls = [];
+  let seasons = id => [{ series_id: id }];
+  let handler;
+  vm.runInNewContext(handlerSource, {
+    ipcMain: { handle: (_, fn) => { handler = fn; } },
+    visibleSeries: () => [],
+    watchHistory: require('../src/native/watch-history'),
+    fetchHongguoSeriesSeasons: async id => { calls.push(id); return seasons(id); },
+  });
+  const id = '7500000000000000001';
+  const result = await handler({}, id);
+  assert.equal(result.official, true);
+  assert.equal(result.results[0].series_id, id);
+  assert.equal((await handler({}, Number(id))).unsupported, true);
+  assert.equal((await handler({}, 'hema:1')).unsupported, true);
+  assert.deepEqual(calls, [id]);
+  seasons = () => null;
+  const unavailable = await handler({}, id);
+  assert.equal(unavailable.unavailable, true);
+  assert.equal(unavailable.results.length, 0);
+  assert.equal(unavailable.partial, undefined);
+});
+
+for (const unavailable of [false, true]) test(`history offers a retry only on lookup failure, unavailable=${unavailable}`, async () => {
+  let attempts = 0;
+  const ui = mountHistoryNavigation({
+    getWatchHistory: async () => ({ success: true, results: [{ series_id: '7500000000000000001', series_title: '单独一部剧' }] }),
+    findSeriesSeasons: async () => {
+      if (++attempts === 1) return { official: true, partial: true, results: [] };
+      return { official: true, results: [], unavailable };
+    },
+  });
+  await ui.flush();
+  const node = label => ui.find(element => element.children.includes(label));
+  await node('系列剧').props.onClick();
+  await ui.flush();
+  assert.ok(node('系列剧查询失败。'));
+  await node('重新查找').props.onClick();
+  await ui.flush();
+  assert.ok(node(unavailable ? '暂无系列剧信息。' : '暂未找到其他季。'));
+  assert.equal(node('系列剧查询失败。'), undefined);
+  assert.equal(node('重新查找'), undefined);
+  ui.unmount();
+});
 
 for (const change of ['leave', 'return', 'unmount', 'repeat']) test(`history missing-archive resolution respects ${change}`, async () => {
   const ui = mountHistoryNavigation(); await ui.flush();
