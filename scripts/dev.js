@@ -77,7 +77,7 @@ async function main() {
     process.exit(1);
   }
 
-  const electron = spawn('npx', ['electron', '.'], {
+  const electron = spawn('npm', ['start'], {
     shell: true,
     stdio: 'inherit',
     env: { ...process.env, VITE_DEV_SERVER_URL: `http://localhost:${port}` },

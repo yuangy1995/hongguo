@@ -20,7 +20,7 @@
 
 | 组件 | 版本 | 许可证 | 项目地址 |
 |---|---|---|---|
-| Electron | 44.9.1 | MIT | https://github.com/electron/electron |
+| Electron | 32.3.3 | MIT | https://github.com/electron/electron |
 | React | 18.3.1 | MIT | https://github.com/facebook/react |
 | React DOM | 18.3.1 | MIT | https://github.com/facebook/react |
 | axios | 1.20.0 | MIT | https://github.com/axios/axios |

@@ -4,6 +4,7 @@ const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const assert = require('node:assert/strict');
+const { verifyCatalinaBinary } = require('./verify-catalina-app.cjs');
 const root = path.resolve(__dirname, '..', 'build', 'ffmpeg');
 const source = 'ffmpeg-9.0.2+x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55';
 const names = ['ffmpeg', 'ffprobe'];
@@ -34,6 +35,7 @@ try {
       const binary = path.join(dest, name);
       fs.chmodSync(binary, 0o755);
       execFileSync('/usr/bin/lipo', [binary, '-verify_arch', arch === 'x64' ? 'x86_64' : 'arm64']);
+      if (arch === 'x64') verifyCatalinaBinary(binary);
       const dependencies = execFileSync('/usr/bin/otool', ['-L', binary], { encoding: 'utf8' }).trim().split('\n').slice(1);
       assert(dependencies.length && dependencies.every(line => /^\s+\/(usr\/lib|System\/Library)\//.test(line)), '工具含非系统动态库');
       console.log(name + ': 源码构建校验、' + arch + ' 与系统库依赖通过');
@@ -58,13 +60,13 @@ try {
     }
     fs.chmodSync(helper, 0o755);
     execFileSync('/usr/bin/lipo', [helper, '-verify_arch', arch === 'x64' ? 'x86_64' : 'arm64']);
+    if (arch === 'x64') verifyCatalinaBinary(helper);
     const helperDependencies = execFileSync('/usr/bin/otool', ['-L', helper], { encoding: 'utf8' }).trim().split('\n').slice(1);
     assert(helperDependencies.length && helperDependencies.every(line => /^\s+\/(usr\/lib|System\/Library)\//.test(line)), 'ByteVC2组件含非系统动态库');
     const decoders = execFileSync(helper, ['-hide_banner', '-decoders'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
     assert(/^\s*V\S*\s+bvc2\s/m.test(decoders), 'ByteVC2组件未包含所需解码器');
-    if (arch === 'arm64') {
-      const encoders = execFileSync(helper, ['-hide_banner', '-encoders'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-      assert(/^\s*V\S*\s+h264_videotoolbox\s/m.test(encoders), 'ByteVC2组件未包含硬件编码器');
-    }
+    const encoders = execFileSync(helper, ['-hide_banner', '-encoders'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const requiredEncoder = arch === 'x64' ? /\s+libx264\s/ : /\s+h264_videotoolbox\s/;
+    assert(requiredEncoder.test(encoders), 'ByteVC2组件未包含所需编码器');
   }
 } catch (error) { console.error('Mac FFmpeg 准备失败：' + error.message); process.exitCode = 1; }

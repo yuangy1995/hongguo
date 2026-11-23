@@ -23,24 +23,23 @@ for (const flags of [{ prerelease: true }, { draft: true }]) {
 const pkg = require('../package.json');
 const lock = require('../package-lock.json');
 const macBuild = require('../build/electron-builder-mac.cjs');
-const fs = require('node:fs');
-const path = require('node:path');
-const yaml = require('js-yaml');
 const { appUpdateSource } = require('../src/native/app-update');
 const macSource = appUpdateSource('darwin');
 assert.equal(pkg.macRelease.version, pkg.version);
 assert.equal(macBuild.buildVersion, pkg.macRelease.version);
 assert.equal(macBuild.extraMetadata.version, pkg.macRelease.version);
-assert.equal(macBuild.mac.artifactName, 'hongguo-downloader-${version}-mac-${arch}.${ext}');
-assert.deepEqual(macBuild.publish, { provider: 'github', owner: 'yuangy1995', repo: 'hongguo' });
-assert.deepEqual(macBuild.publish, macSource.feed);
-assert.deepEqual(pkg.build.publish, macSource.feed);
+assert.equal(macBuild.mac.artifactName, 'hongguo-catalina-${version}-mac-${arch}.${ext}');
+assert.equal(macBuild.electronVersion, '32.3.3');
+assert.equal(macBuild.appId, 'io.github.yuangy1995.hongguo.catalina');
+assert.equal(macBuild.mac.minimumSystemVersion, '10.15.0');
+assert.deepEqual(macBuild.mac.target, [{ target: 'dmg', arch: ['x64'] }]);
+assert.equal(macBuild.publish, null);
+assert.equal(pkg.build.publish, null);
+assert(macBuild.mac.extraResources.every(resource => resource.to !== 'app-update.yml'));
 for (const platform of ['win32', 'linux']) {
   assert.deepEqual(appUpdateSource(platform).feed, macSource.feed);
 }
 assert.equal(availableRelease({ tag_name: 'v1.0.0' }, '7.7.0'), null);
-const { provider, owner, repo } = yaml.load(fs.readFileSync(path.join(__dirname, '../build/app-update.yml'), 'utf8'));
-assert.deepEqual({ provider, owner, repo }, macSource.feed);
 assert.deepEqual(availableRelease({ tag_name: 'v1.0.0' }, '0.9.0'), {
   version: '1.0.0', url: 'https://github.com/yuangy1995/hongguo/releases/tag/v1.0.0',
 });

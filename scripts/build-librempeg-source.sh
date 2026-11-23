@@ -39,7 +39,7 @@ PY
 [[ -d "$ROOT/sources/librempeg-$LIBREMPEG_COMMIT" ]] || tar -xzf "$LIBREMPEG_ARCHIVE" -C "$ROOT/sources"
 [[ -d "$ROOT/sources/x264-$X264_COMMIT" ]] || tar -xzf "$X264_ARCHIVE" -C "$ROOT/sources"
 # The pinned upstream VideoToolbox implementation omits its internal declaration.
-if [[ "$TARGET" == arm64 || "$TARGET" == x64 ]]; then
+if [[ "$TARGET" == arm64 ]]; then
   if ! grep -q '^int ff_videotoolbox_buffer_append(' "$ROOT/sources/librempeg-$LIBREMPEG_COMMIT/libavcodec/vt_internal.h"; then
     patch --batch --forward -p1 -d "$ROOT/sources/librempeg-$LIBREMPEG_COMMIT" < "$VT_PATCH" > "$ROOT/logs/videotoolbox-patch.log" 2>&1
   fi
@@ -71,14 +71,21 @@ else
   SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
   export MACOSX_DEPLOYMENT_TARGET=13.0
   ARCH=arm64; HOST=aarch64
-  [[ "$TARGET" != x64 ]] || { ARCH=x86_64; HOST=x86_64; }
-  X264_ARGS=(--host="$HOST-apple-darwin" --extra-cflags="-arch $ARCH -mmacosx-version-min=13.0" --extra-ldflags="-arch $ARCH -mmacosx-version-min=13.0")
-  [[ "$TARGET" != x64 ]] || X264_ARGS+=(--disable-asm)
-  MEDIA_ARGS=(--arch="$HOST" --target-os=darwin --cc=/usr/bin/clang --extra-cflags="-arch $ARCH -mmacosx-version-min=13.0 -I../prefix/include" --extra-ldflags="-arch $ARCH -mmacosx-version-min=13.0 -L../prefix/lib")
-  # Librempeg's x86 init objects require standalone assembly; use its complete C fallback without NASM.
-  [[ "$TARGET" != x64 ]] || MEDIA_ARGS+=(--disable-asm)
-  ENCODERS+=,h264_videotoolbox
-  MEDIA_ARGS+=(--enable-videotoolbox)
+  if [[ "$TARGET" == x64 ]]; then
+    ARCH=x86_64; HOST=x86_64
+    export MACOSX_DEPLOYMENT_TARGET=10.15
+  fi
+  DEPLOYMENT_FLAGS="-arch $ARCH -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET"
+  X264_ARGS=(--host="$HOST-apple-darwin" --extra-cflags="$DEPLOYMENT_FLAGS" --extra-ldflags="$DEPLOYMENT_FLAGS")
+  MEDIA_ARGS=(--arch="$HOST" --target-os=darwin --cc=/usr/bin/clang --extra-cflags="$DEPLOYMENT_FLAGS -I../prefix/include" --extra-ldflags="$DEPLOYMENT_FLAGS -L../prefix/lib")
+  if [[ "$TARGET" == x64 ]]; then
+    # The Catalina helper uses software encoding and the complete C fallback without NASM.
+    X264_ARGS+=(--disable-asm)
+    MEDIA_ARGS+=(--disable-asm --disable-videotoolbox)
+  else
+    ENCODERS+=,h264_videotoolbox
+    MEDIA_ARGS+=(--enable-videotoolbox)
+  fi
   SUFFIX=
 fi
 cd "$ROOT/build-x264"
@@ -121,7 +128,9 @@ else
     case "$dep" in /usr/lib/*|/System/Library/*) ;; *) echo 'Non-system helper dependency' >&2; exit 1;; esac
   done
   "$TOOL" -hide_banner -decoders 2>/dev/null | awk '$2 == "bvc2" { found=1 } END { exit !found }'
-  "$TOOL" -hide_banner -encoders 2>/dev/null | awk '$2 == "h264_videotoolbox" { found=1 } END { exit !found }'
+  ENCODER=libx264
+  [[ "$TARGET" != arm64 ]] || ENCODER=h264_videotoolbox
+  "$TOOL" -hide_banner -encoders 2>/dev/null | awk -v encoder="$ENCODER" '$2 == encoder { found=1 } END { exit !found }'
 fi
 cp "$LIBREMPEG_ARCHIVE" "$X264_ARCHIVE" "$SCRIPT" "$VT_PATCH" "$ROOT/corresponding-source/"
 cp "$ROOT/sources/librempeg-$LIBREMPEG_COMMIT/COPYING.GPLv3" "$ROOT/artifacts/bin/LIBREMPEG-COPYING.GPLv3"

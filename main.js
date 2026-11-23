@@ -13,10 +13,13 @@ const { app, BrowserWindow, BaseWindow, View, WebContentsView, globalShortcut, i
 const path = require('path');
 const appPackage = require('./package.json');
 const IS_PREVIEW = appPackage.name === 'hongguo-experience-preview';
-if (IS_PREVIEW) {
-  app.setName('红果短剧预览');
-  if (!app.commandLine.hasSwitch('user-data-dir')) {
-    app.setPath('userData', path.join(app.getPath('appData'), 'hongguo-experience-preview'));
+const IS_CATALINA = appPackage.name === 'hongguo-catalina';
+const APP_TITLE = IS_CATALINA ? '红果短剧 Catalina' : IS_PREVIEW ? '红果短剧预览' : '红果短剧';
+const APP_UPDATES_ALLOWED = !IS_PREVIEW && !IS_CATALINA;
+if (IS_PREVIEW || IS_CATALINA) {
+  app.setName?.(APP_TITLE);
+  if (!app.commandLine.hasSwitch?.('user-data-dir')) {
+    app.setPath?.('userData', path.join(app.getPath('appData'), appPackage.name));
   }
 }
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -27,7 +30,7 @@ else app.on('second-instance', () => app.emit('activate'));
 const { applyPortableDataDir, getPortableDirectory } = require('./src/native/portable-data');
 let portableConfig = { mode: 'default', dir: '', reason: '', copied: [],
   portableDir: getPortableDirectory({ env: process.env, platform: process.platform, execPath: process.execPath }) };
-if (hasSingleInstanceLock && !IS_PREVIEW && app.commandLine.hasSwitch?.('user-data-dir') !== true) {
+if (hasSingleInstanceLock && !IS_PREVIEW && !IS_CATALINA && app.commandLine.hasSwitch?.('user-data-dir') !== true) {
   try {
     // 浏览器会话数据也跟随程序目录；applyPortableDataDir 同时设置
     // userData 与 sessionData，失败时把原因留在 portableConfig.reason。
@@ -84,7 +87,7 @@ const attachFloatingPlayerWindow = require('./src/native/floating-player-window'
 const runtimeVersion = app.getVersion();
 const APP_VERSION = (process.platform === 'darwin' && !app.isPackaged && runtimeVersion === appPackage.version
   ? appPackage.macRelease?.version : runtimeVersion) || runtimeVersion || '1.0.0';
-const APP_UPDATE_SOURCE = appUpdateSource();
+const APP_UPDATE_SOURCE = APP_UPDATES_ALLOWED ? appUpdateSource() : null;
 
 for (const level of ['log', 'warn', 'error']) {
   if (typeof console[level] !== 'function') continue;
@@ -92,7 +95,6 @@ for (const level of ['log', 'warn', 'error']) {
   console[level] = (...args) => write(...args.map(sanitizeLogValue));
 }
 
-const APP_TITLE = IS_PREVIEW ? '红果短剧预览' : '红果短剧';
 const { createStealthController } = require('./src/native/stealth-window');
 const { DEFAULT_STEALTH_WAKE_REGION, validateStealthWakeRegion, normalizeStealthWakeRegion } = require('./src/native/stealth-region');
 const { createBossKeyController } = require('./src/native/boss-key');
@@ -255,7 +257,7 @@ let MAX_CONCURRENT_DOWNLOADS = 3;
 // ===== 设置 =====
 function getDefaultSettings() {
   return {
-    root: IS_PREVIEW ? path.join(app.getPath('userData'), 'downloads') : app.getPath('downloads'),
+    root: IS_PREVIEW || IS_CATALINA ? path.join(app.getPath('userData'), 'downloads') : app.getPath('downloads'),
     // 文件命名模板：可用变量 剧名(series_title) 集数(vid_index) 标题(ep_title)
     name_format: '剧名 集数',
     max_concurrent: 3,
@@ -271,7 +273,7 @@ function getDefaultSettings() {
     cache_next_episode: true,
     picture_in_picture_mode: 'custom',
     stealth_wake_region: { ...DEFAULT_STEALTH_WAKE_REGION },
-    app_updates_enabled: !IS_PREVIEW,
+    app_updates_enabled: APP_UPDATES_ALLOWED,
     watch_updates_enabled: true,
     watch_sequels_enabled: true,
     watch_notifications_enabled: false,
@@ -346,7 +348,8 @@ function getCurrentSettings() {
   const saved = store.getSettings() || {};
   const merged = { ...getDefaultSettings(), ...saved };
   merged.stealth_wake_region = normalizeStealthWakeRegion(merged.stealth_wake_region);
-  merged.fast_conversion = merged.fast_conversion === true;
+  merged.fast_conversion = !IS_CATALINA && merged.fast_conversion === true;
+  merged.app_updates_enabled = APP_UPDATES_ALLOWED && merged.app_updates_enabled !== false;
   // 保证并发数合法
   const mc = parseInt(merged.max_concurrent, 10);
   MAX_CONCURRENT_DOWNLOADS = Number.isInteger(mc) && mc >= 1 && mc <= 10 ? mc : 3;
@@ -4512,6 +4515,8 @@ function applyEditableSettings(current, incoming) {
     if (key === 'proxy_password') continue;
     if (Object.prototype.hasOwnProperty.call(source, key)) merged[key] = source[key];
   }
+  if (!APP_UPDATES_ALLOWED) merged.app_updates_enabled = false;
+  if (IS_CATALINA) merged.fast_conversion = false;
   if (Object.prototype.hasOwnProperty.call(source, 'stealth_wake_region')) merged.stealth_wake_region = validateStealthWakeRegion(source.stealth_wake_region);
   if (Object.prototype.hasOwnProperty.call(source, 'export_text')) merged.export_text = normalizeTextExportKinds(source.export_text);
   if (source.clear_proxy_password === true) merged.proxy_password = '';
@@ -5174,7 +5179,8 @@ let updateRequest = null;
 let latestAppRelease = null;
 function appUpdateSupport() {
   let reason = '';
-  if (IS_PREVIEW || !app.isPackaged) reason = '开发或预览版本不支持应用内安装，请使用正式安装版。';
+  if (IS_CATALINA) reason = 'Catalina 专用版通过独立安装包手动更新。';
+  else if (IS_PREVIEW || !app.isPackaged) reason = '开发或预览版本不支持应用内安装，请使用正式安装版。';
   else if (process.platform === 'win32' && (portableConfig.mode === 'portable' || portableConfig.portableDir
     || process.env.PORTABLE_EXECUTABLE_FILE || process.env.PORTABLE_EXECUTABLE_DIR)) reason = '便携版需手动更新。请先退出旧程序，再运行发布页中的 setup 安装包，并从安装后生成的快捷方式启动；安装版支持后续应用内更新。若仍用便携版，请完整解压新版并直接运行新版文件。';
   else if (!['darwin', 'win32'].includes(process.platform)) reason = '当前系统请前往发布页手动更新。';
@@ -5228,7 +5234,7 @@ function getAppUpdateInstaller() {
       updater: appUpdater,
       currentVersion: APP_VERSION,
       source: APP_UPDATE_SOURCE,
-      isEnabled: () => !IS_PREVIEW && getCurrentSettings().app_updates_enabled !== false,
+      isEnabled: () => APP_UPDATES_ALLOWED && getCurrentSettings().app_updates_enabled !== false,
       installBlocker: appUpdateInstallBlocker,
       emit: state => sendToRenderer('app-update-state', state),
     });
@@ -5269,8 +5275,8 @@ ipcMain.handle('install-app-update', () => {
   return appUpdateInstaller.install();
 });
 ipcMain.handle('check-app-update', async event => {
+  if (!APP_UPDATES_ALLOWED || !mainWindow || event.sender !== mainWindow.webContents) return { enabled: false, release: null };
   if (proxyStartupFallback) return { enabled: false, release: null, error: '请先修复或明确关闭代理。' };
-  if (IS_PREVIEW || !mainWindow || event.sender !== mainWindow.webContents) return { enabled: false, release: null };
   if (getCurrentSettings().app_updates_enabled === false) {
     latestAppRelease = null;
     return { enabled: false, release: null };
@@ -5298,7 +5304,7 @@ ipcMain.handle('check-app-update', async event => {
   return { enabled, release: latestAppRelease, error: enabled ? result.error : '' };
 });
 ipcMain.handle('open-app-update', async event => {
-  if (IS_PREVIEW || !mainWindow || event.sender !== mainWindow.webContents || getCurrentSettings().app_updates_enabled === false) {
+  if (!APP_UPDATES_ALLOWED || !mainWindow || event.sender !== mainWindow.webContents || getCurrentSettings().app_updates_enabled === false) {
     return { success: false, error: '更新信息已失效，请稍后重试' };
   }
   try { await shell.openExternal(latestAppRelease?.url || `${APP_UPDATE_SOURCE.releasesUrl}/latest`); return { success: true }; }
@@ -5323,7 +5329,7 @@ ipcMain.handle('get-episode-danmaku', async (_event, options) => {
 
 function applyInterfaceLanguage(language) {
   const label = (zh, en) => language === 'en' ? en : zh;
-  const appName = label(APP_TITLE, IS_PREVIEW ? 'Hongguo Drama Preview' : 'Hongguo Drama');
+  const appName = label(APP_TITLE, IS_CATALINA ? 'Hongguo Drama Catalina' : IS_PREVIEW ? 'Hongguo Drama Preview' : 'Hongguo Drama');
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setTitle?.(appName);
   if (process.platform !== 'darwin') return;
   Menu.setApplicationMenu(Menu.buildFromTemplate([
@@ -5371,6 +5377,7 @@ ipcMain.handle('get-app-info', async () => ({
   appName: APP_TITLE,
   platform: process.platform,
   preview: IS_PREVIEW,
+  catalina: IS_CATALINA,
   dataDir: app.getPath('userData'),
   systemLocale: (await import('./src/native/ui-language.mjs')).systemLocale(
     process.env, app.getPreferredSystemLanguages?.()[0] || app.getLocale(), process.platform),

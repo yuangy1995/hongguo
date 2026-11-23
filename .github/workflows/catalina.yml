@@ -1,0 +1,62 @@
+name: 构建 Catalina 专用版
+
+on:
+  push:
+    branches: [compat/macos-catalina]
+
+permissions:
+  contents: read
+
+jobs:
+  intel:
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 安装依赖并检查分支打包配置
+        run: |
+          test "$(uname -m)" = x86_64
+          command -v pkg-config || brew install pkgconf
+          npm ci --no-audit --no-fund
+          node scripts/check-release-version.cjs
+      - name: 重建 Catalina 媒体工具并构建安装包
+        run: |
+          python3 scripts/prepare-catalina-media.py "$RUNNER_TEMP/catalina-source"
+          npm run build:mac
+      - name: 验证 DMG 和 Intel 应用启动
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          dmg="$PWD/dist/hongguo-catalina-$version-mac-x64.dmg"
+          hdiutil verify "$dmg"
+          mount="$(mktemp -d)"
+          testing="$(mktemp -d)"
+          hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$mount"
+          trap 'hdiutil detach "$mount"' EXIT
+          app_name="$(node -p 'require("./package.json").build.productName')"
+          node scripts/verify-catalina-app.cjs "$mount/$app_name.app"
+          ditto "$mount/$app_name.app" "$testing/$app_name.app"
+          hdiutil detach "$mount"
+          trap - EXIT
+          mkdir -p dist/catalina-artifact
+          node scripts/verify-mac-release.cjs "$testing/$app_name.app" dist/catalina-artifact/launch.json
+          cp "$dmg" dist/catalina-artifact/
+          cp "$RUNNER_TEMP/catalina-source/"*.tar.gz dist/catalina-artifact/
+          cp build/ffmpeg/.librempeg-build-x64/artifacts/*corresponding-source.tar.gz dist/catalina-artifact/catalina-librempeg-source.tar.gz
+          tar -czf dist/catalina-artifact/catalina-ffmpeg-build.tar.gz scripts/build-ffmpeg-source-mac-x64.sh
+          printf '%s\n' "$GITHUB_SHA" > dist/catalina-artifact/SOURCE-SHA.txt
+          (cd dist/catalina-artifact && shasum -a 256 ./*.dmg ./*.tar.gz launch.json SOURCE-SHA.txt > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hongguo-catalina-intel
+          path: dist/catalina-artifact/
+          if-no-files-found: error
+          retention-days: 14

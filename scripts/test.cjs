@@ -41,7 +41,8 @@ const unitTests = [
 ];
 if (!run(['--test', ...unitTests])) failed++;
 if (!run(['src/components/check-ui-state.cjs'])) failed++;
-if (!run(['scripts/check-windows-installer.cjs', '--config'])) failed++;
+const catalina = require('../package.json').name === 'hongguo-catalina';
+if (!catalina && !run(['scripts/check-windows-installer.cjs', '--config'])) failed++;
 if (!run(['scripts/check-linux-media.cjs', '--config'])) failed++;
 for (const name of checks) {
   if (!run([path.join('scripts', name)])) failed++;
@@ -50,5 +51,5 @@ if (failed) {
   console.error(`npm test: ${failed} command(s) failed`);
   process.exitCode = 1;
 } else {
-  console.log(`npm test: unit tests and ${checks.length + 3} platform checks passed`);
+  console.log(`npm test: unit tests and ${checks.length + (catalina ? 2 : 3)} platform checks passed`);
 }

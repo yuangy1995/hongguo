@@ -2,7 +2,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), net = require('node:net'), os = require('node:os');
 const { spawn } = require('node:child_process');
 const { connect, sleep } = require('./fixtures/cdp.cjs');
-const { version } = require('../package.json');
+const { name, build, version } = require('../package.json');
+const catalina = name === 'hongguo-catalina';
 const [,, bundle, receipt] = process.argv;
 const arch = process.arch;
 assert.equal(process.platform, 'darwin');
@@ -16,7 +17,7 @@ const qa = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-mac-check-'));
   const profile=path.join(qa,'profile'), media=path.join(qa,'media');
   fs.mkdirSync(profile); fs.mkdirSync(media);
   fs.writeFileSync(path.join(profile, 'data.json'), JSON.stringify({settings:{root:media,app_updates_enabled:false,watch_updates_enabled:false}}));
-  const exe=path.join(bundle,'Contents/MacOS/红果短剧');
+  const exe=path.join(bundle,'Contents/MacOS',build.productName);
   const log=fs.openSync(path.join(qa,'app.log'),'w');
   const child=spawn(exe,[
     '--mute-audio','--lang=zh-CN','--user-data-dir='+profile,'--disable-background-timer-throttling',
@@ -37,6 +38,14 @@ const qa = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-mac-check-'));
     }throw Error('Version could not be verified');})()`);
     assert.deepEqual(startup,{version,updater:'function',announcements:'undefined'});
     console.log(JSON.stringify({arch,...startup}));
+    if (catalina) {
+      const edition = await cdp.evaluate(`(async()=>({
+        edition: (await window.electronAPI.getAppInfo()).catalina,
+        updater: (await window.electronAPI.getAppUpdateState()).supported,
+        publicUpdate: (await window.electronAPI.checkAppUpdate()).enabled
+      }))()`);
+      assert.deepEqual(edition, { edition: true, updater: false, publicUpdate: false });
+    }
     let playback;
     if (arch === 'arm64') playback = await cdp.evaluate(`(async()=>{
       const api=window.electronAPI, wait=ms=>new Promise(r=>setTimeout(r,ms));
@@ -86,7 +95,7 @@ const qa = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-mac-check-'));
       throw Error(error);
     })()`,420000);
     if (playback) assert.equal(playback.states.length,2);
-    const proof={arch,launch:true,version,sourceCommit:process.env.GITHUB_SHA,playback};
+    const proof={arch,system:os.release(),launch:true,version,sourceCommit:process.env.GITHUB_SHA,playback};
     fs.writeFileSync(receipt,JSON.stringify(proof,null,2)+'\n');
     console.log(JSON.stringify(proof));
   } finally {

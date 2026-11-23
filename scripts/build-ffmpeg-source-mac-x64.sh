@@ -18,7 +18,7 @@ PREFIX="$ROOT/prefix"
 mkdir -p "$ARCHIVES" "$ROOT/sources" "$ROOT/build-x264" "$ROOT/build-ffmpeg" "$ROOT/logs" "$ROOT/artifacts/bin" "$ROOT/artifacts/licenses"
 # Use only system compiler tools. pkg-config is a discovery tool, not a linked library.
 export PATH=/usr/bin:/bin:/usr/sbin:/sbin
-export MACOSX_DEPLOYMENT_TARGET=13.0
+export MACOSX_DEPLOYMENT_TARGET=10.15
 export PKG_CONFIG_PATH=
 export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 unset CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH LIBRARY_PATH DYLD_LIBRARY_PATH LDFLAGS CFLAGS CPPFLAGS || true
@@ -42,7 +42,8 @@ CC=/usr/bin/clang "../sources/x264-$X264_COMMIT/configure" \
   --prefix=../prefix --host=x86_64-apple-darwin --enable-static --enable-pic --disable-asm \
   --disable-cli --disable-opencl --disable-avs --disable-swscale --disable-lavf \
   --disable-ffms --disable-gpac --disable-lsmash --disable-bashcompletion \
-  --extra-cflags='-arch x86_64 -mmacosx-version-min=13.0' --extra-ldflags='-arch x86_64 -mmacosx-version-min=13.0' \
+  --extra-cflags="-arch x86_64 -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET" \
+  --extra-ldflags="-arch x86_64 -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET" \
   > "$ROOT/logs/x264-configure.log" 2>&1
 make -j "$JOBS" > "$ROOT/logs/x264-build.log" 2>&1
 make install-lib-static > "$ROOT/logs/x264-install.log" 2>&1
@@ -51,11 +52,11 @@ cd "$ROOT/build-ffmpeg"
   --prefix=../prefix --arch=x86_64 --target-os=darwin --enable-cross-compile --disable-x86asm --cc=/usr/bin/clang \
   --disable-autodetect --disable-shared --enable-static --disable-doc --disable-debug \
   --disable-ffplay --disable-network --disable-indevs --disable-outdevs --enable-indev=lavfi \
-  --enable-gpl --enable-version3 --enable-libx264 --enable-videotoolbox --enable-audiotoolbox \
+  --enable-gpl --enable-version3 --enable-libx264 --disable-videotoolbox --disable-audiotoolbox \
   --enable-pthreads --enable-zlib --enable-bzlib --enable-iconv \
   --pkg-config="$PKG_CONFIG_TOOL" --pkg-config-flags=--static \
-  --extra-cflags='-arch x86_64 -mmacosx-version-min=13.0 -I../prefix/include' \
-  --extra-ldflags='-arch x86_64 -mmacosx-version-min=13.0 -L../prefix/lib' --extra-libs=-liconv \
+  --extra-cflags="-arch x86_64 -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET -I../prefix/include" \
+  --extra-ldflags="-arch x86_64 -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET -L../prefix/lib" --extra-libs=-liconv \
   > "$ROOT/logs/ffmpeg-configure.log" 2>&1
 make -j "$JOBS" ffmpeg ffprobe > "$ROOT/logs/ffmpeg-build.log" 2>&1
 install -m 755 ffmpeg ffprobe "$ROOT/artifacts/bin/"

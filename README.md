@@ -2,6 +2,8 @@
 
 本项目基于 [jackotom/hongguo-drama](https://github.com/jackotom/hongguo-drama) 修改。感谢原作者 jackotom 和原项目贡献者。
 
+当前分支维护 Intel Mac 的 macOS 10.15 Catalina 专用候选版。构建与验证见 [Catalina 专用版](docs/macos-catalina.md)。
+
 ## 1.0.6 更新内容
 
 - 登录红果账号后，可在桌面查看和管理云端收藏、分集点赞与预约。

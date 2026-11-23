@@ -132,7 +132,7 @@ export default function App({ platformPages = {} }) {
       case 'browse':
         return <Browse active={page === id} onNavigate={navigate} />;
       case 'player':
-        return playerMounted ? <Player portrait={layout === 'portrait'} episodesOpen={episodesOpen} setEpisodesOpen={setEpisodesOpen} actionsHidden={actionsHidden || (borderless && layout === 'portrait')} active={page === id} target={playerTarget} onSeriesSelected={rememberPlayerSeries} onFloatingChange={setFloatingPlayer} onNavigate={navigate} accountCheckpointRef={accountCheckpoint} accountLibrary={accountLibrary} /> : null;
+        return playerMounted ? <Player portrait={layout === 'portrait'} episodesOpen={episodesOpen} setEpisodesOpen={setEpisodesOpen} actionsHidden={actionsHidden || (borderless && layout === 'portrait')} active={page === id} target={playerTarget} onSeriesSelected={rememberPlayerSeries} onFloatingChange={setFloatingPlayer} onNavigate={navigate} accountCheckpointRef={accountCheckpoint} accountLibrary={accountLibrary} catalina={appInfo?.catalina} /> : null;
       case 'feed':
         return page === 'feed' ? <DramaFeed onNavigate={navigate} /> : null;
       case 'calendar':
@@ -166,7 +166,7 @@ export default function App({ platformPages = {} }) {
         return <DownloadManager active={page === id} onNavigate={navigate} />;
       case 'settings':
         if (platformPages.settings) return React.createElement(platformPages.settings, { active: page === id, appInfo });
-        return <><SettingsPage active={page === id} preview={appInfo?.preview} configNote={appInfo?.configNote} wakeRegionFocus={wakeRegionFocus} />
+        return <><SettingsPage active={page === id} preview={appInfo?.preview} catalina={appInfo?.catalina} configNote={appInfo?.configNote} wakeRegionFocus={wakeRegionFocus} />
           {!mobile && layout === 'portrait' && page === id && <AccountSidebar onCheckpoint={captureAccountCheckpoint} />}</>;
       case 'download':
       default:
@@ -268,7 +268,7 @@ export default function App({ platformPages = {} }) {
               onClick={() => navigate(item.id)} title={t(item.label)}><Icon size={18} /><span>{t(item.label)}</span></button>;
           })}
         </nav>
-        {!mobile && !appInfo?.preview && <AppUpdateNotice />}
+        {!mobile && appInfo && !appInfo.preview && !appInfo.catalina && <AppUpdateNotice />}
         {stealthMode && <div className="stealth-toolbar"><span>{t("移开暂停隐藏 · 移回继续")}</span><div className="stealth-toolbar-actions">
           <button className="btn btn-outline btn-sm" disabled={wakeSettingsOpening} onClick={async () => {
             if (wakeSettingsOpening) return;

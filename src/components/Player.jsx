@@ -55,7 +55,7 @@ const prefetchKey = (seriesId, vid, quality) => JSON.stringify([String(seriesId 
  *  - 「边下边看」：下一集若还在下载，显示等待态并轮询，下完自动接上
  *  - 断点续播：按 series_id 记住看到第几集、第几秒
  */
-function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accountCheckpointRef, accountLibrary, active = true, portrait = false, actionsHidden = false, episodesOpen = false, setEpisodesOpen }) {
+function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accountCheckpointRef, accountLibrary, active = true, portrait = false, actionsHidden = false, episodesOpen = false, setEpisodesOpen, catalina = false }) {
   useLanguage();
   const mobile = window.electronAPI.platform === 'android';
   const enhancement = useVideoEnhancement();
@@ -690,7 +690,7 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
   };
 
   const changeDecoder = mode => {
-    if (qualityLoading || playbackSettingPending.current || !['auto', 'software', 'hardware'].includes(mode) || mobile && mode === 'hardware') return;
+    if (qualityLoading || playbackSettingPending.current || !['auto', 'software', 'hardware'].includes(mode) || (mobile || catalina) && mode === 'hardware') return;
     const software = mode === 'software', fast = mode === 'hardware';
     if (software === softwareDecode && fast === fastConversion) return;
     const apply = saved => {
@@ -1867,15 +1867,15 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
     <label className="player-download-quality player-decoder-control">
       <span>{t("解码方式")}</span>
       <select className="input-field" aria-label={t("解码方式")} value={fastConversion ? 'hardware' : softwareDecode ? 'software' : 'auto'}
-        aria-describedby={!mobile ? 'player-decoder-help' : undefined} disabled={qualityLoading || playbackSettingSaving}
+        aria-describedby={!catalina ? 'player-decoder-help' : undefined} disabled={qualityLoading || playbackSettingSaving}
         title={t("软件解码使用CPU直接播放H.264/H.265，无需等待整集转码；流畅度取决于CPU性能。")}
         onChange={event => changeDecoder(event.target.value)}>
         <option value="auto">{t("自动（系统解码）")}</option>
         <option value="software">{t("软件解码（CPU）")}</option>
-        {!mobile && <option value="hardware">{t("高性能显卡快速解码（老电脑请勿使用）")}</option>}
+        {!catalina && <option value="hardware">{t("高性能显卡快速解码（老电脑请勿使用）")}</option>}
       </select>
     </label>
-    {!mobile && <p id="player-decoder-help" className="player-download-quality-hint">{t("优先使用显卡加速格式转换，ByteVC2仍由CPU解码；不支持时提示并回退。")}</p>}
+    {!catalina && <p id="player-decoder-help" className="player-download-quality-hint">{t("优先使用显卡加速格式转换，ByteVC2仍由CPU解码；不支持时提示并回退。")}</p>}
   </div>;
   const playbackOptions = <>
     {!mobile && <button className="btn btn-outline" disabled={current?.status !== 'completed'}

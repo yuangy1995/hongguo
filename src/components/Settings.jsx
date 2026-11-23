@@ -53,7 +53,7 @@ const SETTINGS_SECTIONS = [
   ['network', '来源与网络'], ['updates', '通知与更新'],
 ];
 
-function SettingsPage({ active = true, preview = false, configNote = '', wakeRegionFocus = 0 }) {
+function SettingsPage({ active = true, preview = false, catalina = false, configNote = '', wakeRegionFocus = 0 }) {
   useLanguage();
   const danmakuSource = useDanmakuSource();
   const [settings, setSettings] = useState(null);
@@ -457,7 +457,12 @@ function SettingsPage({ active = true, preview = false, configNote = '', wakeReg
           <label className="proxy-switch-row"><input type="checkbox" checked={settings.watch_notifications_enabled === true} onChange={event => update('watch_notifications_enabled', event.target.checked)} /><span className="proxy-switch-text">{t("发送系统通知")}<em>{t("默认关闭。开启后还需允许 macOS 通知；关闭不影响观看记录红点")}</em></span></label>
         </div>
 
-        {preview ? <>
+        {catalina ? (
+          <div className="settings-group" hidden={section !== 'updates'}>
+            <span className="settings-label">{t("Catalina 专用版")}</span>
+            <p className="settings-hint">{t("通过独立安装包手动更新。")}</p>
+          </div>
+        ) : preview ? <>
         <div className="settings-group" hidden={section !== 'updates'}>
           <span className="settings-label">{t("独立预览")}</span>
           <p className="settings-hint">{t("预览数据独立保存，不接收正式版更新，不会覆盖已安装的红果短剧。")}</p>
