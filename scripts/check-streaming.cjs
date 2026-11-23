@@ -298,7 +298,7 @@ function load(fetchPlayUrlSingle, overrides = {}) {
     h.context.probeDuration = async () => 1;
     h.context.pickH264Encoder = async () => 'libx264';
     const input = path.join(root, 'compat-input.mp4'); fs.writeFileSync(input, 'fixture');
-    const payload = { seriesId: 'same-series', vidIndex: 1, filePath: input, force: true };
+    const payload = { seriesId: 'same-series', vidIndex: 1, vid: 'same-video', filePath: input, force: true };
     const results = await Promise.all([h.handlers['transcode-for-playback']({}, payload), h.handlers['transcode-for-playback']({}, payload)]);
     assert.equal(spawned, 1, 'same episode cannot run two encoders against one output');
     assert.ok(results.every(r => r.success)); assert.equal(results[0].url, results[1].url);

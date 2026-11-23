@@ -75,7 +75,7 @@ const { mount } = require('./check-player-resume.cjs');
     if (!autoNext) { playing.button('连播').props.onClick(); await playing.flush(); }
     const savedBeforeEnd = playing.saves.length;
     playing.find(n => n.type === 'video').props.onEnded(); await playing.flush();
-    assert.deepEqual(cleaned, [['A', 1]], 'online and local ended both invoke the unified cleanup');
+    assert.deepEqual(cleaned, [['A', 1, 'v1']], 'online and local ended both invoke the unified cleanup');
     assert.ok(!playing.saves.slice(savedBeforeEnd).some(args => args[1] === 1 && args[2] === 0), 'cleanup must not erase the finished position');
     if (autoNext) {
       playing.metadata(); assert.equal(playing.media.paused, false, 'cleanup preserves auto-next');
@@ -115,7 +115,7 @@ const { mount } = require('./check-player-resume.cjs');
   await ranges.flush();
   assert.ok(ranges.button('下载本集'), 'current episode download button exists');
   await ranges.button('下载本集').props.onClick(); await ranges.flush();
-  assert.deepEqual(queued, [['A', 8, '720p']]); queued.length = 0;
+  assert.deepEqual(queued, [['A', 8, '720p', 'v8']]); queued.length = 0;
   await ranges.button('下载后5集').props.onClick(); await ranges.flush();
   assert.deepEqual(queued.map(args => args[1]), [9, 12, 13], 'next five excludes current, locked and completed, without extending the range');
   const text = n => typeof n === 'string' || typeof n === 'number' ? String(n) : n?.children?.map(text).join('') || '';

@@ -117,7 +117,12 @@ async function readOfficialSeasons(id) {
 
 async function checkHistory(id) {
   await resolveSeries(id);
-  if (state.settings.watch_sequels_enabled !== false) await readOfficialSeasons(id);
+  if (state.settings.watch_sequels_enabled === false) return;
+  const candidates = await readOfficialSeasons(id);
+  const record = state.playback[id];
+  if (!record) return;
+  record.sequels = history.findSequels(seriesFor(id), [...(record.sequels || []), ...candidates]);
+  save();
 }
 
 const guarded = fn => async (...args) => {

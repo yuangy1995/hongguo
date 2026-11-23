@@ -16,7 +16,7 @@ function listHistory(series, playback, showSequels = true) {
   }
   return watched.map(item => {
     const record = playback[item.series_id];
-    const candidates = sourceOf(String(item.series_id)) === 'hongguo' ? item.officialSeasons : record.sequels;
+    const candidates = record.sequels;
     const sequels = showSequels && Array.isArray(candidates)
       ? findSequels(item, candidates, latestByFamily.get(familyKey(item)) || 0) : [];
     const confirmedIds = new Set(sequels.map(candidate => String(candidate.series_id)));

@@ -10,6 +10,13 @@ const source = transformSync(fs.readFileSync(path.join(__dirname, '../src/compon
   format: 'cjs',
 }).code;
 
+function markOfficialFamily(series, related = []) {
+  const officialSeasons = [...series, ...related].map(({ series_id, series_title }, index) => ({
+    series_id, series_title, season: index + 1, playable: true,
+  }));
+  for (const seriesEntry of series) seriesEntry.officialSeasons = officialSeasons;
+}
+
 function historyRows(removedId = '') {
   const fixtures = [
     { series_id: '1000001', series_title: '春日来信', completed: true },
@@ -22,6 +29,7 @@ function historyRows(removedId = '') {
     { series_id: '1000008', series_title: '无法归族第零季', completed: false },
   ].filter(item => item.series_id !== removedId);
   const series = fixtures.map(({ completed, ...item }) => ({ ...item, total: 20, episodes: [] }));
+  markOfficialFamily(series.filter(item => ['1000001', '1000002'].includes(item.series_id)));
   const playback = Object.fromEntries(series.map((item, index) => [item.series_id, {
     watched: true, vid_index: 1, currentTime: 12, updatedAt: 10_000 - index,
     completedEpisode: fixtures[index].completed ? 20 : 0,
@@ -356,6 +364,7 @@ const findIn = (node, predicate) => predicate(node) ? node : node?.children?.map
   assert.ok(restartedGroup.find(node => node.type === 'span' && text(node) === '独立显示 · 手动'));
 
   const promoted = { series_id: '1000093', series_title: 'AAA1BBB第二季' };
+  markOfficialFamily([similarSeries[0]], [promoted]);
   const promotedRows = listHistory([similarSeries[0]], { '1000091': {
     watched: true, vid_index: 1, currentTime: 1, updatedAt: 100,
     sequels: [promoted], similarSeries: [{ ...promoted, series_title: 'AAA1BBB二' }],
@@ -374,6 +383,7 @@ const findIn = (node, predicate) => predicate(node) ? node : node?.children?.map
     { series_id: '1000111', series_title: '春日回声', total: 11 },
     { series_id: '1000112', series_title: '春日回声第二季', total: 10 },
   ];
+  markOfficialFamily(originSeries, [originSequel, laterSequel]);
   const originPlayback = {
     '1000111': { watched: true, vid_index: 10, currentTime: 1, updatedAt: 99, knownTotal: 11, acknowledgedTotal: 10, unreadEpisodes: 1, sequels: [originSequel, laterSequel] },
     '1000112': { watched: true, vid_index: 1, currentTime: 1, updatedAt: 100, knownTotal: 10, acknowledgedTotal: 10 },
@@ -410,6 +420,7 @@ const findIn = (node, predicate) => predicate(node) ? node : node?.children?.map
   ];
   const externalSequel = { series_id: '1000104', series_title: '春风来信第四季' };
   const fuzzy = { series_id: '1000105', series_title: '春风来信二' };
+  markOfficialFamily(groupedSeries, [externalSequel]);
   const groupedPlayback = Object.fromEntries(groupedSeries.map((item, index) => [item.series_id, {
     watched: true, vid_index: 1, currentTime: 1, updatedAt: 100 + index,
     completedEpisode: 1, knownTotal: 1, acknowledgedTotal: 1,

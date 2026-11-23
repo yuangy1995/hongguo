@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { transformSync } = require('esbuild');
 const file = path.join(__dirname, '../src/native/series-search.js');
-const { findSequels } = require('../src/native/watch-history');
+const { findTitleSequels } = require('../src/native/watch-history');
 const first = { series_id: '1000001', series_title: '双子房客' };
 const second = { series_id: '1000002', series_title: '双子房客第二季' };
 const third = { series_id: '1000003', series_title: '双子房客第三季' };
@@ -40,15 +40,15 @@ function searchModule() { assert.ok(fs.existsSync(file), 'bounded search module 
     assert.match(result.error, /补充搜索/);
   });
   await check('sequel matching is same-source, same-base, explicit and nearest-season-first', () => {
-    const results = findSequels(first, [fourth, { series_id: 'hema:7', series_title: third.series_title }, third, second, second, { series_id: '1999999', series_title: '双子房客番外' }]);
+    const results = findTitleSequels(first, [fourth, { series_id: 'hema:7', series_title: third.series_title }, third, second, second, { series_id: '1999999', series_title: '双子房客番外' }]);
     assert.deepEqual(results.map(item => item.series_id), ['1000002', '1000003', '1000004']);
   });
   await check('bracketed years remain part of the base title while unsafe explicit seasons are rejected', async () => {
     const original = { ...first, series_title: '年轮（2024）' }, sequel = { ...second, series_title: '年轮（2024）第二季' };
-    assert.deepEqual(findSequels(original, [sequel]).map(item => item.series_id), [second.series_id]);
+    assert.deepEqual(findTitleSequels(original, [sequel]).map(item => item.series_id), [second.series_id]);
     const local = await searchModule().findSeriesSequels(original, [sequel], async () => { throw new Error('localOnly must not search'); }, { localOnly: true });
     assert.equal(local.success, true); assert.equal(local.results[0].series_id, second.series_id);
-    assert.deepEqual(findSequels({ ...first, series_title: '年轮第999999999999999999999季' }, [sequel]), []);
+    assert.deepEqual(findTitleSequels({ ...first, series_title: '年轮第999999999999999999999季' }, [sequel]), []);
   });
   await check('local sequel candidates survive remote failure and localOnly makes no requests', async () => {
     const { findSeriesSequels } = searchModule(); let calls = 0;
@@ -151,7 +151,7 @@ function searchModule() { assert.ok(fs.existsSync(file), 'bounded search module 
     const offline = await findSeriesSeasons(seasons[2], seasons.slice(0, 2), async () => { throw new Error('offline'); });
     assert.deepEqual(offline.results.map(item => item.season), [1, 2, 3]);
     assert.equal(offline.partial, true);
-    assert.deepEqual(findSequels(seasons[1], [seasons[2]]), [], 'watch-history matching stays exact');
+    assert.deepEqual(findTitleSequels(seasons[1], [seasons[2]]), [], 'watch-history matching stays exact');
   });
   await check('season lookup retries the original title if a shorter query misses earlier seasons', async () => {
     const base = '都重生了，谁还装富二代啊';

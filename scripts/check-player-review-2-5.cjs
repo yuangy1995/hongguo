@@ -98,7 +98,7 @@ const defer = () => { let resolve; const promise = new Promise(done => { resolve
       await ui.flush(); ui.metadata(); ui.find(node => node.type === 'video').props.onEnded(); await ui.flush();
       await new Promise(done => setImmediate(done));
       assert.equal(unhandled.length, before, 'delete must not leave an unhandled rejection');
-      assert.deepEqual(cleaned, [['A', 1]], 'cleanup must target only the ended episode');
+      assert.deepEqual(cleaned, [['A', 1, 'v1']], 'cleanup must target only the ended episode');
       assert.ok(visible(ui, '文件正在使用'), 'delete failure must be visible');
       assert.equal(ui.find(node => node.type === 'video').props.src, 'file:///mock-2.mp4');
     } finally { ui.unmount(); }

@@ -22,7 +22,7 @@ const checks = [
       compatPreparing: new Map(), compatRequests: new Map(), compatClearing: null, compatPathFor: () => 'cached',
       fs: { existsSync: () => { cacheReads++; return true; }, statSync: () => ({ size: 200000 }), utimesSync() {} },
       localPlayUrl: () => 'file:///cached.mp4' };
-    vm.runInNewContext(extract('transcodeForPlayback'), context);
+    vm.runInNewContext(extract('episodeIdAt') + '\n' + extract('transcodeForPlayback'), context);
     const start = source.indexOf("ipcMain.handle('transcode-for-playback'");
     vm.runInNewContext(source.slice(start, source.indexOf('\n});', start) + 4), context);
     // A cache is not a downloaded original; exercise the real access check before reading it.

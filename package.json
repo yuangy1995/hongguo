@@ -1,8 +1,8 @@
 {
   "name": "hongguo-downloader",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "macRelease": {
-    "version": "1.0.7"
+    "version": "1.0.8"
   },
   "description": "红果短剧播放与下载",
   "main": "main.js",
@@ -249,7 +249,7 @@
     "appImage": {
       "executableArgs": []
     },
-    "buildVersion": "1.0.7"
+    "buildVersion": "1.0.8"
   },
   "engines": {
     "node": ">=22.12"

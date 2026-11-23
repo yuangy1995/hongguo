@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const { findSequels, sequelKeyword } = require('../src/native/watch-history');
+const { findTitleSequels, sequelKeyword } = require('../src/native/watch-history');
 const { decryptMp4Buffer } = require('../src/native/hongguo');
 
 // Reuse the existing isolated updater and renderer fixtures without running their suites.
@@ -77,14 +77,14 @@ function restoredEntry(format, configs, entryType) {
   await check('sequel matching preserves year suffixes and accepts explicit and modest bracket seasons', () => {
     const original = { series_id: '1000001', series_title: '春日来信' };
     assert.equal(sequelKeyword({ series_title: '春日来信（2024）' }), '春日来信(2024)');
-    assert.deepEqual(findSequels(original, [{ series_id: '1000002', series_title: '春日来信（2024）' }]), []);
+    assert.deepEqual(findTitleSequels(original, [{ series_id: '1000002', series_title: '春日来信（2024）' }]), []);
     for (const suffix of ['（2）', '(二)', '（十二）', '第两部', '第十二季', '第一百季', 'season2', '（９９）']) {
-      assert.equal(findSequels(original, [{ series_id: '1000002', series_title: `春日来信${suffix}` }]).length, 1, suffix);
+      assert.equal(findTitleSequels(original, [{ series_id: '1000002', series_title: `春日来信${suffix}` }]).length, 1, suffix);
     }
     for (const suffix of ['(0)', '(100)', '(二〇二四)', '(二零二四)', '(一百)', '第0季']) {
-      assert.equal(findSequels(original, [{ series_id: '1000002', series_title: `春日来信${suffix}` }]).length, 0, suffix);
+      assert.equal(findTitleSequels(original, [{ series_id: '1000002', series_title: `春日来信${suffix}` }]).length, 0, suffix);
     }
-    assert.equal(findSequels({ ...original, series_title: '春日来信（十二）' }, [{ series_id: '1000002', series_title: '春日来信第十三季' }]).length, 1);
+    assert.equal(findTitleSequels({ ...original, series_title: '春日来信（十二）' }, [{ series_id: '1000002', series_title: '春日来信第十三季' }]).length, 1);
   });
   await check('synthetic encrypted sample entries preserve AVC/HEVC codecs and reject ambiguity', () => {
     for (const [format, configs] of [['avc1', ['avcC']], ['avc3', ['avcC']], ['hvc1', ['hvcC']], ['hev1', ['hvcC']]]) {

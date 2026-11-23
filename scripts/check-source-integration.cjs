@@ -25,7 +25,7 @@ let failures=0;async function check(name,fn){if(process.argv[2]&&!name.includes(
  await check('Hema cached playback and compatibility still enforce current access',async()=>{
   vm.runInContext("onlineCache.set('hema:1:2',{size:123,playInfo:{url:'https://example.invalid/media.mp4'}})",context);
   const online=await handlers['prepare-online-play']({},{vid:'hema:1:2',seriesId:'hema:1',vidIndex:2});assert.equal(online.success,false);assert.match(online.error,/锁定/);assert.equal(permissionCalls,1);
-  fs.writeFileSync(context.compatPathFor('hema:1',2),Buffer.alloc(120000));
+  fs.writeFileSync(context.compatPathFor('hema:1',2,'auto','hema:1:2'),Buffer.alloc(120000));
   const compat=await handlers['transcode-for-playback']({},{seriesId:'hema:1',vid:'hema:1:2',vidIndex:2,requestId:'hema-locked'});assert.equal(compat.success,false);assert.match(compat.error,/锁定/);
  });
  await check('Hema queued download rechecks access before trusting existing files',async()=>{
