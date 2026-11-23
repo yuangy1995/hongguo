@@ -284,16 +284,18 @@ const checks = [
     const owner = { taskId:'large', seriesId:'1', vid:'11', vidIndex:1, savePath:path.join(h.root, 'large.mp4') };
     await withLargeFileIds(h.root, async () => {
       const temporary = await native.createDownloadTemporary(h.root, { owner });
-      fs.writeFileSync(temporary.input, Buffer.alloc(120000));
-      await temporary.reserveOutput(); fs.writeFileSync(temporary.output, Buffer.alloc(130000));
-      const receipt = JSON.parse(JSON.stringify(temporary.record));
-      assert.equal(typeof receipt.files['input.enc.tmp'].ino, 'string');
-      const state = native.inspectDownloadTemporary(receipt, owner);
-      assert.equal(state.unverifiedItems, 0);
-      assert.equal(state.files.reduce((sum, file) => sum + file.size, 0), 250000);
-      const cleaned = await native.cleanupDownloadTemporary(receipt, owner);
-      assert.equal(cleaned.missing, true);
-      assert.equal(cleaned.freed, 250000);
+      try {
+        fs.writeFileSync(temporary.input, Buffer.alloc(120000));
+        await temporary.reserveOutput(); fs.writeFileSync(temporary.output, Buffer.alloc(130000));
+        const receipt = JSON.parse(JSON.stringify(temporary.record));
+        assert.equal(typeof receipt.files['input.enc.tmp'].ino, 'string');
+        const state = native.inspectDownloadTemporary(receipt, owner);
+        assert.equal(state.unverifiedItems, 0);
+        assert.equal(state.files.reduce((sum, file) => sum + file.size, 0), 250000);
+        const cleaned = await native.cleanupDownloadTemporary(receipt, owner);
+        assert.equal(cleaned.missing, true);
+        assert.equal(cleaned.freed, 250000);
+      } finally { await temporary.cleanup(); }
     });
   }],
   ['large file IDs distinguish replacements even when Number and timestamps collide', async () => {
@@ -314,15 +316,17 @@ const checks = [
     const h = fixture(), native = require('../src/native/download-temporary');
     const owner = { taskId:'legacy', seriesId:'1', vid:'11', vidIndex:1, savePath:path.join(h.root, 'legacy.mp4') };
     const temporary = await native.createDownloadTemporary(h.root, { owner });
-    fs.writeFileSync(temporary.input, Buffer.alloc(120000));
-    const identity = file => { const stat = fs.lstatSync(file); return { dev:stat.dev, ino:stat.ino, birthtimeMs:stat.birthtimeMs }; };
-    const receipt = JSON.parse(JSON.stringify(temporary.record));
-    receipt.identity = identity(receipt.directory);
-    receipt.files['input.enc.tmp'] = identity(temporary.input);
-    if (unsafe) receipt.files['input.enc.tmp'].ino = Number.MAX_SAFE_INTEGER + 1;
-    const cleaned = await native.cleanupDownloadTemporary(receipt, owner);
-    assert.equal(cleaned.missing, !unsafe);
-    assert.equal(fs.existsSync(temporary.input), unsafe);
+    try {
+      fs.writeFileSync(temporary.input, Buffer.alloc(120000));
+      const identity = file => { const stat = fs.lstatSync(file); return { dev:stat.dev, ino:stat.ino, birthtimeMs:stat.birthtimeMs }; };
+      const receipt = JSON.parse(JSON.stringify(temporary.record));
+      receipt.identity = identity(receipt.directory);
+      receipt.files['input.enc.tmp'] = identity(temporary.input);
+      if (unsafe) receipt.files['input.enc.tmp'].ino = Number.MAX_SAFE_INTEGER + 1;
+      const cleaned = await native.cleanupDownloadTemporary(receipt, owner);
+      assert.equal(cleaned.missing, !unsafe);
+      assert.equal(fs.existsSync(temporary.input), unsafe);
+    } finally { await temporary.cleanup(); }
   }]),
   ['disk cache download preserves ownership and allows deleting its record', async () => {
     const h = fixture();

@@ -15,7 +15,7 @@
 
 ## 1.0.7 正式发行
 
-1.0.7 已于 2026-11-23 晚间公开并设为 Latest。标签 `v1.0.7` 指向冻结提交 `662a1f9417a3c70ac0fa077963a0bcf237f4da98`。同一次工作流汇总了双 Mac、Windows x64、Linux x64 产物，并于北京时间 23:30 完成 20 份公开附件校验。见 [发布页](https://github.com/yuangy1995/hongguo/releases/tag/v1.0.7)和[构建与验收](https://github.com/yuangy1995/hongguo/actions/runs/45192999506/attempts/4)。
+1.0.7 已于 2026-11-23 23:30:12（Asia/Shanghai）公开并设为 Latest。标签 `v1.0.7` 指向冻结提交 `662a1f9417a3c70ac0fa077963a0bcf237f4da98`。同一次工作流汇总了双 Mac、Windows x64、Linux x64 产物，并于北京时间 23:30 完成 20 份公开附件校验。见 [发布页](https://github.com/yuangy1995/hongguo/releases/tag/v1.0.7)和[构建与验收](https://github.com/yuangy1995/hongguo/actions/runs/45192999506/attempts/4)。
 
 - 两个 macOS 架构检查了 DMG、版本、临时签名和隔离启动。Linux 检查了 AppImage 启动及随包媒体工具和软件解码资源。Windows 在 GitHub 虚拟机检查了启动、新装、重装和从 1.80 升级。EXE 未签名。
 - 本轮发行使用该版本的跳过真实下载和播放选项。独立全量源码回归有一项红果真实片源获取失败。其余定向检查覆盖观看记录的官方系列剧、无系列提示和失败重试。

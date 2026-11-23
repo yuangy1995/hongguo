@@ -10,7 +10,9 @@ const crypto = require('node:crypto');
 const { gzipSync } = require('node:zlib');
 const { setTimeout: delay } = require('node:timers/promises');
 const playbackDevice = require('./playback-device');
-const sdkPlayback = require('./sdk-playback');
+const sdkPlayback = typeof HONGGUO_ANDROID_WEBVIEW === 'undefined'
+    ? require('./sdk-playback')
+    : { resolveSdkPlayback: async () => null };
 const { signPlayer } = require('./playback-signature');
 const { signPlaybackV5 } = require('./playback-v5');
 const { abortError, throwIfAborted, boundedSignal, networkFailure } = require('./request-signal');

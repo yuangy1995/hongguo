@@ -3,7 +3,9 @@ set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 WORK="$ROOT/build/sdk-playback"
-ARCH="${1:-$(uname -m)}"
+HOST_ARCH="$(uname -m)"
+if [ "$HOST_ARCH" = "x86_64" ]; then HOST_ARCH="x64"; fi
+ARCH="${1:-$HOST_ARCH}"
 PYTHON="${PYTHON:-python3.11}"
 SOURCE_SHA="beebd9847e3214ca280cfe71320fb89eb2d5b4db18659803a3404ddac75dd5db"
 SOURCE_URL="https://github.com/waligoraamodio288-rgb/hongguo-desktop-releases/releases/download/v1.0.104/hongguo-1.0.104-third-party-sources.zip"
@@ -16,7 +18,7 @@ if [ "$ARCH" != "arm64" ] && [ "$ARCH" != "x64" ]; then
     printf '%s\n' "Architecture must be arm64 or x64." >&2
     exit 1
 fi
-if [ "$ARCH" != "$(uname -m)" ]; then
+if [ "$ARCH" != "$HOST_ARCH" ]; then
     printf '%s\n' "Build $ARCH on a matching host architecture." >&2
     exit 1
 fi

@@ -174,12 +174,13 @@ test('shared preparation owns exactly one token/Blob and releases failures or ca
 test('shared Android consumer cancels the delivered G2 registration/model/fallback transport', async t => {
   const root = path.resolve(__dirname,'..');
   const built = await esbuild.build({entryPoints:[path.join(root,'web/media.js')],nodePaths:require.resolve.paths('buffer/'),bundle:true,format:'cjs',platform:'browser',write:false,logLevel:'silent',
+    define:{HONGGUO_ANDROID_WEBVIEW:'true'},
     inject:[path.join(root,'web/globals.js')],alias:{'node:crypto':path.join(root,'web/crypto.js'),'node:zlib':path.join(root,'web/zlib.js'),'node:timers/promises':path.join(root,'web/timers.cjs'),axios:path.join(root,'web/axios.cjs')},
     plugins:[{name:'unused-decoder',setup(build){
       build.onResolve({filter:/^android-decrypt$/},()=>({path:'decoder',namespace:'unused'}));
       build.onLoad({filter:/.*/,namespace:'unused'},()=>({contents:'export function decryptMp4Buffer(){throw Error("decoder must not run");}'}));
     }}]});
-  for (const phase of ['registration','model','fallback']) await t.test(phase,async () => {
+  for (const phase of ['registration','video-tab','model','fallback']) await t.test(phase,async () => {
     const sent=[],cancelled=[]; let arrived,held,gunzips=0;
     const reached = new Promise(resolve => { arrived=resolve; });
     const context={module:{exports:{}},URL,Blob,AbortController,AbortSignal,setTimeout,clearTimeout,console:{info(){}},Native:{
@@ -192,15 +193,18 @@ test('shared Android consumer cancels the delivered G2 registration/model/fallba
       request(id,raw){
         const options=JSON.parse(raw),url=new URL(options.url); sent.push({id,path:url.pathname});
         const registration=url.pathname.includes('device_register'),fallback=url.pathname==='/fallback';
-        if ((phase==='registration'&&registration)||(phase==='model'&&!registration)||(phase==='fallback'&&fallback)) { held=id;arrived();return; }
+        const videoTab = url.pathname.includes('/video_tab/');
+        const requestPhase = registration ? 'registration' : videoTab ? 'video-tab' : fallback ? 'fallback' : 'model';
+        if (phase === requestPhase) { held=id;arrived();return; }
         const data=registration?{device_id_str:'1000000000000001',install_id_str:'1000000000000002'}:{code:0,data:{'111111':{video_model:{fallback_api:'https://api5-normal-sinfonlineb.fqnovel.com/fallback'}}}};
-        queueMicrotask(()=>context.__nativeResponse(id,JSON.stringify({status:200,headers:{},data:JSON.stringify(data)})));
+        const body = videoTab && phase === 'model' ? '' : JSON.stringify(data);
+        queueMicrotask(()=>context.__nativeResponse(id,JSON.stringify({status:200,headers:{},data:body})));
       },
     }};
     vm.runInNewContext(built.outputFiles[0].text,context);
     const controller=new AbortController();
     const pending=context.module.exports.prepareMedia('111111','auto',controller.signal);
-    pending.catch(()=>{}); await Promise.race([reached,pending]); assert.notEqual(held,undefined); assert.equal(gunzips,phase==='registration'?0:1); const before=sent.length; controller.abort();
+    pending.catch(()=>{}); await Promise.race([reached,pending]); assert.notEqual(held,undefined); assert.equal(gunzips, phase === 'model' ? 1 : 0); const before=sent.length; controller.abort();
     await assert.rejects(pending,e=>e.code==='ERR_CANCELED');
     assert.deepEqual(cancelled,[held]);
     context.__nativeResponse(held,JSON.stringify({status:200,headers:{},data:'{}'}));

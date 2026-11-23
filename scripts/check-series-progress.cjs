@@ -112,6 +112,18 @@ function series() {
   const invalidated = await h.handlers['get-series-progress']({});
   assert.equal(invalidated.pending.join(','), 'S');
 
+  const candidates = await h.handlers['get-series-list']({}, { downloadedOnly: true });
+  assert.equal(candidates.map(item => item.series_id).join(','), 'S');
+  fs.unlinkSync(one.savePath);
+  const verified = await h.handlers['get-download-tasks']({}, { verifyFiles: true });
+  assert.equal(verified[0].status, 'failed', 'explicit verification must report a missing download');
+  const nextSnapshot = await h.handlers['get-download-tasks']({}, { verifyFiles: false });
+  assert.equal(nextSnapshot[0].status, 'failed', 'a fast snapshot must keep the last verified failure');
+  fs.writeFileSync(one.savePath, Buffer.alloc(120000, 2));
+  one.fileIdentity = req('./src/native/file-identity').readFileIdentity(one.savePath);
+  const replaced = await h.handlers['get-download-tasks']({}, { verifyFiles: false });
+  assert.equal(replaced[0].status, 'completed', 'a new download identity must clear the old failure');
+
   const held = fixture();
   const heldTask = episodeTask(held.dir);
   held.set('seriesRegistry', series());

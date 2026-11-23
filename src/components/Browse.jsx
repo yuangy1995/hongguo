@@ -180,16 +180,17 @@ function Browse({ onNavigate, active = true }) {
     toastTimer.current = setTimeout(() => setToast(null), 3000);
   }, []);
 
-  const loadDownloadedMap = useCallback(async (visibleIds) => {
+  const loadDownloadedMap = useCallback(async (visibleIds, cancelled) => {
     try {
       const res = await window.electronAPI.getSeriesProgress();
-      if (!res?.success) return;
+      if (!res?.success || cancelled()) return;
       const map = { ...(res.progress || {}) };
       setDownloadedMap(map);
       const known = new Set(visibleIds.map(String));
       for (const seriesId of res.pending || []) {
         if (!known.has(String(seriesId))) continue;
         const warmed = await window.electronAPI.warmSeriesProgress(seriesId);
+        if (cancelled()) return;
         if (!warmed?.success) continue;
         map[String(seriesId)] = warmed.progress;
         setDownloadedMap({ ...map });
@@ -336,7 +337,9 @@ function Browse({ onNavigate, active = true }) {
 
   useEffect(() => {
     if (!active) return;
-    void loadDownloadedMap(results.map(item => item.series_id));
+    let cancelled = false;
+    void loadDownloadedMap(results.map(item => item.series_id), () => cancelled);
+    return () => { cancelled = true; };
   }, [active, results, loadDownloadedMap]);
 
   useEffect(() => {

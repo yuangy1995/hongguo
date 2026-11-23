@@ -222,6 +222,16 @@ Object.assign(api, {
   searchSeriesMore: async (keyword, options) => options?.channel === 'app' ? { ...await searchApp(keyword, options), channel: 'app' } : api.searchSeries(keyword, options),
   searchResolve: guarded(resolveSeries), hongguoResolve: guarded(resolveSeries),
   getSeriesList: async options => clone(state.series.filter(row => !options?.downloadedOnly || state.files.some(file => file.seriesId === row.series_id && Native.mediaSize(file.token) > 0))),
+  getSeriesProgress: async () => ({
+    success: true,
+    progress: {},
+    pending: [...new Set(state.files.map(file => file.seriesId))],
+  }),
+  warmSeriesProgress: guarded(async id => {
+    const result = await episodes(id);
+    if (!result.success) return result;
+    return { success: true, progress: { completed: result.data.completedCount, total: result.data.total } };
+  }),
   getSeriesEpisodes: guarded(episodes),
   playSeries: guarded(async payload => {
     const legacy = state.legacyHistory.find(row => row.series_id === payload.seriesId);

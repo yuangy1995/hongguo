@@ -52,6 +52,10 @@ test('共享页面安卓桥：真实资料持久化、历史校验、文件与�
   const { api, files, state } = await bridge(initial);
   assert.equal((await api.getDownloadTasks())[0].title, '剧集 第1集');
   assert.equal((await api.getSeriesEpisodes('123456789')).data.completedCount, 1);
+  assert.equal((await api.getSeriesProgress()).pending.join(','), '123456789');
+  const warmed = await api.warmSeriesProgress('123456789');
+  assert.equal(warmed.progress.completed, 1);
+  assert.equal(warmed.progress.total, 2);
   assert.match((await api.getSeriesEpisodes('123456789')).data.episodes[0].fileUrl,/^https:\/\/app\.local\/media\//,'共享播放器需要与currentSrc一致的完整地址');
   assert.equal((await api.savePlaybackPosition('123456789',1,12,{duration:100})).success,true);
   assert.equal((await api.getWatchHistory()).results[0].currentTime,12);
@@ -72,6 +76,7 @@ test('共享页面安卓桥：真实资料持久化、历史校验、文件与�
   assert.equal((await api.deleteEpisodeFile('123456789',1)).success,true);
   assert.equal(files.size,0);
   assert.equal((await api.getSeriesEpisodes('123456789')).data.completedCount,0);
+  assert.equal((await api.getSeriesProgress()).pending.length, 0);
   assert.ok(state().series.length);
 });
 

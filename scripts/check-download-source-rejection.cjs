@@ -239,7 +239,9 @@ const checks = [
     lookup.resolve(rejected('HTTP_403')); await tick();
     assert.equal(pending.status, 'pending'); assert.equal(active.status, 'downloading');
     assert.equal(active.cancelSource.token.reason, undefined);
-    transfer.resolve(); await tick();
+    const running = h.run('Promise.all([...downloadRuns.values()])');
+    transfer.resolve();
+    await running;
     assert.equal(active.status, 'completed'); assert.equal(other.status, 'completed');
     assert.equal(pending.status, 'pending');
     assert.equal(h.run('activeDownloads'), 0); assert.equal(h.run('runningDownloads.size'), 0);

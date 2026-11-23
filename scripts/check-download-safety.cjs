@@ -47,15 +47,29 @@ async function check(name, run) { if (process.argv[2] && !new RegExp(process.arg
 async function crashedTemporary(overrides = {}) {
   const h = load({}, overrides), one = task('one', h.dir, 'downloading');
   h.set('seriesRegistry', series()); h.set('downloadTasks', [one]);
-  const temporary = await require('../src/native/download-temporary').createDownloadTemporary(h.dir, {
-    owner: { taskId:one.id, seriesId:'S', vid:'one', vidIndex:1, savePath:one.savePath },
-    onChange(record) {
-      one.temporaryDownloads ||= [];
-      if (!one.temporaryDownloads.includes(record)) one.temporaryDownloads.push(record);
-      h.run('saveDownloadTasks()');
-    },
-  });
-  file(temporary.input); await temporary.reserveOutput(); file(temporary.output);
+  const promises = require('node:fs/promises'), originalOpen = promises.open;
+  const handles = [];
+  let temporary;
+  promises.open = async (...args) => {
+    const handle = await originalOpen(...args);
+    handles.push(handle);
+    return handle;
+  };
+  try {
+    temporary = await require('../src/native/download-temporary').createDownloadTemporary(h.dir, {
+      owner: { taskId:one.id, seriesId:'S', vid:'one', vidIndex:1, savePath:one.savePath },
+      onChange(record) {
+        one.temporaryDownloads ||= [];
+        if (!one.temporaryDownloads.includes(record)) one.temporaryDownloads.push(record);
+        h.run('saveDownloadTasks()');
+      },
+    });
+    file(temporary.input); await temporary.reserveOutput(); file(temporary.output);
+  } finally {
+    promises.open = originalOpen;
+    // A terminated writer leaves receipts and files, but no open descriptors.
+    await Promise.all(handles.filter(handle => handle.fd !== -1).map(handle => handle.close()));
+  }
   h.run('saveDownloadTasks()');
   const restored = load({ root:h.dir }, overrides); restored.set('seriesRegistry', series());
   restored.context.crashSnapshot = h.saved();

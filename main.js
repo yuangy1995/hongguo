@@ -1955,10 +1955,13 @@ ipcMain.handle('search-window-show', async (event, visible, sourceUrl) => {
 // 已登记的短剧档案（不含被用户移除的）
 ipcMain.handle('get-series-list', async (event, options) => {
   const list = visibleSeries();
-  // 合并候选与实际合并共用磁盘检查，不能把在线播放档案当成已下载。
-  return options?.downloadedOnly === true
-    ? list.filter(series => collectSeriesEpisodeFiles(series.series_id, series.series_title).ordered.length > 0)
-    : list;
+  if (options?.downloadedOnly !== true) return list;
+  const downloaded = [];
+  for (const series of list) {
+    const { scan } = await getSeriesView(String(series.series_id));
+    if (scan.ordered.length) downloaded.push(series);
+  }
+  return downloaded;
 });
 
 /** 从列表移除一部短剧（只取消登记，不删本地文件） */
@@ -4916,25 +4919,28 @@ ipcMain.handle('test-proxy', async (event, draft) => {
 });
 
 // ===== IPC：下载管理 =====
+const verifiedMissingTaskFiles = new WeakMap();
+
 async function currentDownloadTaskView(verifyFiles = false) {
-  const options = {
+  if (verifyFiles) {
+    const conflicts = pathConflicts(downloadTasks);
+    for (const task of downloadTasks) {
+      if (task.status !== 'completed') continue;
+      const { savePath, fileIdentity, endTime } = task;
+      const checked = await completeTaskFileForList(task, conflicts);
+      if (task.status !== 'completed' || savePath !== task.savePath || fileIdentity !== task.fileIdentity || endTime !== task.endTime) continue;
+      if (checked.error) verifiedMissingTaskFiles.set(task, { savePath, fileIdentity, endTime });
+      else verifiedMissingTaskFiles.delete(task);
+    }
+  }
+  return downloadTaskView(downloadTasks, {
     xifanTitleConflict: info => episodeDisplayTitle(info.series_id, info.series_title, info.ep_title) !== info.ep_title,
-  };
-  if (!verifyFiles) {
-    return downloadTaskView(downloadTasks, {
-      ...options,
-      // Path conflicts are cheap and safe to detect here; full file identity checks run in the explicit verification pass.
-      hasCompleteFile: (task, conflicts) => !conflicts.get(task.savePath)?.has(task),
-    });
-  }
-  const conflicts = pathConflicts(downloadTasks);
-  const checks = new Map();
-  for (const task of downloadTasks) {
-    if (task.status !== 'completed') continue;
-    await new Promise(resolve => setTimeout(resolve, 0));
-    checks.set(task, !conflicts.get(task.savePath)?.has(task) && hasCompleteTaskFile(task, conflicts));
-  }
-  return downloadTaskView(downloadTasks, { ...options, hasCompleteFile: task => checks.get(task) === true });
+    hasCompleteFile: (task, conflicts) => {
+      if (!task.savePath || task.pathConflict || conflicts.get(task.savePath)?.has(task)) return false;
+      const missing = verifiedMissingTaskFiles.get(task);
+      return !missing || missing.savePath !== task.savePath || missing.fileIdentity !== task.fileIdentity || missing.endTime !== task.endTime;
+    },
+  });
 }
 
 ipcMain.handle('get-download-tasks', (_event, options = {}) => currentDownloadTaskView(options?.verifyFiles !== false));

@@ -41,6 +41,7 @@ esbuild.buildSync({
   outfile: path.join(root,tv ? 'build/tv/assets/app.js' : 'build/legacy-app.js'),
   bundle: true, format:'iife', platform:'browser', target:'chrome100', minify:true,
   inject:[path.join(root,'web/globals.js')],
+  define: { HONGGUO_ANDROID_WEBVIEW: 'true' },
   alias: {'android-decrypt':path.join(root,'build/decrypt.js'), 'node:crypto':path.join(root,'web/crypto.js'), 'node:zlib':path.join(root,'web/zlib.js'), 'node:timers/promises':path.join(root,'web/timers.cjs'), 'axios':path.join(root,'web/axios.cjs'),
     ...(tv ? {'node:fs':path.join(root,'mobile/fs.cjs'), 'node:path':path.join(root,'mobile/path.cjs')} : {})},
   legalComments:'eof',
