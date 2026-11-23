@@ -1,4 +1,4 @@
-// Hongguo Drama 7.5: desktop runtime; server entry is server/index.cjs.
+// Hongguo Drama 8.1: desktop runtime; server entry is server/index.cjs.
 /**
  * main.js - 红果短剧 6.2 下载器（独立版）主进程
  *
@@ -52,11 +52,11 @@ const { decryptInWorker } = require('./src/native/decrypt-worker.cjs');
 const { convertBytevc2 } = require('./src/native/bytevc2');
 const hardwareEncoding = require('./src/native/hardware-encoder');
 const { createDownloadTemporary, downloadTemporaryOwner, inspectDownloadTemporary, cleanupDownloadTemporary } = require('./src/native/download-temporary');
-const { readFileIdentity, sameFileObject } = require('./src/native/file-identity');
+const { readFileIdentity, readFileIdentityAsync, sameFileObject } = require('./src/native/file-identity');
 const { localMediaEnv } = require('./src/native/child-env');
 const { safeErrorText, sanitizeLogValue, sanitizeIpcValue } = require('./src/native/error-text');
 const { createIpcBoundary } = require('./src/native/ipc-boundary');
-const { downloadTaskView } = require('./src/native/download-task-view');
+const { downloadTaskView, pathConflicts } = require('./src/native/download-task-view');
 const { createProxyConfig } = require('./src/native/proxy-config');
 const { createProxyManager } = require('./src/native/proxy-manager');
 const { createHistoryService } = require('./src/native/history-service');
@@ -407,11 +407,13 @@ function loadDownloadTasks() {
   for (const task of downloadTasks) {
     if (task.status !== 'completed' || !task.savePath) continue;
     try {
-      const current = readFileIdentity(task.savePath);
-      if (!task.fileIdentity && legacyFileMatches(task, task.savePath)) {
-        task.fileIdentity = current;
+      if (!task.fileIdentity) {
+        if (!legacyFileMatches(task, task.savePath)) continue;
+        task.fileIdentity = readFileIdentity(task.savePath);
         migrated = true;
-      } else if (task.fileIdentity && !task.fileIdentity.contentHash && sameFileObject(task.fileIdentity, current)) {
+      } else if (!task.fileIdentity.contentHash) {
+        const current = readFileIdentity(task.savePath);
+        if (!sameFileObject(task.fileIdentity, current)) continue;
         task.fileIdentity = { ...task.fileIdentity, contentHash: current.contentHash };
         migrated = true;
       }
@@ -481,6 +483,7 @@ function rebuildSeriesRegistryFromTasks() {
 }
 
 function saveDownloadTasks() {
+  invalidateSeriesProgress();
   const serializable = downloadTasks.map((task) => {
     const { cancelSource, writer, ...rest } = task;
     if (rest.error) rest.error = safeErrorText(rest.error);
@@ -512,12 +515,23 @@ function restoreQueueTasks(snapshot) {
 
 // ===== 短剧档案（播放页据此列出完整分集）=====
 let seriesRegistry = [];
+const SERIES_PROGRESS_TTL_MS = 3 * 60 * 1000;
+const SERIES_SCAN_REACHABILITY_MS = 4000;
+const seriesProgressCache = new Map();
+const seriesEpisodeJobs = new Map();
+let seriesProgressRevision = 0;
+
+function invalidateSeriesProgress() {
+  seriesProgressRevision++;
+  seriesProgressCache.clear();
+}
 
 function loadSeriesRegistry() {
   seriesRegistry = store.getSeries() || [];
 }
 
 function saveSeriesRegistry() {
+  invalidateSeriesProgress();
   store.saveSeries(seriesRegistry);
 }
 
@@ -679,8 +693,15 @@ function sourceFailureHasEmpty(error) {
   return Array.isArray(error?.sources) && error.sources.some(item => item.code === 'EMPTY_RESPONSE');
 }
 
+function sourceFailureIsPublicLimited(error) {
+  return error?.code === 'SOURCE_UNAVAILABLE'
+    && Array.isArray(error.sources)
+    && error.sources.some(item => item.code === 'PUBLIC_ACCESS_LIMITED');
+}
+
 function isDeferrableSourceError(task, error) {
   if (!/^\d{1,30}$/.test(String(task.hongguoInfo?.vid || ''))) return false;
+  if (sourceFailureIsPublicLimited(error)) return false;
   if (isTransientRegistrationFailure(error)) return true;
   if (error?.code === 'EMPTY_RESPONSE') return true;
   if (error?.code === 'SOURCE_UNAVAILABLE') {
@@ -899,6 +920,7 @@ async function executeHongguoDownload(task) {
   task.cancelSource = source;
   let tmpPath, writer, temporary, finalPath;
   const numeric = /^\d{1,30}$/.test(String(vid));
+  const preferSdk = numeric;
   try {
     delete task.published;
     task.status = 'downloading'; task.cancelled = false; task.progress = 0; delete task.retryAt;
@@ -1024,8 +1046,18 @@ async function executeHongguoDownload(task) {
       }
       reusedCache = await reuseCache();
     }
-    if (!reusedCache) await withMediaRecovery(vid, hongguoInfo?.series_id, { playInfo: checkedPlayInfo, quality, allowLowerQuality, force: true, cancelToken: source.token,
-      onSourceReady: numeric ? clearHongguoSourceBackoff : null }, async playInfo => {
+    if (!reusedCache && preferSdk) {
+      task.qualityNotice = '正在获取完整片源';
+      sendToRenderer('download-progress', { id, qualityNotice: task.qualityNotice });
+    }
+    if (!reusedCache) await withMediaRecovery(vid, hongguoInfo?.series_id, { playInfo: checkedPlayInfo, quality, allowLowerQuality, preferSdk, force: true, cancelToken: source.token,
+      onSourceReady: () => {
+        if (numeric) clearHongguoSourceBackoff();
+        if (preferSdk && task.qualityNotice === '正在获取完整片源') {
+          task.qualityNotice = '';
+          sendToRenderer('download-progress', { id, qualityNotice: '' });
+        }
+      } }, async playInfo => {
       source.token.throwIfRequested();
       const bytevc2Executable = playInfo.codec === 'bytevc2' ? requireBytevc2Executable() : null;
       notifyQuality(Math.min(Number(playInfo.width), Number(playInfo.height)));
@@ -1142,10 +1174,16 @@ async function executeHongguoDownload(task) {
       }
     } else {
       const retries = task.sourceRetries || 0;
-      task.status = 'failed'; task.error = error.code === 'EEXIST' ? '下载临时文件发生冲突或已变化，已有文件已保留，请重试' : error.message; task.endTime = Date.now();
+      const publicLimited = numeric && sourceFailureIsPublicLimited(error);
+      const accessible = Number(task.hongguoInfo?.web_accessible_episodes);
+      task.status = 'failed';
+      task.error = publicLimited
+        ? `本集不在官网公开片源范围${Number.isSafeInteger(accessible) && accessible > 0 ? `（公开源只提供前 ${accessible} 集）` : ''}；后续集需在官方 App 观看，本应用不绕过登录、付费或 DRM。`
+        : error.code === 'EEXIST' ? '下载临时文件发生冲突或已变化，已有文件已保留，请重试' : error.message;
+      task.endTime = Date.now();
       const rejection = numeric && isDownloadSourceRejection(error);
-      const rejectionRetry = rejection || isTransientRegistrationFailure(error)
-        || error.code === 'EMPTY_RESPONSE' || error.code === 'SOURCE_UNAVAILABLE' && sourceFailureHasEmpty(error);
+      const rejectionRetry = !publicLimited && (rejection || isTransientRegistrationFailure(error)
+        || error.code === 'EMPTY_RESPONSE' || error.code === 'SOURCE_UNAVAILABLE' && sourceFailureHasEmpty(error));
       const delays = rejectionRetry ? REJECTION_RETRY_DELAYS
         : error.code === 'SOURCE_UNAVAILABLE' || [404, 410].includes(error.mediaStatus)
           ? SOURCE_RETRY_DELAYS : TRANSFER_RETRY_DELAYS;
@@ -1153,12 +1191,16 @@ async function executeHongguoDownload(task) {
         holdHongguoLookups(REJECTION_RETRY_DELAYS[Math.min(sourceRejectionStreak, REJECTION_RETRY_DELAYS.length - 1)]);
         sourceRejectionStreak++;
       }
-      if (retries < delays.length && (rejection || isDeferrableSourceError(task, error))) {
+      if (!publicLimited && retries < delays.length && (rejection || isDeferrableSourceError(task, error))) {
         const delay = delays[retries];
         task.sourceRetries = retries + 1; task.retryAt = Date.now() + delay; task.sourceRetryLimit = delays.length;
         const wait = delay >= 120000 ? `${delay / 60000} 分钟` : `${delay / 1000} 秒`;
         task.error = `${error.message} 将在 ${wait}后自动重试（${retries + 1}/${delays.length}）。`;
         armSourceRetry(task);
+      } else if (publicLimited) {
+        delete task.sourceRetries;
+        delete task.sourceRetryLimit;
+        delete task.retryAt;
       }
       sendToRenderer('download-failed', { id, error: task.error, retryAt: task.retryAt || null,
         sourceRetries: task.sourceRetries || 0, sourceRetryLimit: task.sourceRetryLimit || 3, qualityNotice: '' });
@@ -2516,6 +2558,324 @@ function ownsEpisodeFiles(file, owners) {
     && !mergeTasks.some(task => paths.has(task.output));
 }
 
+function withDeadline(promise, deadline) {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) return Promise.reject(new Error('网络目录响应超时'));
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('网络目录响应超时')), remaining);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+async function seriesDirectoryIsUsable(directory, deadline) {
+  try {
+    const stat = await withDeadline(fsp.lstat(directory), deadline);
+    return stat.isDirectory() && !stat.isSymbolicLink();
+  } catch (_) { return false; }
+}
+
+async function resolveSeriesDirAsync(seriesId, seriesTitle, tasks, deadline) {
+  for (const task of tasks) {
+    if (task.customDir && await seriesDirectoryIsUsable(task.customDir, deadline)) return task.customDir;
+    if (task.savePath && await seriesDirectoryIsUsable(path.dirname(task.savePath), deadline)) return path.dirname(task.savePath);
+  }
+  const settings = getCurrentSettings();
+  const root = (settings.root && String(settings.root).trim()) ? String(settings.root).trim() : app.getPath('downloads');
+  const guess = seriesDownloadDir(root, seriesId, seriesTitle);
+  if (await seriesDirectoryIsUsable(guess, deadline)) return guess;
+  if (!/^(xifan|hema|reelshort|dramabox|custom):/.test(String(seriesId))) {
+    const title = sanitizeFolderName(seriesTitle) || '未命名短剧';
+    const owners = seriesRegistry.filter(series => sanitizeFolderName(series.series_title) === title);
+    const legacy = path.join(root, '红果短剧', title);
+    if (owners.length <= 1 && await seriesDirectoryIsUsable(legacy, deadline)) return legacy;
+  }
+  return null;
+}
+
+async function readDirectoryIdentityAsync(directory) {
+  const real = await fsp.realpath(directory);
+  const stat = await fsp.stat(real, { bigint: true });
+  if (!stat.isDirectory()) throw new Error('下载目录不可用');
+  return { directory: real, device: Number(stat.dev), ino: Number(stat.ino) };
+}
+
+async function directoryIdentityMismatch(identity, file) {
+  try {
+    const stat = await fsp.lstat(identity.directory);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return 'type';
+    if (stat.dev !== identity.device) return 'device';
+    const identityPath = await fsp.realpath(identity.directory);
+    const parentPath = await fsp.realpath(path.dirname(file));
+    if (path.relative(identityPath, parentPath) !== '') return 'path';
+    if (Number.isSafeInteger(identity.ino) && identity.ino > 0
+      && Number.isSafeInteger(stat.ino) && stat.ino > 0
+      && stat.ino !== identity.ino) return 'inode';
+    return '';
+  } catch (_) { return 'unavailable'; }
+}
+
+async function nasDestinationCurrentAsync(destination, file) {
+  try {
+    if (!destination?.root || !destination?.directory || !pathInside(destination.directory, file)) return false;
+    const root = await fsp.lstat(destination.root, { bigint: true });
+    const directory = await fsp.lstat(destination.directory, { bigint: true });
+    if (!root.isDirectory() || root.isSymbolicLink() || Number(root.dev) !== destination.device
+      || await fsp.realpath(destination.root) !== destination.root
+      || !directory.isDirectory() || directory.isSymbolicLink() || Number(directory.dev) !== destination.device
+      || await fsp.realpath(destination.directory) !== destination.directory) return false;
+    for (const [name, identity] of [['root', destination.rootIdentity], ['directory', destination.directoryIdentity]]) {
+      if (!identity) continue;
+      const stat = name === 'root' ? root : directory;
+      if (String(stat.dev) !== identity.dev || String(stat.ino) !== identity.ino
+        || (identity.birthtimeNs != null && String(stat.birthtimeNs) !== identity.birthtimeNs)) return false;
+    }
+    return true;
+  } catch (_) { return false; }
+}
+
+async function legacyFileMatchesAsync(task, file) {
+  try {
+    const started = Number(task.startTime), ended = Number(task.endTime);
+    if (!Number.isFinite(started) || started <= 0 || !Number.isFinite(ended) || ended < started) return false;
+    const stat = await fsp.lstat(file);
+    const birth = stat.birthtimeMs > 0 ? stat.birthtimeMs : stat.mtimeMs;
+    return stat.isFile() && !stat.isSymbolicLink() && birth >= started - 2000 && birth <= ended + 2000;
+  } catch (_) { return false; }
+}
+
+async function completeTaskFileForList(task, conflicts) {
+  const failed = reason => ({ error: reason });
+  if (!task?.savePath) return failed('missing-path');
+  if (task.pathConflict) return failed('path-conflict');
+  if (conflicts.get(task.savePath)?.has(task)) return failed('task-conflict');
+  if (task.nasDestination && !await nasDestinationCurrentAsync(task.nasDestination, task.savePath)) return failed('nas-identity');
+  if (!task.nasDestination && task.directoryIdentity) {
+    const mismatch = await directoryIdentityMismatch(task.directoryIdentity, task.savePath);
+    if (mismatch) return failed(`directory-${mismatch}`);
+  }
+  try {
+    const stat = await fsp.lstat(task.savePath);
+    if (!stat.isFile() || stat.isSymbolicLink()) return failed('not-file');
+    if (stat.size <= 1024 * 100) return failed('too-small');
+    if (task.fileIdentity) {
+      const current = await readFileIdentityAsync(task.savePath, { content: false });
+      if (!sameFileObject(task.fileIdentity, current)) return failed('file-identity');
+      if (task.fileIdentity.contentHash
+        && (current.mtimeNs !== task.fileIdentity.mtimeNs || current.ctimeNs !== task.fileIdentity.ctimeNs
+          || current.birthtimeNs !== task.fileIdentity.birthtimeNs)) {
+        const full = await readFileIdentityAsync(task.savePath);
+        if (!sameFileObject(task.fileIdentity, full)) return failed('content-identity');
+      }
+    } else if (!await legacyFileMatchesAsync(task, task.savePath)) return failed('legacy-identity');
+    return { size: stat.size, identity: task.fileIdentity?.contentHash ? task.fileIdentity : null };
+  } catch (_) { return failed('stat-error'); }
+}
+
+async function scanSeriesEpisodes(seriesId, seriesTitle, tasks, entry) {
+  const conflicts = pathConflicts(downloadTasks);
+  const byIndex = new Map(), failures = new Map();
+  for (let offset = 0; offset < tasks.length; offset += 6) {
+    const batch = tasks.slice(offset, offset + 6);
+    const checked = await Promise.all(batch.map(task => completeTaskFileForList(task, conflicts)));
+    batch.forEach((task, index) => {
+      const complete = checked[index];
+      const idx = Number(task.hongguoInfo?.vid_index) || 0;
+      if (!complete || complete.error) {
+        if (idx && task.status === 'completed') failures.set(task.id, complete?.error || 'incomplete');
+        return;
+      }
+      if (!idx || !ownsEpisodeFiles(task.savePath, tasks)) {
+        if (idx && task.status === 'completed') failures.set(task.id, 'ownership');
+        return;
+      }
+      const previous = byIndex.get(idx);
+      if (!previous || (task.startTime || 0) > (previous.startTime || 0)) byIndex.set(idx, {
+        vid_index: idx, startTime: task.startTime || 0, path: task.savePath,
+        filename: task.filename || path.basename(task.savePath), size: complete.size,
+        identity: complete.identity, task,
+      });
+    });
+  }
+
+  const deadline = Date.now() + SERIES_SCAN_REACHABILITY_MS;
+  const dir = await resolveSeriesDirAsync(seriesId, seriesTitle, tasks, deadline);
+  let names = [], scanFailed = 0, dirIdentity = null;
+  if (dir) {
+    try {
+      const stat = await withDeadline(fsp.lstat(dir), deadline);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error();
+      dirIdentity = await withDeadline(readDirectoryIdentityAsync(dir), deadline);
+      names = await withDeadline(fsp.readdir(dir), deadline);
+    } catch (_) { scanFailed = 1; }
+  } else {
+    scanFailed = 1;
+  }
+
+  const sharedDirectory = dir && (downloadTasks.some(task => String(task.hongguoInfo?.series_id) !== seriesId
+      && task.savePath && path.dirname(task.savePath) === dir)
+    || mergeTasks.some(task => String(task.seriesId) !== seriesId && task.output && path.dirname(task.output) === dir));
+  const registeredPaths = new Set([...downloadTasks.map(task => task.savePath), ...mergeTasks.map(task => task.output)].filter(Boolean));
+  const episodeNames = new Map();
+  const formats = new Set([getCurrentSettings().name_format, '剧名 集数', '剧名 集数 标题', '剧名']);
+  const ambiguousTitle = sharedDirectory && (seriesRegistry.some(series => String(series.series_id) !== seriesId
+      && sanitizeFolderName(series.series_title) === sanitizeFolderName(seriesTitle))
+    || downloadTasks.some(task => String(task.hongguoInfo?.series_id) !== seriesId && task.savePath
+      && path.dirname(task.savePath) === dir
+      && sanitizeFolderName(task.hongguoInfo?.series_title || '') === sanitizeFolderName(seriesTitle)));
+  if (!ambiguousTitle) for (const episode of entry?.episodes || []) {
+    for (const nameFormat of formats) {
+      if (sharedDirectory && !/剧名|\bseries_title\b/.test(nameFormat || '')) continue;
+      episodeNames.set(uniqueEpisodeFilename({ name_format: nameFormat }, seriesTitle, episode), Number(episode.vid_index));
+    }
+  }
+  const candidates = names.map(name => {
+    if (!/\.mp4$/i.test(name) || name.includes('合集')) return null;
+    const idx = episodeNames.get(name) || 0;
+    const full = dir && path.join(dir, name);
+    if (!idx || !full || byIndex.has(idx) || registeredPaths.has(full) || !ownsEpisodeFiles(full, tasks)) return null;
+    return { idx, full, name };
+  }).filter(Boolean);
+  for (let offset = 0; offset < candidates.length; offset += 6) {
+    const batch = candidates.slice(offset, offset + 6);
+    const checked = await Promise.all(batch.map(async item => {
+      try {
+        const stat = await fsp.lstat(item.full);
+        return stat.isFile() && !stat.isSymbolicLink() && stat.size > 1024 * 100 ? stat.size : null;
+      } catch (_) { return null; }
+    }));
+    batch.forEach((item, index) => {
+      if (checked[index] != null) byIndex.set(item.idx, {
+        vid_index: item.idx, path: item.full, filename: item.name, size: checked[index], identity: null, task: null,
+      });
+    });
+  }
+  return {
+    dir, dirIdentity, scanFailed, failures, ordered: [...byIndex.values()].sort((a, b) => a.vid_index - b.vid_index),
+  };
+}
+
+function seriesEpisodeBase(seriesId, entry, tasks) {
+  return entry && entry.episodes.length
+    ? entry.episodes
+    : tasks.map(task => ({
+        vid: task.hongguoInfo.vid,
+        vid_index: task.hongguoInfo.vid_index,
+        title: task.hongguoInfo.ep_title || '',
+      }));
+}
+
+function getSeriesView(seriesId) {
+  const revision = seriesProgressRevision;
+  const existing = seriesEpisodeJobs.get(seriesId);
+  if (existing?.revision === revision) return existing.promise;
+  const jobEntry = { revision, promise: null };
+  const job = (async () => {
+    const seriesEntry = seriesRegistry.find(series => String(series.series_id) === seriesId);
+    const tasks = downloadTasks.filter(task => task.hongguoInfo && String(task.hongguoInfo.series_id) === seriesId);
+    const seriesTitle = seriesEntry?.series_title || tasks[0]?.hongguoInfo?.series_title || '未命名短剧';
+    return {
+      at: Date.now(),
+      entry: seriesEntry,
+      seriesTitle,
+      baseEpisodes: seriesEpisodeBase(seriesId, seriesEntry, tasks),
+      scan: await scanSeriesEpisodes(seriesId, seriesTitle, tasks, seriesEntry),
+    };
+  })().finally(() => { if (seriesEpisodeJobs.get(seriesId) === jobEntry) seriesEpisodeJobs.delete(seriesId); });
+  jobEntry.promise = job;
+  seriesEpisodeJobs.set(seriesId, jobEntry);
+  return job;
+}
+
+async function seriesEpisodesData(seriesId, { withUrls = true } = {}) {
+  const view = await getSeriesView(seriesId);
+  const { entry, seriesTitle, baseEpisodes, scan } = view;
+  const tasks = downloadTasks.filter(task => task.hongguoInfo && String(task.hongguoInfo.series_id) === seriesId);
+  const taskByIndex = new Map();
+  for (const task of tasks) {
+    const index = Number(task.hongguoInfo.vid_index);
+    const previous = taskByIndex.get(index);
+    if (!previous || (task.startTime || 0) > (previous.startTime || 0)) taskByIndex.set(index, task);
+  }
+  const scannedByIndex = new Map(scan.ordered.map(item => [Number(item.vid_index), item]));
+  const episodes = baseEpisodes.map(episode => {
+    const idx = Number(episode.vid_index), task = taskByIndex.get(idx), scanned = scannedByIndex.get(idx);
+    let status = 'missing', fileUrl = null, progress = 0, fileSize = 0, savePath = null;
+    let candidate = null;
+    if (task?.savePath) {
+      savePath = task.savePath;
+      const complete = scanned?.task === task;
+      if (complete) {
+        status = 'completed';
+        candidate = scanned;
+        fileSize = scanned.size;
+      } else if (task.status === 'downloading') {
+        status = 'downloading'; progress = task.progress || 0;
+      } else if (task.status === 'pending') status = 'pending';
+      else if (task.status !== 'completed') status = task.status;
+    }
+    if (status === 'missing' && scanned && scanned.task !== task) {
+      status = 'completed'; candidate = scanned; savePath = scanned.path; fileSize = scanned.size;
+    }
+    return {
+      vid: episode.vid, vid_index: idx,
+      title: seriesId.startsWith('xifan:')
+        ? require('./src/native/xifan').episodeDisplayTitle(seriesId, seriesTitle, episode.title || '') : episode.title || '',
+      web_available: episode.web_available ?? null,
+      locked: episode.locked === true,
+      taskId: task ? task.id : null,
+      error: task?.error || '',
+      retryAt: task?.retryAt || null,
+      actualQuality: task?.actualQuality || null,
+      status, progress, fileSize, fileUrl, savePath,
+      candidate,
+      localCheck: task?.status === 'completed' && !candidate ? scan.failures.get(task.id) || 'not-matched' : undefined,
+    };
+  }).sort((a, b) => a.vid_index - b.vid_index);
+
+  if (withUrls) {
+    for (let offset = 0; offset < episodes.length; offset += 6) {
+      await Promise.all(episodes.slice(offset, offset + 6).map(async episode => {
+        const candidate = episode.candidate;
+        if (episode.status !== 'completed' || !candidate) return;
+        const validate = candidate.task
+          ? () => downloadTasks.includes(candidate.task) && candidate.task.savePath === candidate.path
+            && hasCompleteTaskFile(candidate.task)
+          : () => {
+              try {
+                if (!scan.dirIdentity) return false;
+                validateDirectoryIdentity(scan.dirIdentity, candidate.path);
+                return isRegularFile(candidate.path);
+              } catch (_) { return false; }
+            };
+        try {
+          const identity = candidate.identity || await readFileIdentityAsync(candidate.path);
+          candidate.identity = identity;
+          episode.fileUrl = mediaAccess.localUrlWithIdentity(candidate.path, identity, validate);
+        } catch (_) {
+          episode.status = 'missing';
+          episode.fileUrl = null;
+        }
+        delete episode.candidate;
+      }));
+    }
+  }
+  episodes.forEach(episode => { delete episode.candidate; });
+  const completedCount = episodes.filter(episode => episode.status === 'completed').length;
+  const data = {
+    series_id: seriesId, series_title: seriesTitle, cover: entry?.cover || '', seriesDir: scan.dir,
+    web_accessible_episodes: entry?.web_accessible_episodes ?? null,
+    total: episodes.length, completedCount, episodes,
+  };
+  const revision = seriesProgressRevision;
+  if (revision === seriesProgressRevision) {
+    seriesProgressCache.set(seriesId, { at: Date.now(), completed: completedCount, total: episodes.length });
+  }
+  return data;
+}
+
 /**
  * 组装合并顺序：只认磁盘上真实存在的文件（任务队列可能因为重复提交、
  * 手动删除、跨会话下载等原因与实际文件不一致）。
@@ -2753,122 +3113,40 @@ function loadMergeTasks() {
  * 判定可播的规则与下载跳过逻辑一致：文件存在且 > 100KB。
  * 由于解密文件是「先写 .enc.tmp、成功后改名 .mp4」，因此不会读到半成品。
  */
+ipcMain.handle('get-series-progress', async () => {
+  const progress = {}, pending = [];
+  for (const series of visibleSeries()) {
+    const sid = String(series.series_id);
+    const cached = seriesProgressCache.get(sid);
+    if (cached) {
+      progress[sid] = { completed: cached.completed, total: cached.total };
+      if (Date.now() - cached.at >= SERIES_PROGRESS_TTL_MS) pending.push(sid);
+    } else {
+      progress[sid] = {
+        completed: 0,
+        total: Number(series.total) || (Array.isArray(series.episodes) ? series.episodes.length : 0),
+      };
+      pending.push(sid);
+    }
+  }
+  return { success: true, progress, pending };
+});
+
+ipcMain.handle('warm-series-progress', async (_event, seriesId) => {
+  const sid = String(seriesId || '');
+  if (!sid) return { success: false, error: '缺少剧集编号' };
+  try {
+    const data = await seriesEpisodesData(sid, { withUrls: false });
+    return { success: true, progress: { completed: data.completedCount, total: data.total } };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('get-series-episodes', async (event, seriesId) => {
   try {
-    const sid = String(seriesId);
-    const entry = seriesRegistry.find((s) => String(s.series_id) === sid);
-    const tasks = downloadTasks.filter((t) => t.hongguoInfo && String(t.hongguoInfo.series_id) === sid);
-
-    // 一集只保留一个任务（同 vid 重复提交时取最新的）
-    const taskByIndex = new Map();
-    for (const t of tasks) {
-      const idx = Number(t.hongguoInfo.vid_index);
-      const prev = taskByIndex.get(idx);
-      if (!prev || (t.startTime || 0) > (prev.startTime || 0)) taskByIndex.set(idx, t);
-    }
-
-    const baseEpisodes =
-      entry && entry.episodes.length
-        ? entry.episodes
-        : tasks.map((t) => ({
-            vid: t.hongguoInfo.vid,
-            vid_index: t.hongguoInfo.vid_index,
-            title: t.hongguoInfo.ep_title || '',
-          }));
-
-    // 目录兜底：磁盘上可能存在没有任务记录的「孤儿」文件
-    // （任务被清理、跨会话下载等），仅靠任务判断会把它们误报成「未下载」。
-    const seriesTitle = (entry && entry.series_title) ||
-      (tasks[0] && tasks[0].hongguoInfo.series_title) || '未命名短剧';
-    let scannedByIndex = new Map(), scannedDirIdentity = null;
-    let seriesDir = null;
-    try {
-      const scanned = collectSeriesEpisodeFiles(sid, seriesTitle);
-      seriesDir = scanned.dir;
-      scannedDirIdentity = scanned.dirIdentity;
-      for (const e of scanned.ordered) scannedByIndex.set(Number(e.vid_index), e);
-    } catch (_) {}
-
-    const episodes = baseEpisodes
-      .map((ep) => {
-        const idx = Number(ep.vid_index);
-        const t = taskByIndex.get(idx);
-        let status = 'missing';
-        let fileUrl = null;
-        let progress = 0;
-        let fileSize = 0;
-        let savePath = null;
-
-        if (t && t.savePath) {
-          savePath = t.savePath;
-          if (fs.existsSync(t.savePath)) {
-            try { fileSize = fs.lstatSync(t.savePath).size; } catch (_) {}
-          }
-          if (hasCompleteTaskFile(t)) {
-            status = 'completed';
-            fileUrl = localPlayUrl(savePath, () => downloadTasks.includes(t)
-              && t.savePath === savePath && hasCompleteTaskFile(t));
-          } else if (t.status === 'downloading') {
-            status = 'downloading';
-            progress = t.progress || 0;
-          } else if (t.status === 'pending') {
-            status = 'pending';
-          } else {
-            status = t.status === 'completed' ? 'missing' : t.status;
-          }
-        }
-
-        // 任务缺失（或该任务没有可用文件）时，用磁盘扫描结果兜底
-        if (status === 'missing') {
-          const f = scannedByIndex.get(idx);
-          if (f) {
-            savePath = f.path;
-            fileUrl = localPlayUrl(f.path, () => {
-              try {
-                if (!scannedDirIdentity) return false;
-                validateDirectoryIdentity(scannedDirIdentity, f.path);
-                return isRegularFile(f.path);
-              } catch (_) { return false; }
-            });
-            try { fileSize = fs.lstatSync(f.path).size; } catch (_) {}
-            status = 'completed';
-          }
-        }
-
-        return {
-          vid: ep.vid,
-          vid_index: idx,
-          title: sid.startsWith('xifan:')
-            ? require('./src/native/xifan').episodeDisplayTitle(sid, seriesTitle, ep.title || '') : ep.title || '',
-          web_available: ep.web_available ?? null,
-          locked: ep.locked === true,
-          taskId: t ? t.id : null,
-          error: t?.error || '',
-          retryAt: t?.retryAt || null,
-          actualQuality: t?.actualQuality || null,
-          status,
-          progress,
-          fileSize,
-          fileUrl,
-          savePath,
-        };
-      })
-      .sort((a, b) => a.vid_index - b.vid_index);
-
-    const completedCount = episodes.filter((e) => e.status === 'completed').length;
-    return {
-      success: true,
-      data: {
-        series_id: sid,
-        series_title: seriesTitle,
-        cover: (entry && entry.cover) || '',
-        seriesDir,
-        web_accessible_episodes: entry?.web_accessible_episodes ?? null,
-        total: episodes.length,
-        completedCount,
-        episodes,
-      },
-    };
+    const data = await seriesEpisodesData(String(seriesId));
+    return { success: true, data };
   } catch (error) {
     console.error('[Player] 读取分集失败:', error.message);
     return { success: false, error: error.message };
@@ -3094,7 +3372,8 @@ async function withMediaRecovery(vid, seriesId, options, consume) {
         if (!info) {
           lookup = boundedSignal(controller.signal, 30000);
           info = await awaitMediaOperation(hongguo.fetchPlayUrlSingle(vid, seriesId,
-            { quality: options.quality, allowLowerQuality: options.allowLowerQuality, force: options.force || round > 0, signal: lookup.signal }), lookup.signal);
+            { quality: options.quality, allowLowerQuality: options.allowLowerQuality, preferSdk: options.preferSdk === true,
+              force: options.force || round > 0, signal: lookup.signal }), lookup.signal);
           throwIfAborted(lookup.signal);
         }
       } catch (error) {
@@ -3472,7 +3751,7 @@ async function prepareHlsEntry(playInfo,entry,signal,onProgress) {
 }
 
 ipcMain.handle('prepare-online-play', async (event, payload) => {
-  const { vid, seriesId, vidIndex, requestId, prefetch = false, force = false } = payload || {};
+  const { vid, seriesId, vidIndex, requestId, prefetch = false, force = false, allowLowerQuality = false } = payload || {};
   if (!vid) return { success: false, error: '缺少 vid' };
   let quality;
   try { quality = playbackQuality(payload.quality, vid); } catch (error) { return { success: false, error: error.message }; }
@@ -3498,7 +3777,7 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
               sendToRenderer('online-play-progress',{vid:sourceVid,seriesId,vidIndex,requestId:active.requestId, ...job.progress});
             }
           };
-          const prepared = await withMediaRecovery(sourceVid,seriesId,{playInfo:checkedPlayInfo,quality,force,signal:controller.signal},async playInfo => {
+          const prepared = await withMediaRecovery(sourceVid,seriesId,{playInfo:checkedPlayInfo,quality,allowLowerQuality,force,signal:controller.signal},async playInfo => {
             const entry = {quality,codec:playInfo.codec === 'bytevc2' ? 'h264' : playInfo.codec || '',size:0,lastUsed:Date.now(),seriesId:String(seriesId||''),vidIndex:Number(vidIndex)||0};
             if (playInfo.format === 'hls') await prepareHlsEntry(playInfo,entry,controller.signal,received => progress(received,0));
             else if (!prefetch && !playInfo.spadeA && !playInfo.contentKey && playInfo.codec !== 'bytevc2') return {...entry,playInfo};
@@ -4091,6 +4370,8 @@ ipcMain.handle('decode-capability', async () => ({
 async function enqueueEpisodes({ seriesId, seriesTitle, episodes, cover, quality, nasDestination }) {
   if (!Array.isArray(episodes) || episodes.length === 0) return 0;
   const settings = getCurrentSettings();
+  const publicEpisodeLimit = typeof seriesRegistry === 'undefined' ? null
+    : seriesRegistry.find(item => String(item.series_id) === String(seriesId))?.web_accessible_episodes ?? null;
   const downloadQuality = normalizeDownloadQuality(quality ?? settings.download_quality);
   if (/^(xifan|hema|reelshort|dramabox|custom):/.test(String(seriesId))) {
     const current = await hongguo.fetchEpisodeList(seriesId);
@@ -4176,6 +4457,10 @@ async function enqueueEpisodes({ seriesId, seriesTitle, episodes, cover, quality
     );
     if (dup) {
       changedTasks.push({ task: dup, previous: { ...dup } });
+      if (dup.hongguoInfo) {
+        dup.hongguoInfo.web_available = ep.web_available ?? null;
+        dup.hongguoInfo.web_accessible_episodes = publicEpisodeLimit;
+      }
       if (!nasDestination) dup.metadataWarning = metadataWarning;
       if (!nasDestination && !dup.nasDestination && !dup.directoryIdentity && typeof dup.savePath === 'string' && fs.existsSync(path.dirname(dup.savePath)))
         dup.directoryIdentity = readDirectoryIdentity(path.dirname(dup.savePath));
@@ -4237,6 +4522,8 @@ async function enqueueEpisodes({ seriesId, seriesTitle, episodes, cover, quality
         series_title: cleanSeriesTitle,
         vid_index: ep.vid_index,
         ep_title: ep.title,
+        web_available: ep.web_available ?? null,
+        web_accessible_episodes: publicEpisodeLimit,
       },
     };
 
@@ -4546,6 +4833,7 @@ async function saveSettings(settings) {
       try { await applyProxyWithTimeout(current, 5000); } catch (_) { /* 旧配置也可能已不可用 */ }
       throw error;
     }
+    invalidateSeriesProgress();
     if (merged.app_updates_enabled === false) { updateDownloadGeneration++; appUpdateInstaller?.cancel(); }
     if (wasCheckingUpdates !== (merged.app_updates_enabled !== false)) {
       sendToRenderer('app-update-preference', merged.app_updates_enabled !== false);
@@ -4628,12 +4916,28 @@ ipcMain.handle('test-proxy', async (event, draft) => {
 });
 
 // ===== IPC：下载管理 =====
-ipcMain.handle('get-download-tasks', () => {
-  return downloadTaskView(downloadTasks, {
-    hasCompleteFile: hasCompleteTaskFile,
+async function currentDownloadTaskView(verifyFiles = false) {
+  const options = {
     xifanTitleConflict: info => episodeDisplayTitle(info.series_id, info.series_title, info.ep_title) !== info.ep_title,
-  });
-});
+  };
+  if (!verifyFiles) {
+    return downloadTaskView(downloadTasks, {
+      ...options,
+      // Path conflicts are cheap and safe to detect here; full file identity checks run in the explicit verification pass.
+      hasCompleteFile: (task, conflicts) => !conflicts.get(task.savePath)?.has(task),
+    });
+  }
+  const conflicts = pathConflicts(downloadTasks);
+  const checks = new Map();
+  for (const task of downloadTasks) {
+    if (task.status !== 'completed') continue;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    checks.set(task, !conflicts.get(task.savePath)?.has(task) && hasCompleteTaskFile(task, conflicts));
+  }
+  return downloadTaskView(downloadTasks, { ...options, hasCompleteFile: task => checks.get(task) === true });
+}
+
+ipcMain.handle('get-download-tasks', (_event, options = {}) => currentDownloadTaskView(options?.verifyFiles !== false));
 
 
 // ===== 文件清理（删除已下载的本地文件）=====

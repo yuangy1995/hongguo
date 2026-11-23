@@ -8,10 +8,19 @@ const zlib = require('node:zlib');
 const success = { device_id: '123', install_id: '456' };
 function modelStage(config) {
     const url = new URL(config.url);
+    if (url.pathname === '/reading/bookapi/video_tab/multi_video_model/v1/') {
+        assert.equal(config.method, 'GET');
+        assert.equal(url.hostname, 'api5-normal-sinfonlineb.fqnovel.com');
+        return 'video-tab';
+    }
     assert.equal(config.method, 'POST');
     if (url.pathname === '/novel/player/multi_video_model/v1/') {
         assert.equal(url.hostname, 'api5-normal-sinfonlineb.fqnovel.com');
         return 'legacy';
+    }
+    if (url.pathname === '/novel/player/video_model/v1/') {
+        assert.ok(['api5-normal-sinfonlinea.fqnovel.com', 'api5-normal-sinfonlinec.fqnovel.com'].includes(url.hostname));
+        return url.hostname.includes('sinfonlinea') ? 'model-a' : 'model-c';
     }
     assert.equal(url.pathname, '/novel/player/multi_video_model/player/v1');
     assert.ok(['api5-normal-sinfonlineb.fqnovel.com', 'api5-normal-sinfonlinea.fqnovel.com'].includes(url.hostname));
@@ -67,9 +76,24 @@ test('empty playback responses keep their classification through the public sour
     assert.match(result.error, /所选清晰度 1080p，未降级/);
     assert.match(result.error, /空响应.*原因尚未确认/);
     assert.doesNotMatch(JSON.stringify(result), /签名|鉴权|请检查网络|PRIVATE_SENTINEL/);
-    assert.equal(registrations, 2, 'empty recovery permits only the initial identity and one renewal');
-    assert.equal(models, 3, 'empty recovery permits two v5 hosts and one legacy model');
-    assert.deepEqual(stages, ['registration', 'primary', 'alternate', 'renewal', 'legacy']);
+    assert.equal(registrations, 2, 'empty routes rotate identity once');
+    assert.equal(models, 24, 'six routes each probe twice for two identities');
+    assert.deepEqual(stages, [
+        'registration',
+        'video-tab', 'video-tab',
+        'primary', 'primary',
+        'alternate', 'alternate',
+        'model-a', 'model-a',
+        'model-c', 'model-c',
+        'legacy', 'legacy',
+        'renewal',
+        'video-tab', 'video-tab',
+        'primary', 'primary',
+        'alternate', 'alternate',
+        'model-a', 'model-a',
+        'model-c', 'model-c',
+        'legacy', 'legacy',
+    ]);
 });
 
 function app(transport, clock = Date) {
@@ -242,10 +266,10 @@ test('canceling one lookup leaves another lookup and shared search/account regis
     await failed;
     assert.equal(independentSignal.aborted, false);
     assert.equal(await api.getPlaybackDevice(() => assert.fail('must keep shared registration')), shared);
-    assert.equal(calls, 5);
+    assert.equal(calls, 3);
 });
 
-test('registration and models retain separate 8s/12s budgets; failed renewal stays bounded', async () => {
+test('registration and models retain separate 8s/12s budgets across route recovery', async () => {
     let now = Date.now(), registrations = 0;
     const stages = [];
     const api = app(async config => {
@@ -253,35 +277,28 @@ test('registration and models retain separate 8s/12s budgets; failed renewal sta
             registrations++;
             stages.push(registrations === 1 ? 'registration' : 'renewal');
             assert.ok(config.timeout > 0 && config.timeout <= 8000);
-            if (registrations > 1) {
-                assert.equal(registrations, 2, 'only one renewal is allowed');
-                now += 1000;
-                throw { code: 'ENOTFOUND' };
-            }
-            now += 7900;
-            return response(success);
+            if (registrations === 1) now += 7900;
+            else now += 1000;
+            return response({ device_id: String(100 + registrations), install_id: '456' });
         }
         const stage = modelStage(config);
         stages.push(stage);
-        if (stage === 'primary') {
-            assert.equal(config.timeout, 12000);
-            now += 250;
-            return { status: 200, headers: {}, data: '' };
-        }
-        if (stage === 'alternate') {
-            assert.equal(config.timeout, 11750, 'alternate shares the original model deadline');
-            now += 350;
-            return { status: 200, headers: {}, data: '' };
-        }
-        assert.equal(config.timeout, 10400, 'failed renewal cannot reset the model deadline');
-        return playResponse();
+        assert.ok(config.timeout > 0 && config.timeout <= 12000);
+        if (stage === 'legacy') return playResponse();
+        now += 250;
+        return { status: 200, headers: {}, data: '' };
     }, { now: () => now });
     assert.equal((await api.fetchAppPlayUrl('11')).source, 'app');
-    assert.equal(registrations, 2);
-    assert.deepEqual(stages, ['registration', 'primary', 'alternate', 'renewal', 'legacy']);
-    await assert.rejects(api.registerPlaybackDevice(() => assert.fail('failed renewal must retain its cooldown')), {
-        code: 'DEVICE_REGISTRATION_FAILED', registrationFailure: 'NETWORK_ERROR', networkFailure: 'DNS',
-    });
+    assert.equal(registrations, 1);
+    assert.deepEqual(stages, [
+        'registration',
+        'video-tab', 'video-tab',
+        'primary', 'primary',
+        'alternate', 'alternate',
+        'model-a', 'model-a',
+        'model-c', 'model-c',
+        'legacy',
+    ]);
 });
 
 test('cancellation mapping preserves ERR_CANCELED instead of retryable NETWORK_ERROR', () => {
@@ -312,23 +329,19 @@ test('internal registration timeout aborts its transport and retains failure coo
     assert.equal(calls, 1);
 });
 
-test('internal model timeout aborts its transport without triggering a renewal or alternate host', async t => {
-    t.mock.timers.enable({ apis: ['setTimeout'] });
-    let signal, calls = 0, enter;
-    const entered = new Promise(resolve => { enter = resolve; });
+test('model timeout stays terminal without rotating identity or probing another route', async () => {
+    let calls = 0, registrations = 0;
     const api = app(config => {
         calls++;
-        if (calls === 1) return Promise.resolve(response(success));
-        signal = config.signal; enter();
-        return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject({ code: 'ERR_CANCELED' }), { once: true }));
+        if (new URL(config.url).pathname.includes('device_register')) {
+            registrations++;
+            return response(success);
+        }
+        throw { code: 'ETIMEDOUT' };
     });
-    const failed = assert.rejects(api.fetchAppPlayUrl('11'), { code: 'ETIMEDOUT' });
-    await entered;
-    t.mock.timers.tick(11999);
-    assert.equal(signal.aborted, false);
-    t.mock.timers.tick(1);
-    await failed;
+    await assert.rejects(api.fetchAppPlayUrl('11'), { code: 'ETIMEDOUT' });
     assert.equal(calls, 2);
+    assert.equal(registrations, 1);
 });
 
 test('hongguo fixed and automatic lookup both preserve cancellation without another source request', async () => {

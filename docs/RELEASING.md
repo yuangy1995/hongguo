@@ -13,6 +13,13 @@
 
 需要发新版本时，由维护者手动合并上游改动并检查本项目的功能，再通过 GitHub Actions 的「发布桌面版」启动四平台发行。
 
+## 1.0.7 正式发行
+
+1.0.7 已于 2026-11-23 晚间公开并设为 Latest。标签 `v1.0.7` 指向冻结提交 `662a1f9417a3c70ac0fa077963a0bcf237f4da98`。同一次工作流汇总了双 Mac、Windows x64、Linux x64 产物，并于北京时间 23:30 完成 20 份公开附件校验。见 [发布页](https://github.com/yuangy1995/hongguo/releases/tag/v1.0.7)和[构建与验收](https://github.com/yuangy1995/hongguo/actions/runs/45192999506/attempts/4)。
+
+- 两个 macOS 架构检查了 DMG、版本、临时签名和隔离启动。Linux 检查了 AppImage 启动及随包媒体工具和软件解码资源。Windows 在 GitHub 虚拟机检查了启动、新装、重装和从 1.80 升级。EXE 未签名。
+- 本轮发行使用该版本的跳过真实下载和播放选项。独立全量源码回归有一项红果真实片源获取失败。其余定向检查覆盖观看记录的官方系列剧、无系列提示和失败重试。
+
 ## 1.0.6 正式发行
 
 1.0.6 已于 2026-11-23 00:53:29（Asia/Shanghai）公开并设为 Latest。标签 `v1.0.6` 对应源码 `a82855495ca4936c1fe5b901447b43aa50b4915a`。四平台由同一次工作流构建，共 20 份附件。发布任务核对了远端大小、SHA256、Windows 更新清单和匿名下载入口。见 [发布页](https://github.com/yuangy1995/hongguo/releases/tag/v1.0.6)及[构建和验收](https://github.com/yuangy1995/hongguo/actions/runs/45045427846)。
@@ -63,7 +70,27 @@
 - 每次发行页必须在附件列表前的醒目位置保留以下推荐；这是独立第三方项目，不计入本项目附件和平台验收：
   > **Android手机APK／Android TV版：** 请前往 [N3urda/hongguoTV](https://github.com/N3urda/hongguoTV) 下载。该项目独立维护；版本、兼容性与测试状态以该项目发布页为准，不计入本项目的四平台附件或验收。
 
-# 7.6最新正式发行
+# 上游 8.1 正式发行
+
+8.1已于2026-11-23 21:33:46（Asia/Shanghai）正式公开并设Latest，内部8.1.0、桌面构建8.1.1，冻结源码`bc02370ff519adf7a94a20688c5538ac303f4ec7`，标签`v8.1`，Release ID `455441801`。恢复后续分集SDK 1080P取源，数字下载改为SDK优先和三进程有界并行；macOS arm64/x64提供SDK执行文件，Windows/Linux保留回退。23附件远端摘要与匿名入口已核对；完整回执见[8.1记录](release-8.1.md)。
+
+# 上游 8.0 正式发行
+
+8.0已于2026-11-23 18:34:11（Asia/Shanghai）正式公开并设Latest，内部8.0.0、桌面构建8.0.1，冻结源码`8d14d07b3aaf99ecbe6b3ecb8ba2d0308261845d`，标签`v8.0`，Release ID `455258444`。基于正式7.9按“逢9进1”升级，修复#179 App播放接口全链路空响应与#178弹幕表情显示。双Mac、Windows x64、Linux x64 AppImage共23份正式附件，远端名称、大小、SHA256与匿名入口已核对；完整回执见[8.0记录](release-8.0.md)。
+
+# 上游 7.9 正式发行
+
+7.9已于2026-11-21 23:33:28（Asia/Shanghai）正式公开并设Latest，内部7.9.0、桌面构建7.9.1，冻结源码`11223b03313bca2b9ea54a9f2d059afb12889770`，标签`v7.9`，Release ID `453779527`。基于正式7.8修复 #177：发现页角标改为内存快照与当前页逐部异步预热，剧集面板和分集列表改为异步扫描；SMB／NAS 探测最多等待4秒。双Mac、Windows x64、Linux x64 AppImage共23份正式附件；远端大小／SHA256、两份更新清单和全部23个匿名下载入口已核对。完整回执见[7.9记录](release-7.9.md)。
+
+# 上游 7.8 正式发行
+
+7.8已于2026-11-21 13:58:45（Asia/Shanghai）正式公开并设Latest，内部7.8.0、桌面构建7.8.1，冻结源码`e46820ba2b9d224cfbc638f6926ae2ce4421db70`，标签`v7.8`，Release ID `453468377`。双Mac、Windows x64、Linux x64 AppImage共23份正式附件；远端大小／SHA256和全部23个匿名下载入口已核对。双Mac本轮重新签名、公证、装订；Windows EXE未签名，GitHub Windows虚拟机真实下载与升级通过；Linux真实两集静音播放通过。完整回执见[7.8记录](release-7.8.md)。
+
+# 上游 7.7 正式发行
+
+7.7已于2026-11-20 15:08:15（Asia/Shanghai）正式公开并设Latest，内部7.7.0、桌面构建7.7.1，冻结源码`92df757ed7be8ea658ee274a6a429b77f49e54e8`，标签`v7.7`，Release ID `452358120`。双Mac、Windows x64、Linux x64 AppImage共23份正式附件；远端大小／SHA256和全部23个匿名下载入口已核对。双Mac重新签名、公证、装订；Windows EXE未签名，GitHub Windows虚拟机真实下载与升级通过；Linux真实两集静音播放通过。完整回执见[7.7记录](release-7.7.md)。
+
+# 7.6正式发行
 
 7.6已于2026-11-18 18:17:30（Asia/Shanghai）正式公开并设Latest，内部7.6.0、桌面构建7.6.1，冻结源码`6a3df3b0b03e8a63589a73e375e9058f181930e8`，标签`v7.6`，Release ID `449788313`。双Mac、Windows x64、Linux x64 AppImage共23份正式附件；远端大小／SHA256、更新清单和全部23个匿名下载入口已核对。双Mac本轮签名、公证、装订；Windows EXE未签名，真实下载和安装升级在GitHub Windows虚拟机通过；Linux原生CI真实静音播放两集。完整回执见[7.6记录](release-7.6.md)。
 

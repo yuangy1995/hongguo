@@ -1,7 +1,7 @@
-<!-- 7.6 source and release target; historical credits retained. -->
+<!-- 8.1 source and release target; historical credits retained. -->
 # 贡献者与问题反馈致谢
 
-7.6 延续公开贡献记录；本轮代码审查与修复由维护者完成，不新增未核实的代码作者署名。
+8.0 延续公开贡献记录；感谢 #179 的多位用户及时提供空响应、无法在线播放和下载失败现象，感谢 #178 提供弹幕表情代码的显示需求。详细署名与历史致谢保留在下方。
 
 ## 7.5 播放修复特别致谢（2026-11-16）
 

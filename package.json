@@ -50,7 +50,7 @@
   },
   "overrides": {
     "shell-quote": "1.12.0",
-    "joi": "17.13.8",
+    "joi": "17.13.9",
     "source-map-js": "1.2.2"
   },
   "build": {
@@ -63,10 +63,14 @@
       "main.js",
       "preload.js",
       "dist-react/**/*",
+      "build/sdk-playback/darwin-*/hongguo-sdk-playback",
       "src/native/**/*",
       "src/store.js"
     ],
     "asar": true,
+    "asarUnpack": [
+      "build/sdk-playback/darwin-*/hongguo-sdk-playback"
+    ],
     "artifactName": "hongguo-downloader-${version}-${os}-${arch}.${ext}",
     "win": {
       "target": [
