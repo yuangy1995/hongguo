@@ -41,13 +41,11 @@ function nativeFiles(directory) {
 
 function verifyCatalinaApp(bundle) {
   const contents = path.join(bundle, 'Contents');
-  const framework = path.join(contents, 'Frameworks', 'Electron Framework.framework');
   const readPlist = (file, key) => run('/usr/libexec/PlistBuddy', ['-c', `Print :${key}`, file]);
   const info = path.join(contents, 'Info.plist');
   assert.equal(readPlist(info, 'LSMinimumSystemVersion'), build.mac.minimumSystemVersion);
   assert.equal(readPlist(info, 'CFBundleIdentifier'), build.appId);
   assert.equal(readPlist(info, 'CFBundleShortVersionString'), macRelease.version);
-  assert.equal(readPlist(path.join(framework, 'Resources', 'Info.plist'), 'CFBundleShortVersionString'), build.electronVersion);
 
   const resources = path.join(contents, 'Resources');
   assert(!fs.existsSync(path.join(resources, 'app-update.yml')), 'Catalina 包含公共更新清单');
@@ -61,6 +59,11 @@ function verifyCatalinaApp(bundle) {
   const signature = spawnSync('/usr/bin/codesign', ['-dv', '--verbose=4', bundle], { encoding: 'utf8' });
   assert.equal(signature.status, 0);
   assert.match(signature.stderr, /^Signature=adhoc$/m);
+  const executable = path.join(contents, 'MacOS', readPlist(info, 'CFBundleExecutable'));
+  const version = execFileSync(executable, ['-p', 'process.versions.electron'], {
+    encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 10_000,
+  }).trim();
+  assert.equal(version, build.electronVersion);
   console.log(`Catalina 包检查通过，已核对 ${binaries.length} 个 Intel Mach-O 和临时签名。`);
 }
 

@@ -28,10 +28,26 @@ jobs:
           command -v pkg-config || brew install pkgconf
           npm ci --no-audit --no-fund
           node scripts/check-release-version.cjs
-      - name: 重建 Catalina 媒体工具并构建安装包
+      - uses: actions/cache/restore@v4
+        id: media-cache
+        with:
+          path: |
+            build/ffmpeg/darwin-x64
+            build/ffmpeg/.librempeg-build-x64/artifacts/*corresponding-source.tar.gz
+          key: catalina-intel-media-v1-${{ hashFiles('scripts/build-ffmpeg-source-mac-x64.sh', 'scripts/build-librempeg-source.sh', 'scripts/setup-ffmpeg-mac.js', 'scripts/librempeg-videotoolbox-prototype.patch') }}
+      - name: 重建 Catalina 媒体工具
         run: |
           python3 scripts/prepare-catalina-media.py "$RUNNER_TEMP/catalina-source"
-          npm run build:mac
+          npm run setup:ffmpeg:mac
+      - uses: actions/cache/save@v4
+        if: steps.media-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            build/ffmpeg/darwin-x64
+            build/ffmpeg/.librempeg-build-x64/artifacts/*corresponding-source.tar.gz
+          key: ${{ steps.media-cache.outputs.cache-primary-key }}
+      - name: 构建 Catalina 安装包
+        run: npm run build:mac
       - name: 验证 DMG 和 Intel 应用启动
         run: |
           version="$(node -p 'require("./package.json").version')"

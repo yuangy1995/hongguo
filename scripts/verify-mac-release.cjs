@@ -98,6 +98,9 @@ const qa = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-mac-check-'));
     const proof={arch,system:os.release(),launch:true,version,sourceCommit:process.env.GITHUB_SHA,playback};
     fs.writeFileSync(receipt,JSON.stringify(proof,null,2)+'\n');
     console.log(JSON.stringify(proof));
+  } catch(error) {
+    console.error(fs.readFileSync(path.join(qa, 'app.log'), 'utf8').slice(-8000));
+    throw error;
   } finally {
     try{cdp?.close();}catch{}
     child.kill('SIGTERM');
