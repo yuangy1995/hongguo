@@ -9,6 +9,9 @@ on:
       build_only:
         type: boolean
         default: false
+      skip_playback:
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       source_sha:
@@ -80,6 +83,8 @@ jobs:
         run: npm run build:react && npx electron-builder --linux AppImage --x64 --publish never --config.electronDist=.cache/electron
       - run: cp "$RUNNER_TEMP/linux-media/ffmpeg/artifacts/"*source.tar.gz "$RUNNER_TEMP/linux-media/librempeg/artifacts/"*source.tar.gz dist/
       - if: ${{ !inputs.build_only }}
+        env:
+          HONGGUO_SKIP_LIVE_MEDIA: ${{ inputs.skip_playback || false }}
         run: xvfb-run -a node scripts/check-linux-appimage.cjs
       - name: Archive frozen source and asset digests
         run: |

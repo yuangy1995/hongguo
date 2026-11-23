@@ -6,6 +6,10 @@ on:
         description: 完整发行版本号，例如 1.0.0
         required: true
         type: string
+      skip_live_media:
+        description: 仅 1.0.7 用于红果取源受限时保留其他验收
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -24,10 +28,12 @@ jobs:
       - name: 核对版本与发布说明
         env:
           REQUESTED_VERSION: ${{ inputs.version }}
+          SKIP_LIVE_MEDIA: ${{ inputs.skip_live_media }}
         run: |
           test "$REQUESTED_VERSION" = "$(node -p 'require("./package.json").version')"
           [[ "$REQUESTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           test -s "docs/release-notes/$REQUESTED_VERSION.md"
+          if [[ "$SKIP_LIVE_MEDIA" == true ]]; then test "$REQUESTED_VERSION" = 1.0.7; fi
 
   mac:
     needs: source
@@ -35,7 +41,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15
+          - runner: ${{ inputs.skip_live_media && 'macos-26' || 'macos-15' }}
             arch: arm64
           - runner: macos-15-intel
             arch: x64
@@ -43,6 +49,7 @@ jobs:
     timeout-minutes: 35
     env:
       ARCH: ${{ matrix.arch }}
+      HONGGUO_SKIP_LIVE_MEDIA: ${{ inputs.skip_live_media }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -94,12 +101,14 @@ jobs:
     uses: ./.github/workflows/windows.yml
     with:
       source_sha: ${{ github.sha }}
+      skip_playback: ${{ inputs.skip_live_media }}
 
   linux:
     needs: source
     uses: ./.github/workflows/linux.yml
     with:
       source_sha: ${{ github.sha }}
+      skip_playback: ${{ inputs.skip_live_media }}
 
   publish:
     needs: [mac, windows, linux]
@@ -124,4 +133,5 @@ jobs:
       - name: 汇总、核对并发布
         env:
           GH_TOKEN: ${{ github.token }}
+          HONGGUO_SKIP_LIVE_MEDIA: ${{ inputs.skip_live_media }}
         run: python3 scripts/publish-desktop-release.py release-inputs

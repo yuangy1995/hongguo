@@ -75,6 +75,12 @@ function safeDownloadFailure(value) {
     })()`);
     assert.equal(assets.player, 'function'); assert.equal(assets.wasm, true);
     result.checks.push(`AppImage launches its UI and reports ${pkg.version}; packaged CPU player and HEVC Wasm load`);
+    result.launch = true;
+    if (process.env.HONGGUO_SKIP_LIVE_MEDIA === 'true') {
+      result.playbackSkipped = true;
+      console.log('PASS actual Linux AppImage: media tools, launch and software assets; live playback deferred');
+      return;
+    }
     // Keep all real downloads inside this disposable profile's media directory.
     assert.equal((await cdp.evaluate(`(async()=>{const settings=await window.electronAPI.getSettings();
       return window.electronAPI.saveSettings({...settings,root:${JSON.stringify(path.join(temp,'media'))}});})()`)).success,true);

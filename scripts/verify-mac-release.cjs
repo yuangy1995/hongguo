@@ -5,6 +5,7 @@ const { connect, sleep } = require('./fixtures/cdp.cjs');
 const { version } = require('../package.json');
 const [,, bundle, receipt] = process.argv;
 const arch = process.arch;
+const playbackSkipped = arch === 'arm64' && process.env.HONGGUO_SKIP_LIVE_MEDIA === 'true';
 assert.equal(process.platform, 'darwin');
 assert.equal(process.env.GITHUB_ACTIONS, 'true');
 const qa = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-mac-check-'));
@@ -38,7 +39,7 @@ const qa = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-mac-check-'));
     assert.deepEqual(startup,{version,updater:'function',announcements:'undefined'});
     console.log(JSON.stringify({arch,...startup}));
     let playback;
-    if (arch === 'arm64') playback = await cdp.evaluate(`(async()=>{
+    if (arch === 'arm64' && !playbackSkipped) playback = await cdp.evaluate(`(async()=>{
       const api=window.electronAPI, wait=ms=>new Promise(r=>setTimeout(r,ms));
       localStorage.setItem('hongguo:playback-preferences','{"rate":1,"volume":0,"muted":true}');
       let rows=[];
@@ -86,7 +87,7 @@ const qa = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-mac-check-'));
       throw Error(error);
     })()`,420000);
     if (playback) assert.equal(playback.states.length,2);
-    const proof={arch,launch:true,version,sourceCommit:process.env.GITHUB_SHA,playback};
+    const proof={arch,launch:true,version,sourceCommit:process.env.GITHUB_SHA,playbackSkipped,playback};
     fs.writeFileSync(receipt,JSON.stringify(proof,null,2)+'\n');
     console.log(JSON.stringify(proof));
   } finally {
