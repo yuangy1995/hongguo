@@ -38,13 +38,15 @@ const qa = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-mac-check-'));
     }throw Error('Version could not be verified');})()`);
     assert.deepEqual(startup,{version,updater:'function',announcements:'undefined'});
     console.log(JSON.stringify({arch,...startup}));
+    let edition;
     if (catalina) {
-      const edition = await cdp.evaluate(`(async()=>({
+      edition = await cdp.evaluate(`(async()=>({
         edition: (await window.electronAPI.getAppInfo()).catalina,
+        electronVersion: (await window.electronAPI.getAppInfo()).electronVersion,
         updater: (await window.electronAPI.getAppUpdateState()).supported,
         publicUpdate: (await window.electronAPI.checkAppUpdate()).enabled
       }))()`);
-      assert.deepEqual(edition, { edition: true, updater: false, publicUpdate: false });
+      assert.deepEqual(edition, { edition: true, electronVersion: build.electronVersion, updater: false, publicUpdate: false });
     }
     let playback;
     if (arch === 'arm64') playback = await cdp.evaluate(`(async()=>{
@@ -95,7 +97,7 @@ const qa = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-mac-check-'));
       throw Error(error);
     })()`,420000);
     if (playback) assert.equal(playback.states.length,2);
-    const proof={arch,system:os.release(),launch:true,version,sourceCommit:process.env.GITHUB_SHA,playback};
+    const proof={arch,system:os.release(),launch:true,version,sourceCommit:process.env.GITHUB_SHA,edition,playback};
     fs.writeFileSync(receipt,JSON.stringify(proof,null,2)+'\n');
     console.log(JSON.stringify(proof));
   } catch(error) {

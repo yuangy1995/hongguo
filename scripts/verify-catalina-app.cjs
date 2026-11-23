@@ -59,11 +59,6 @@ function verifyCatalinaApp(bundle) {
   const signature = spawnSync('/usr/bin/codesign', ['-dv', '--verbose=4', bundle], { encoding: 'utf8' });
   assert.equal(signature.status, 0);
   assert.match(signature.stderr, /^Signature=adhoc$/m);
-  const executable = path.join(contents, 'MacOS', readPlist(info, 'CFBundleExecutable'));
-  const version = execFileSync(executable, ['-p', 'process.versions.electron'], {
-    encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 10_000,
-  }).trim();
-  assert.equal(version, build.electronVersion);
   console.log(`Catalina 包检查通过，已核对 ${binaries.length} 个 Intel Mach-O 和临时签名。`);
 }
 

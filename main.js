@@ -5373,6 +5373,7 @@ ipcMain.handle('set-interface-language', (_event, language) => {
 
 ipcMain.handle('get-app-info', async () => ({
   version: APP_VERSION,
+  electronVersion: process.versions?.electron,
   brand: APP_TITLE,
   appName: APP_TITLE,
   platform: process.platform,
