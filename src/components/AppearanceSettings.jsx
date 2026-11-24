@@ -1,11 +1,12 @@
 import { t, useLanguage } from '../i18n';
 import LanguageSettings from './LanguageSettings';
 import React, { useEffect, useRef, useState } from 'react';
-import { getThemePreference, setThemePreference, getPosterSize, setPosterSize } from '../theme';
+import { getThemePreference, setThemePreference, getPosterSize, setPosterSize, getSkin, setSkin } from '../theme';
 
 export default function AppearanceSettings({ active = true, showZoom = true }) {
   useLanguage();
   const [preference, setPreference] = useState(getThemePreference);
+  const [skin, setSkinPreference] = useState(getSkin);
   const [posterSize, setPosterPreference] = useState(getPosterSize);
   const [zoom, setZoom] = useState(null);
   const [zoomBusy, setZoomBusy] = useState(false);
@@ -65,6 +66,16 @@ export default function AppearanceSettings({ active = true, showZoom = true }) {
     }
   };
 
+  const changeSkin = event => {
+    try {
+      setSkin(event.target.value);
+      setSkinPreference(event.target.value);
+      setError('');
+    } catch {
+      setError('皮肤保存失败，请重试。');
+    }
+  };
+
   return (
     <>
     <LanguageSettings />
@@ -77,6 +88,14 @@ export default function AppearanceSettings({ active = true, showZoom = true }) {
       </select>
       <p className="settings-hint" id="appearance-hint">{t("立即生效并自动保存。跟随系统时，外观会随系统切换。")}</p>
     </div>
+    {showZoom && <div className="settings-group">
+      <label className="settings-label" htmlFor="appearance-skin">{t("皮肤")}</label>
+      <select id="appearance-skin" className="input-field select-field" value={skin} onChange={changeSkin} aria-describedby="appearance-skin-hint">
+        <option value="default">{t("默认")}</option>
+        <option value="frosted">{t("磨砂玻璃")}</option>
+      </select>
+      <p className="settings-hint" id="appearance-skin-hint">{t("立即生效并自动保存，浅色和深色外观都适用。")}</p>
+    </div>}
     {showZoom && <div className="settings-group">
       <span className="settings-label" id="appearance-zoom-label">{t("界面与字号")}</span>
       <div className="appearance-zoom" role="group" aria-labelledby="appearance-zoom-label" aria-describedby="appearance-zoom-hint">

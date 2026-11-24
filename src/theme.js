@@ -2,6 +2,27 @@ const STORAGE_KEY = 'hongguo-experience-preview:theme';
 const PREFERENCES = ['system', 'light', 'dark'];
 const POSTER_SIZE_KEY = 'hongguo-experience-preview:poster-size';
 const POSTER_SIZES = ['small', 'standard', 'large', 'extra-large'];
+const SKIN_KEY = 'hongguo-experience-preview:skin';
+const SKINS = ['default', 'frosted'];
+
+export function getSkin() {
+  try {
+    const stored = window.localStorage.getItem(SKIN_KEY);
+    return SKINS.includes(stored) ? stored : 'default';
+  } catch {
+    return 'default';
+  }
+}
+
+export function initializeSkin() {
+  document.documentElement.dataset.skin = getSkin();
+}
+
+export function setSkin(skin) {
+  if (!SKINS.includes(skin)) throw new Error('请选择有效的皮肤');
+  window.localStorage.setItem(SKIN_KEY, skin);
+  initializeSkin();
+}
 
 export function getPosterSize() {
   try {

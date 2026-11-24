@@ -1,0 +1,263 @@
+/* 磨砂玻璃皮肤：中性通透玻璃、随角度变化的边缘高光、凸起的玻璃选中块，系统蓝只用于主要操作。 */
+:root[data-skin="frosted"] .desktop-mist {
+  --bg: #eef0f4;
+  --bg-subtle: rgba(255, 255, 255, 0.30);
+  --bg-elevated: #fbfbfd;
+  --bg-card: rgba(255, 255, 255, 0.28);
+  --bg-inset: rgba(120, 128, 140, 0.08);
+  --bg-hover: rgba(255, 255, 255, 0.50);
+  --bg-input: rgba(120, 128, 140, 0.09);
+  --sidebar-hover: rgba(120, 128, 140, 0.10);
+  --sidebar-active: rgba(255, 255, 255, 0.72);
+  --text: #1d1d1f;
+  --text-secondary: #4a4a52;
+  --text-tertiary: #6e6e76;
+  --primary: #0a7aff;
+  --primary-hover: #0068e0;
+  --accent: #0a7aff;
+  --accent-text: #0062d6;
+  --accent-hover: #0068e0;
+  --accent-soft: rgba(255, 255, 255, 0.70);
+  --accent-border: rgba(10, 122, 255, 0.35);
+  --border: rgba(255, 255, 255, 0.55);
+  --border-muted: rgba(60, 60, 67, 0.08);
+  --border-strong: rgba(60, 60, 67, 0.18);
+  --focus-ring: #0a7aff;
+  --focus-soft: rgba(10, 122, 255, 0.35);
+  --selection: #cfe3ff;
+  --skeleton: rgba(120, 128, 140, 0.12);
+  --scroll-thumb: rgba(60, 60, 67, 0.28);
+  --radius: 14px;
+  --radius-lg: 24px;
+  --mist-frame: rgba(255, 255, 255, 0.60);
+  --mist-glass: rgba(255, 255, 255, 0.40);
+  --mist-glass-strong: rgba(255, 255, 255, 0.74);
+  --mist-glass-subtle: rgba(255, 255, 255, 0.24);
+  --mist-controls: rgba(255, 255, 255, 0.50);
+  --mist-rim: rgba(255, 255, 255, 0.90);
+  --mist-border-outer: transparent;
+  --mist-shadow: rgba(0, 0, 0, 0.10);
+  --mist-shadow-lg: 0 12px 32px -14px rgba(20, 30, 50, 0.22), 0 1px 2px rgba(20, 30, 50, 0.06);
+  --mist-blur: blur(24px) saturate(190%) brightness(1.04);
+  /* 玻璃厚度：上缘受光、下缘反光、内侧柔光 */
+  --glass-depth: inset 0 1.5px 1px -0.5px rgba(255, 255, 255, 0.95), inset 0 -1px 1px -0.5px rgba(255, 255, 255, 0.55), inset 0 0 0 0.5px rgba(255, 255, 255, 0.45), inset 0 0 18px rgba(255, 255, 255, 0.30);
+  /* 玻璃表层：顶部一层很淡的光 */
+  --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.30) 0, rgba(255, 255, 255, 0) 36px);
+  /* 边缘高光：左上与右下最亮，两侧渐隐 */
+  --glass-rim: linear-gradient(135deg, #fff 0%, rgba(255, 255, 255, 0.55) 14%, rgba(255, 255, 255, 0.10) 38%, rgba(255, 255, 255, 0.06) 62%, rgba(255, 255, 255, 0.55) 86%, #fff 100%);
+  --glass-rim-shade: rgba(30, 40, 60, 0.10);
+  --bubble: rgba(255, 255, 255, 0.86);
+  --bubble-text: #1d1d1f;
+  --bubble-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.05), 0 2px 7px -2px rgba(0, 0, 0, 0.13), inset 0 1px 0 #fff, inset 0 -0.5px 0 rgba(0, 0, 0, 0.04);
+  --on-accent: #ffffff;
+  --mist-backdrop:
+    radial-gradient(1200px 820px at 108% -12%, rgba(118, 166, 232, 0.55), transparent 58%),
+    radial-gradient(900px 640px at 78% 18%, rgba(196, 214, 244, 0.70), transparent 62%),
+    radial-gradient(1000px 760px at -10% 112%, rgba(214, 196, 232, 0.55), transparent 60%),
+    radial-gradient(760px 560px at 30% 70%, rgba(240, 226, 214, 0.50), transparent 64%),
+    linear-gradient(160deg, #f4f6fa 0%, #e8edf4 55%, #e4e8f0 100%);
+}
+
+:root[data-skin="frosted"][data-theme="dark"] .desktop-mist {
+  --bg: #121316;
+  --bg-subtle: rgba(255, 255, 255, 0.05);
+  --bg-elevated: #1f2024;
+  --bg-card: rgba(255, 255, 255, 0.06);
+  --bg-inset: rgba(255, 255, 255, 0.05);
+  --bg-hover: rgba(255, 255, 255, 0.12);
+  --bg-input: rgba(255, 255, 255, 0.07);
+  --sidebar-hover: rgba(255, 255, 255, 0.07);
+  --sidebar-active: rgba(255, 255, 255, 0.16);
+  --text: #f5f5f7;
+  --text-secondary: #c7c7cc;
+  --text-tertiary: #98989f;
+  --primary: #0a84ff;
+  --primary-hover: #3395ff;
+  --accent: #4ea2ff;
+  --accent-text: #6cb2ff;
+  --accent-hover: #8ac2ff;
+  --accent-soft: rgba(255, 255, 255, 0.14);
+  --accent-border: rgba(10, 132, 255, 0.45);
+  --border: rgba(255, 255, 255, 0.10);
+  --border-muted: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.20);
+  --focus-ring: #4ea2ff;
+  --focus-soft: rgba(10, 132, 255, 0.45);
+  --selection: #1d4f8f;
+  --skeleton: rgba(255, 255, 255, 0.07);
+  --scroll-thumb: rgba(235, 235, 245, 0.25);
+  --success: #63d69a;
+  --success-bg: rgba(48, 209, 88, 0.16);
+  --warning: #ffcc66;
+  --danger: #ff8a85;
+  --danger-bg: rgba(255, 69, 58, 0.18);
+  --mist-frame: rgba(255, 255, 255, 0.12);
+  --mist-glass: rgba(40, 40, 46, 0.42);
+  --mist-glass-strong: rgba(70, 70, 78, 0.66);
+  --mist-glass-subtle: rgba(40, 40, 46, 0.30);
+  --mist-controls: rgba(255, 255, 255, 0.08);
+  --mist-rim: rgba(255, 255, 255, 0.22);
+  --mist-shadow: rgba(0, 0, 0, 0.40);
+  --mist-shadow-lg: 0 14px 36px -14px rgba(0, 0, 0, 0.65), 0 1px 3px rgba(0, 0, 0, 0.30);
+  --mist-blur: blur(18px) saturate(170%) brightness(0.96);
+  --glass-depth: inset 0 1.5px 1px -0.5px rgba(255, 255, 255, 0.30), inset 0 -1px 1px -0.5px rgba(255, 255, 255, 0.10), inset 0 0 0 0.5px rgba(255, 255, 255, 0.08), inset 0 0 18px rgba(255, 255, 255, 0.04);
+  --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0, rgba(255, 255, 255, 0) 36px);
+  --glass-rim: linear-gradient(135deg, rgba(255, 255, 255, 0.50) 0%, rgba(255, 255, 255, 0.14) 18%, rgba(255, 255, 255, 0.04) 42%, rgba(255, 255, 255, 0.04) 60%, rgba(255, 255, 255, 0.16) 82%, rgba(255, 255, 255, 0.36) 100%);
+  --glass-rim-shade: rgba(0, 0, 0, 0.35);
+  --bubble: rgba(255, 255, 255, 0.20);
+  --bubble-text: #ffffff;
+  --bubble-shadow: 0 1px 1px rgba(0, 0, 0, 0.20), 0 4px 12px -2px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.28), inset 0 -0.5px 0 rgba(255, 255, 255, 0.06);
+  --mist-backdrop:
+    radial-gradient(1100px 700px at 100% 0%, rgba(54, 74, 110, 0.55), transparent 60%),
+    radial-gradient(900px 700px at 0% 100%, rgba(84, 62, 52, 0.40), transparent 62%),
+    linear-gradient(180deg, #17181c 0%, #0f1013 100%);
+}
+
+/* 玻璃面板 */
+:root[data-skin="frosted"] .desktop-mist :is(
+  .account-card, .hongguo-card, .settings-card, .drama-feed-feature, .browse-continue,
+  .browse-header, .browse-category-shelf, .drama-feed-categories, .drama-feed-header,
+  .drama-feed-upcoming, .random-drama-stage, .player-empty, .player-library-bar,
+  .player-management, .community-panel, .player-footer-tools, .history-filter-bar,
+  .history-empty, .release-toolbar, .release-empty, .dm-stat, .dm-toolbar, .settings-sections, .browse-pager, .pagination-controls
+),
+:root[data-skin="frosted"] .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar {
+  background-color: var(--mist-glass);
+  background-image: var(--glass-sheen);
+  border-color: transparent;
+  box-shadow: var(--glass-depth), var(--mist-shadow-lg);
+}
+:root[data-skin="frosted"] .desktop-mist :is(
+  .account-card, .hongguo-card, .settings-card, .drama-feed-feature, .browse-continue,
+  .browse-header, .browse-category-shelf, .drama-feed-categories, .drama-feed-header,
+  .drama-feed-upcoming, .random-drama-stage, .player-empty, .player-library-bar,
+  .player-management, .player-footer-tools, .history-filter-bar, .history-empty, .release-toolbar,
+  .release-empty, .dm-stat, .dm-toolbar, .browse-pager, .pagination-controls
+) { position: relative; }
+
+/* 边缘高光环：用遮罩只保留 1px 外圈 */
+:root[data-skin="frosted"] .desktop-mist :is(
+  .account-card, .hongguo-card, .settings-card, .drama-feed-feature, .browse-continue,
+  .browse-header, .browse-category-shelf, .drama-feed-categories, .drama-feed-header,
+  .drama-feed-upcoming, .random-drama-stage, .player-empty, .player-library-bar,
+  .player-management, .community-panel, .player-footer-tools, .history-filter-bar,
+  .history-empty, .release-toolbar, .release-empty, .dm-stat, .dm-toolbar, .settings-sections, .browse-pager, .pagination-controls, .desktop-popover[popover]
+)::after,
+:root[data-skin="frosted"] .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: var(--glass-rim);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  box-shadow: 0 0 0 0.5px var(--glass-rim-shade);
+  pointer-events: none;
+}
+
+:root[data-skin="frosted"] .desktop-mist :is(.account-card, .hongguo-card, .settings-card, .drama-feed-feature, .browse-continue),
+:root[data-skin="frosted"] .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar { border-radius: 26px; }
+
+/* 内容卡片不做玻璃：只保留干净的底与柔和投影，让玻璃只出现在导航和控件层 */
+:root[data-skin="frosted"] .desktop-mist :is(.browse-card, .search-grid .search-card) {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+:root[data-skin="frosted"] .desktop-mist :is(.browse-card, .search-grid .search-card):hover { background: rgba(255, 255, 255, 0.36); }
+:root[data-skin="frosted"][data-theme="dark"] .desktop-mist :is(.browse-card, .search-grid .search-card):hover { background: rgba(255, 255, 255, 0.06); }
+:root[data-skin="frosted"] .desktop-mist :is(.browse-card, .search-grid .search-card) img { box-shadow: 0 8px 22px -10px rgba(0, 0, 0, 0.35); }
+:root[data-skin="frosted"] .desktop-mist :is(.history-row, .dm-task, .dm-series-card, .release-row) {
+  background-color: rgba(255, 255, 255, 0.58);
+  background-image: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: 0 0 0 0.5px rgba(30, 40, 60, 0.07), 0 6px 18px -12px rgba(20, 30, 50, 0.22);
+}
+:root[data-skin="frosted"][data-theme="dark"] .desktop-mist :is(.history-row, .dm-task, .dm-series-card, .release-row) {
+  background-color: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.07), 0 6px 18px -12px rgba(0, 0, 0, 0.5);
+}
+
+/* 弹出层 */
+:root[data-skin="frosted"] .desktop-mist :is(.browse-drawer-mask, .proxy-modal-mask, .player-confirm-mask, .dm-modal-mask) {
+  background: rgba(20, 24, 32, 0.18);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+:root[data-skin="frosted"][data-theme="dark"] .desktop-mist :is(.browse-drawer-mask, .proxy-modal-mask, .player-confirm-mask, .dm-modal-mask) { background: rgba(0, 0, 0, 0.45); }
+:root[data-skin="frosted"] .desktop-mist :is(.desktop-popover[popover], .browse-drawer, .proxy-modal, .player-confirm, .account-login-dialog, .dm-modal, .dm-more-menu) {
+  background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+  backdrop-filter: blur(28px) saturate(190%);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+  border-color: transparent;
+  border-radius: 22px;
+  box-shadow: var(--glass-depth), 0 0 0 0.5px var(--glass-rim-shade), 0 22px 50px -16px rgba(0, 0, 0, 0.30);
+}
+
+/* 控件：胶囊玻璃 */
+:root[data-skin="frosted"] .desktop-mist :is(.btn, .input-field, select.history-scope) { border-radius: 999px; }
+:root[data-skin="frosted"] .desktop-mist textarea.input-field { border-radius: 14px; }
+:root[data-skin="frosted"] .desktop-mist .btn { transition: background-color .18s ease, box-shadow .18s ease, transform .18s cubic-bezier(.3, 1.5, .5, 1); }
+:root[data-skin="frosted"] .desktop-mist .btn-outline {
+  background: var(--mist-controls);
+  border-color: transparent;
+  box-shadow: var(--glass-depth), 0 0 0 0.5px var(--glass-rim-shade), 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+:root[data-skin="frosted"] .desktop-mist .btn-outline:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: transparent;
+}
+:root[data-skin="frosted"] .desktop-mist .btn:active:not(:disabled) { transform: scale(0.96); }
+:root[data-skin="frosted"] .desktop-mist .input-field {
+  background: var(--bg-input);
+  border-color: transparent;
+  box-shadow: inset 0 0.5px 1.5px rgba(0, 0, 0, 0.10), inset 0 -0.5px 0 rgba(255, 255, 255, 0.50);
+}
+
+/* 选中：凸起的玻璃块 */
+:root[data-skin="frosted"] .desktop-mist :is(.active, [aria-pressed="true"], [aria-selected="true"], [aria-current="page"]):not(.sidebar-item):not(:disabled) {
+  background: var(--bubble) !important;
+  color: var(--bubble-text) !important;
+  border-color: transparent !important;
+  box-shadow: var(--bubble-shadow) !important;
+}
+:root[data-skin="frosted"] .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-item { border-radius: 999px; }
+:root[data-skin="frosted"] .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-item.active {
+  background: var(--bubble);
+  color: var(--accent-text);
+  box-shadow: var(--bubble-shadow);
+}
+
+/* 主要操作：系统蓝着色玻璃 */
+:root[data-skin="frosted"] .desktop-mist .btn-primary,
+:root[data-skin="frosted"] .desktop-mist .btn-primary:hover:not(:disabled) {
+  background: var(--primary) !important;
+  color: var(--on-accent) !important;
+  border-color: transparent !important;
+  box-shadow: inset 0 1px 0.5px rgba(255, 255, 255, 0.45), inset 0 -1px 0.5px rgba(0, 0, 0, 0.08), 0 4px 14px -4px color-mix(in srgb, var(--primary) 60%, transparent) !important;
+}
+:root[data-skin="frosted"] .desktop-mist .btn-primary:hover:not(:disabled) { background: var(--primary-hover) !important; }
+
+:root[data-skin="frosted"] .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-brand .logo {
+  background: linear-gradient(180deg, #3a3a3f, #1d1d1f);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 3px 8px -2px rgba(0, 0, 0, 0.30);
+}
+:root[data-skin="frosted"] :is(.desktop-mist, [data-desktop-player-popup]) select option:checked {
+  background: var(--primary);
+  color: var(--on-accent);
+}
+
+/* 海报与「更多」按钮 */
+:root[data-skin="frosted"] .desktop-mist :is(.poster, .drama-poster, .browse-card img, .hongguo-card img) { border-radius: 16px; }
+:root[data-skin="frosted"] .desktop-mist .history-list[data-view="cards"] .history-row-actions > .history-more {
+  background: var(--mist-glass-strong);
+  border-color: transparent;
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  box-shadow: var(--glass-depth), 0 0 0 0.5px var(--glass-rim-shade), 0 4px 10px -4px rgba(0, 0, 0, 0.30);
+}
