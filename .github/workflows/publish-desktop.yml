@@ -7,7 +7,7 @@ on:
         required: true
         type: string
       skip_live_media:
-        description: 仅 1.0.7 用于红果取源受限时保留其他验收
+        description: 仅 1.0.7 和 1.0.8 用于红果取源受限时保留其他验收
         type: boolean
         default: false
 
@@ -33,7 +33,9 @@ jobs:
           test "$REQUESTED_VERSION" = "$(node -p 'require("./package.json").version')"
           [[ "$REQUESTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           test -s "docs/release-notes/$REQUESTED_VERSION.md"
-          if [[ "$SKIP_LIVE_MEDIA" == true ]]; then test "$REQUESTED_VERSION" = 1.0.7; fi
+          if [[ "$SKIP_LIVE_MEDIA" == true ]]; then
+            [[ "$REQUESTED_VERSION" == 1.0.7 || "$REQUESTED_VERSION" == 1.0.8 ]]
+          fi
 
   mac:
     needs: source
@@ -41,7 +43,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ${{ inputs.skip_live_media && 'macos-26' || 'macos-15' }}
+          - runner: macos-26
             arch: arm64
           - runner: macos-15-intel
             arch: x64

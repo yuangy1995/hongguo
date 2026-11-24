@@ -154,6 +154,8 @@ module.exports = async function checkDownloads({ evaluate, result, dataFile, med
     seriesId: original.hongguoInfo.series_id, vid: original.hongguoInfo.vid,
     vidIndex: original.hongguoInfo.vid_index, force: false, quality: 'auto' };
   const trial = receipt.fastConversionTrial = { tested: false, index: request.vidIndex, originalSha256: originalMedia.sha256 };
+  const cacheDir = path.join(path.dirname(dataFile), 'compat-cache');
+  const previousCacheFiles = new Set(fs.existsSync(cacheDir) ? fs.readdirSync(cacheDir) : []);
   try {
     const enabled = await api(`window.electronAPI.saveSettings({ fast_conversion: true })`);
     assert.equal(enabled.success, true);
@@ -182,7 +184,10 @@ module.exports = async function checkDownloads({ evaluate, result, dataFile, med
       throw new Error('Actual App high-performance conversion exceeded 180 seconds; cancellation requested');
     }
     const actual = assertFastTrial(state.result, state.notices);
-    const converted = path.join(path.dirname(dataFile), 'compat-cache', `${request.seriesId}_${String(request.vidIndex).padStart(3, '0')}.mp4`);
+    const newCacheFiles = fs.readdirSync(cacheDir, { withFileTypes: true }).filter(entry =>
+      entry.isFile() && entry.name.endsWith('.mp4') && !entry.name.startsWith('.tmp_') && !previousCacheFiles.has(entry.name));
+    assert.equal(newCacheFiles.length, 1, 'The isolated App conversion must create one new completed cache file');
+    const converted = path.join(cacheDir, newCacheFiles[0].name);
     assert.notEqual(path.resolve(converted), path.resolve(original.savePath));
     assert.equal(fs.statSync(converted).size, state.result.size, 'Probed output must match the App conversion result');
     const probe = JSON.parse(execFileSync(ffprobe, ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', converted], { encoding: 'utf8', windowsHide: true, timeout: 30000 }));
