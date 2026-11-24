@@ -13,6 +13,14 @@
 
 需要发新版本时，由维护者手动合并上游改动并检查本项目的功能，再通过 GitHub Actions 的「发布桌面版」启动四平台发行。
 
+## 1.0.8 正式发行
+
+1.0.8 已于 2026-11-24 18:54:16（Asia/Shanghai）公开并设为 Latest。标签 `v1.0.8` 指向冻结提交 `7787c3c9a41b5dda3dacdc99ba913ad1a32a93f6`。同一次工作流汇总双 Mac、Windows x64 和 Linux x64 共 20 份公开附件，并核对远端大小、SHA256、Windows 更新清单及匿名下载入口。见 [发布页](https://github.com/yuangy1995/hongguo/releases/tag/v1.0.8)和[四平台构建与验收](https://github.com/yuangy1995/hongguo/actions/runs/45377747597)。
+
+- 两种 Mac DMG 的版本、架构、临时签名及隔离启动均通过。Linux AppImage 的启动、媒体工具及软件解码资源检查通过。Windows 在 GitHub 虚拟机通过启动、新装、同版本重装和从 1.80 迁移的资料保留检查。Windows EXE 未签名。
+- 依用户要求，本次最终包验收跳过依赖红果服务器的真实下载与播放。独立的[源码回归](https://github.com/yuangy1995/hongguo/actions/runs/45377643214)通过。
+- [此前的发行任务](https://github.com/yuangy1995/hongguo/actions/runs/45222407967/attempts/2)在 Apple Silicon 构建机排队期间被取消，Windows 两次验收分别遇到随机样本取源失败和脚本仍按旧文件名查找转码缓存。最终轮改用有可用构建机的 macOS 26，并修正 Windows 脚本的缓存检查。
+
 ## 1.0.7 正式发行
 
 1.0.7 已于 2026-11-23 23:30:12（Asia/Shanghai）公开并设为 Latest。标签 `v1.0.7` 指向冻结提交 `662a1f9417a3c70ac0fa077963a0bcf237f4da98`。同一次工作流汇总了双 Mac、Windows x64、Linux x64 产物，并于北京时间 23:30 完成 20 份公开附件校验。见 [发布页](https://github.com/yuangy1995/hongguo/releases/tag/v1.0.7)和[构建与验收](https://github.com/yuangy1995/hongguo/actions/runs/45192999506/attempts/4)。
