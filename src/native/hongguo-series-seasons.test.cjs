@@ -38,11 +38,10 @@ test('the official selector looks up the exact ID and preserves provider order a
   assert.equal(cards[2].reservationId, reservationId);
 });
 
-test('a generic service error stays retryable instead of confirming an empty series list', () => {
-  for (const payload of [{ code: 0, data: [] }, { code: 0, data: null }, { code: '0' }]) {
+test('101116 without data means no series, other service errors stay retryable', () => {
+  for (const payload of [{ code: 0, data: [] }, { code: 0, data: null }, { code: '0' }, { code: 101116, message: 'SERVICE_ERROR', data: null }]) {
     assert.deepEqual(parseSeriesSeasons(payload), []);
   }
-  assert.throws(() => parseSeriesSeasons({ code: 101116, message: 'SERVICE_ERROR', data: null }), /未确认/);
   assert.throws(() => parseSeriesSeasons({ code: 0, data: {} }), /格式/);
   assert.throws(() => parseSeriesSeasons({ code: 101116, message: 'SERVICE_ERROR', data: [] }), /未确认/);
   assert.throws(() => parseSeriesSeasons({ code: 101117, message: 'SERVICE_ERROR', data: null }), /未确认/);

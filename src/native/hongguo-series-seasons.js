@@ -10,6 +10,8 @@ const flag = value => [true, 1, '1', 'true'].includes(value);
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 
 function parseSeriesSeasons(payload, seriesId) {
+  // 红果对没有系列的剧固定返回 101116 且不带数据。
+  if ((payload?.code === 101116 || payload?.code === '101116') && payload.data == null) return [];
   if (payload?.code !== 0 && payload?.code !== '0') throw new Error('红果未确认系列剧查询，请稍后重试。');
   if (payload.data == null) return [];
   if (!Array.isArray(payload.data)) throw new Error('官方系列剧列表格式已变化。');
