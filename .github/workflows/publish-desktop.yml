@@ -7,7 +7,7 @@ on:
         required: true
         type: string
       skip_live_media:
-        description: 仅 1.0.7 和 1.0.8 用于红果取源受限时保留其他验收
+        description: 仅 1.0.7、1.0.8 和 1.0.10 用于红果取源受限时保留其他验收
         type: boolean
         default: false
 
@@ -34,7 +34,7 @@ jobs:
           [[ "$REQUESTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           test -s "docs/release-notes/$REQUESTED_VERSION.md"
           if [[ "$SKIP_LIVE_MEDIA" == true ]]; then
-            [[ "$REQUESTED_VERSION" == 1.0.7 || "$REQUESTED_VERSION" == 1.0.8 ]]
+            [[ "$REQUESTED_VERSION" == 1.0.7 || "$REQUESTED_VERSION" == 1.0.8 || "$REQUESTED_VERSION" == 1.0.10 ]]
           fi
 
   mac:

@@ -19,7 +19,7 @@ assert os.environ['GITHUB_REF'] == 'refs/heads/main'
 assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == sha
 version = json.loads(Path('package.json').read_text())['version']
 skip_live_media = os.environ.get('HONGGUO_SKIP_LIVE_MEDIA') == 'true'
-assert not skip_live_media or version in ('1.0.7', '1.0.8')
+assert not skip_live_media or version in ('1.0.7', '1.0.8', '1.0.10')
 tag = f'v{version}'
 inputs = Path(sys.argv[1])
 output = Path('release-assets')
