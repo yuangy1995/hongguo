@@ -13,6 +13,13 @@
 
 需要发新版本时，由维护者手动合并上游改动并检查本项目的功能，再通过 GitHub Actions 的「发布桌面版」启动四平台发行。
 
+## 1.0.10 正式发行
+
+1.0.10 已于 2026-11-25 16:27:38（Asia/Shanghai）公开并设为 Latest。标签 `v1.0.10` 指向冻结提交 `56c406a39f690878d817a015498d42912be68701`。同一次工作流汇总双 Mac、Windows x64 和 Linux x64 共 20 份公开附件，并核对远端大小、SHA256、Windows 更新清单及匿名下载入口。见 [发布页](https://github.com/yuangy1995/hongguo/releases/tag/v1.0.10)和[四平台构建与验收](https://github.com/yuangy1995/hongguo/actions/runs/45574907218)。
+
+- 两种 Mac DMG 的版本、架构、临时签名及隔离启动均通过。Linux AppImage 的启动、媒体工具及软件解码资源检查通过。Windows 在 GitHub 虚拟机通过启动、新装、同版本重装、从 1.80 迁移的资料保留检查及 173 项播放源回归测试；Windows EXE 未签名。
+- 此前完整轮次 [45557318986](https://github.com/yuangy1995/hongguo/actions/runs/45557318986) 中，Apple 芯片 Mac 完成真实下载与静音播放验收，Linux 与 Windows 在云端随机样本拉取阶段遇到红果上游超时/无可用样本。依用户明确授权，最终轮跳过依赖红果服务器的云端真实下载与播放验收，保留其余全部构建、签名与安装启动检查。
+
 ## 1.0.9 正式发行
 
 1.0.9 已于 2026-11-25 09:21:10（Asia/Shanghai）公开并设为 Latest。标签 `v1.0.9` 指向冻结提交 `1ff1d7ab19dc4d4da661a33c51efdd9ba266a9a2`。同一次工作流汇总双 Mac、Windows x64 和 Linux x64 共 20 份公开附件，并核对远端大小、SHA256、Windows 更新清单及匿名下载入口。见 [发布页](https://github.com/yuangy1995/hongguo/releases/tag/v1.0.9)和[四平台构建与验收](https://github.com/yuangy1995/hongguo/actions/runs/45522709364)。
