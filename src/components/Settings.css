@@ -28,9 +28,18 @@
 }
 
 .settings-group {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.settings-group > .btn {
+  align-self: flex-start;
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: anywhere;
 }
 
 .settings-label {
@@ -40,17 +49,26 @@
 
 .folder-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
 .folder-row .input-field {
-  flex: 1;
+  flex: 1 1 160px;
+  min-width: 0;
 }
 
 .preset-row {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.preset-row .btn-chip {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: anywhere;
 }
 
 .select-field {
