@@ -26,6 +26,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('stealth-state', listener);
   },
   // 应用信息 / 官网链接
+  getSourcePackStatus: () => ipcRenderer.invoke('get-source-pack-status'),
+  setSourcePackEnabled: enabled => ipcRenderer.invoke('set-source-pack-enabled', enabled),
+  checkSourcePack: () => ipcRenderer.invoke('check-source-pack'),
+  rollbackSourcePack: () => ipcRenderer.invoke('rollback-source-pack'),
+  getPlaybackSourceOrder: () => ipcRenderer.invoke('get-playback-source-order'),
+  setPlaybackSourceOrder: order => ipcRenderer.invoke('set-playback-source-order', order),
+  onSourcePackStatus: cb => {
+    const listener = (_event, status) => cb(status);
+    ipcRenderer.on('source-pack-status', listener);
+    return () => ipcRenderer.removeListener('source-pack-status', listener);
+  },
   checkAppUpdate: () => ipcRenderer.invoke('check-app-update'),
   openAppUpdate: () => ipcRenderer.invoke('open-app-update'),
   getAppUpdateState: () => ipcRenderer.invoke('get-app-update-state'),

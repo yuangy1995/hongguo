@@ -189,5 +189,7 @@
   "共 {0} 集 · 当前 {1}-{2}": "Total {0} episodes · Showing {1}-{2}",
   "选择《{0}》": "Select {0}",
   "删除《{0}》全部任务": "Delete all tasks for {0}",
-  "删除《{0}》选中的 {1} 个任务": "Delete {1} selected tasks for {0}"
+  "删除《{0}》选中的 {1} 个任务": "Delete {1} selected tasks for {0}",
+  "已更新到策略第 {0} 版。": "Updated to policy revision {0}.",
+  "已回滚到策略第 {0} 版。": "Rolled back to policy revision {0}."
 }

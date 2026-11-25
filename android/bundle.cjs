@@ -43,7 +43,7 @@ esbuild.buildSync({
   inject:[path.join(root,'web/globals.js')],
   define: { HONGGUO_ANDROID_WEBVIEW: 'true' },
   alias: {'android-decrypt':path.join(root,'build/decrypt.js'), 'node:crypto':path.join(root,'web/crypto.js'), 'node:zlib':path.join(root,'web/zlib.js'), 'node:timers/promises':path.join(root,'web/timers.cjs'), 'axios':path.join(root,'web/axios.cjs'),
-    'node:fs':path.join(root,'mobile/fs.cjs'), 'node:path':path.join(root,'mobile/path.cjs'),
+    'node:fs':path.join(root,'mobile/fs.cjs'), 'node:os':path.join(root,'mobile/os.cjs'), 'node:path':path.join(root,'mobile/path.cjs'),
     'node:child_process':path.join(root,'mobile/child-process.cjs'), 'electron':path.join(root,'mobile/electron.cjs')},
   legalComments:'eof',
 });

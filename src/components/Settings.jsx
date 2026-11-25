@@ -7,6 +7,7 @@ import AppearanceSettings from './AppearanceSettings';
 import ShortcutSettings from './ShortcutSettings';
 import StealthWakeRegion from './StealthWakeRegion.jsx';
 import CustomSources from './CustomSources';
+import SourcePackSettings from './SourcePackSettings';
 import BuiltinSources from './BuiltinSources';
 import { RollingNumber, SoftKnob, SoftStatusBars, useSkin, useSoftCheckboxDrag } from './SoftControls';
 import { Settings, Folder, Check, Globe, X, RefreshCw, AlertCircle } from './icons';
@@ -351,6 +352,7 @@ function SettingsPage({ active = true, preview = false, configNote = '', wakeReg
       </section>}
       <div className="settings-source-cards" hidden={section !== 'network'}>
         <BuiltinSources />
+        <SourcePackSettings />
         <CustomSources active={active && section === 'network'} />
       </div>
       <fieldset className="settings-card settings-preferences" disabled={saving} hidden={section === 'appearance' || section === 'network'}>
