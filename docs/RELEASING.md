@@ -13,6 +13,14 @@
 
 需要发新版本时，由维护者手动合并上游改动并检查本项目的功能，再通过 GitHub Actions 的「发布桌面版」启动四平台发行。
 
+## 1.0.9 正式发行
+
+1.0.9 已于 2026-11-25 09:21:10（Asia/Shanghai）公开并设为 Latest。标签 `v1.0.9` 指向冻结提交 `1ff1d7ab19dc4d4da661a33c51efdd9ba266a9a2`。同一次工作流汇总双 Mac、Windows x64 和 Linux x64 共 20 份公开附件，并核对远端大小、SHA256、Windows 更新清单及匿名下载入口。见 [发布页](https://github.com/yuangy1995/hongguo/releases/tag/v1.0.9)和[四平台构建与验收](https://github.com/yuangy1995/hongguo/actions/runs/45522709364)。
+
+- 两种 Mac DMG 的版本、架构、临时签名及隔离启动均通过；Apple 芯片版完成真实下载与静音播放验收，Intel Mac 覆盖启动。
+- Linux AppImage 通过隔离启动、媒体工具、软件解码资源及真实下载与静音播放检查。
+- Windows x64 在 GitHub 虚拟机通过便携版真实下载队列与静音播放、新装、同版本重装及从 1.80 迁移的资料保留检查；Windows EXE 未签名。
+
 ## 1.0.8 正式发行
 
 1.0.8 已于 2026-11-24 18:54:16（Asia/Shanghai）公开并设为 Latest。标签 `v1.0.8` 指向冻结提交 `7787c3c9a41b5dda3dacdc99ba913ad1a32a93f6`。同一次工作流汇总双 Mac、Windows x64 和 Linux x64 共 20 份公开附件，并核对远端大小、SHA256、Windows 更新清单及匿名下载入口。见 [发布页](https://github.com/yuangy1995/hongguo/releases/tag/v1.0.8)和[四平台构建与验收](https://github.com/yuangy1995/hongguo/actions/runs/45377747597)。
