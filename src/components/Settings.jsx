@@ -362,7 +362,7 @@ function SettingsPage({ active = true, preview = false, configNote = '', wakeReg
             if (event.target.checked) setConfirmAutoDelete(true);
             else update('auto_delete_watched', false);
           }} /><span className="proxy-switch-text">{t("看完自动删除")}<em>{t("看完一集后，将永久删除该集已下载的视频、在线播放缓存和转码缓存。需要时可重新下载。")}</em></span></label>
-          <label className="proxy-switch-row"><input type="checkbox" aria-label={t("优先使用红果 App 搜索")} checked={settings.search_app_enabled === true} onChange={event => update('search_app_enabled', event.target.checked)} /><span className="proxy-switch-text">{t("优先使用红果 App 搜索")}<em>{t("失败或空结果自动回退官网；关闭此项时，官网不可用仍会尝试 App 备用搜索。")}</em></span></label>
+          <label className="proxy-switch-row"><input type="checkbox" aria-label={t("优先使用红果 App 搜索")} checked={settings.search_app_enabled === true} onChange={event => update('search_app_enabled', event.target.checked)} /><span className="proxy-switch-text">{t("优先使用红果 App 搜索")}<em>{t("失败或空结果自动回退官网；关闭此项时，官网无匹配或不可用仍会尝试 App 备用搜索。")}</em></span></label>
         </div>
         <div className="settings-group" hidden={section !== 'playback'}>
           <span className="settings-label">{t("弹幕按钮设置")}</span>

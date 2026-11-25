@@ -3,6 +3,7 @@ set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 WORK="$ROOT/build/sdk-playback"
+STAGE="$ROOT/build/sdk-playback-work"
 HOST_ARCH="$(uname -m)"
 if [ "$HOST_ARCH" = "x86_64" ]; then HOST_ARCH="x64"; fi
 ARCH="${1:-$HOST_ARCH}"
@@ -22,13 +23,18 @@ if [ "$ARCH" != "$HOST_ARCH" ]; then
     printf '%s\n' "Build $ARCH on a matching host architecture." >&2
     exit 1
 fi
+PYTHON_ARCH="$("$PYTHON" -c 'import platform; print(platform.machine())')"
+if [ "$PYTHON_ARCH" != "$TARGET_ARCH" ]; then
+    printf '%s\n' "Python architecture $PYTHON_ARCH does not match target $TARGET_ARCH." >&2
+    exit 1
+fi
 
 command -v "$PYTHON" >/dev/null
-mkdir -p "$WORK/source" "$WORK/build-$ARCH" "$WORK/darwin-$ARCH"
-ARCHIVE="$WORK/source/hongguo-1.0.104-third-party-sources.zip"
+mkdir -p "$STAGE/source" "$STAGE/build-$ARCH" "$WORK/darwin-$ARCH"
+ARCHIVE="$STAGE/source/hongguo-1.0.104-third-party-sources.zip"
 VENDOR="$ROOT/scripts/sdk-playback/vendor/phone_account"
 
-BUILD_ROOT="$WORK/build-$ARCH"
+BUILD_ROOT="$STAGE/build-$ARCH"
 rm -rf "$BUILD_ROOT/phone_account"
 if [ -d "$VENDOR" ]; then
     cp -R "$VENDOR" "$BUILD_ROOT/phone_account"
@@ -40,23 +46,22 @@ else
         rm -f "$ARCHIVE"
         exit 1
     fi
-    rm -rf "$WORK/source/expanded"
-    mkdir -p "$WORK/source/expanded"
-    ditto -x -k "$ARCHIVE" "$WORK/source/expanded"
-    cp -R "$WORK/source/expanded/desktop-app-1.0.59/source-tree/work/library-search/scripts/phone-account-protocol" "$BUILD_ROOT/phone_account"
-    cp "$WORK/source/expanded/desktop-account-1.0.19/medusa_wire_tables.json" "$BUILD_ROOT/phone_account/"
+    rm -rf "$STAGE/source/expanded"
+    mkdir -p "$STAGE/source/expanded"
+    ditto -x -k "$ARCHIVE" "$STAGE/source/expanded"
+    cp -R "$STAGE/source/expanded/desktop-app-1.0.59/source-tree/work/library-search/scripts/phone-account-protocol" "$BUILD_ROOT/phone_account"
+    cp "$STAGE/source/expanded/desktop-account-1.0.19/medusa_wire_tables.json" "$BUILD_ROOT/phone_account/"
 fi
 cp "$ROOT/scripts/sdk-playback/resolve_cli.py" "$BUILD_ROOT/resolve_cli.py"
 
-if [ ! -x "$WORK/venv-$ARCH/bin/python" ]; then
-    "$PYTHON" -m venv "$WORK/venv-$ARCH"
-fi
-"$WORK/venv-$ARCH/bin/pip" install --quiet \
+rm -rf "$STAGE/venv-$ARCH"
+"$PYTHON" -m venv "$STAGE/venv-$ARCH"
+"$STAGE/venv-$ARCH/bin/pip" install --quiet \
     pyinstaller==6.22.3 unicorn==2.1.4 requests==2.34.2 pycryptodome==4.6.0
 
 (
     cd "$BUILD_ROOT"
-    "$WORK/venv-$ARCH/bin/pyinstaller" --noconfirm --clean --onefile \
+    "$STAGE/venv-$ARCH/bin/pyinstaller" --noconfirm --clean --onefile \
         --name hongguo-sdk-playback \
         --collect-all unicorn --collect-all Crypto \
         --paths "$BUILD_ROOT/phone_account" \
