@@ -3,6 +3,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AlertCircle, Play, RefreshCw, Clock, Search } from './icons';
 import './WatchHistory.css';
 import { groupHistory, historyGroupSuggestions } from './historyGroups.mjs';
+import { RollingNumber } from './SoftControls';
 
 const PREFERENCES_KEY = 'hongguo:watch-history-preferences';
 const ACCOUNT_VIEW_KEY = 'hongguo:account-history-view';
@@ -296,7 +297,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
           ['all', '全部', listedRows.length],
           ['unfinished', '未看完', listedRows.length - completedCount],
           ['completed', '已看完', completedCount],
-        ].map(([value, label, count]) => <button key={value} type="button" aria-pressed={filter === value} disabled={loading} onClick={() => setFilter(value)}>{t(label)} {t(count)}</button>)}
+        ].map(([value, label, count]) => <button key={value} type="button" aria-pressed={filter === value} disabled={loading} onClick={() => setFilter(value)}>{t(label)} <RollingNumber value={count} /></button>)}
       </div>
       {accountSignedIn && <div className="account-history-tools">
         <label className="account-history-search">
@@ -401,7 +402,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
             ? <div className="history-seasons-list">{seasons.results.map(season => {
               const selected = season.series_id === row.series_id;
               return <button type="button" key={season.series_id} className="btn btn-outline" aria-current={selected ? 'true' : undefined}
-                disabled={selected || !season.playable || !active || !!opening || !!removing} onClick={event => {
+                disabled={!season.playable || !active || !!opening || !!removing} onClick={event => {
                   event.currentTarget.closest('.history-seasons-menu')?.hidePopover?.();
                   const existing = rows.find(item => item.series_id === season.series_id);
                   if (existing) void resume(existing);

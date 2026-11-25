@@ -2,9 +2,18 @@ import { t, useLanguage } from '../i18n';
 import LanguageSettings from './LanguageSettings';
 import React, { useEffect, useRef, useState } from 'react';
 import { getThemePreference, setThemePreference, getPosterSize, setPosterSize, getSkin, setSkin } from '../theme';
+import { RollingNumber, SoftKnob, useSkin } from './SoftControls';
+
+const POSTER_KNOB_OPTIONS = [
+  { value: 'small', label: '小', numeric: 80 },
+  { value: 'standard', label: '标准', numeric: 100 },
+  { value: 'large', label: '大', numeric: 130 },
+  { value: 'extra-large', label: '特大', numeric: 160 },
+];
 
 export default function AppearanceSettings({ active = true, showZoom = true }) {
   useLanguage();
+  const activeSkin = useSkin();
   const [preference, setPreference] = useState(getThemePreference);
   const [skin, setSkinPreference] = useState(getSkin);
   const [posterSize, setPosterPreference] = useState(getPosterSize);
@@ -46,15 +55,17 @@ export default function AppearanceSettings({ active = true, showZoom = true }) {
     }
   };
 
-  const changePosterSize = event => {
+  const applyPosterSize = value => {
     try {
-      setPosterSize(event.target.value);
-      setPosterPreference(event.target.value);
+      setPosterSize(value);
+      setPosterPreference(value);
       setError('');
     } catch {
       setError('海报大小保存失败，请重试。');
     }
   };
+
+  const changePosterSize = event => applyPosterSize(event.target.value);
 
   const changeTheme = (event) => {
     try {
@@ -93,6 +104,7 @@ export default function AppearanceSettings({ active = true, showZoom = true }) {
       <select id="appearance-skin" className="input-field select-field" value={skin} onChange={changeSkin} aria-describedby="appearance-skin-hint">
         <option value="default">{t("默认")}</option>
         <option value="frosted">{t("磨砂玻璃")}</option>
+        <option value="soft">{t("新拟物")}</option>
       </select>
       <p className="settings-hint" id="appearance-skin-hint">{t("立即生效并自动保存，浅色和深色外观都适用。")}</p>
     </div>}
@@ -100,7 +112,7 @@ export default function AppearanceSettings({ active = true, showZoom = true }) {
       <span className="settings-label" id="appearance-zoom-label">{t("界面与字号")}</span>
       <div className="appearance-zoom" role="group" aria-labelledby="appearance-zoom-label" aria-describedby="appearance-zoom-hint">
         <button type="button" className="btn btn-outline" aria-label={t("缩小界面与字号")} disabled={zoomBusy || zoom === null || zoom <= 0.5} onClick={() => changeZoom('out')}>{t("缩小")}</button>
-        <output aria-live="polite">{t(zoom === null ? '读取中…' : `${Math.round(zoom * 100)}%`)}</output>
+        <output aria-live="polite">{zoom === null ? t('读取中…') : <RollingNumber value={Math.round(zoom * 100)} suffix="%" />}</output>
         <button type="button" className="btn btn-outline" aria-label={t("放大界面与字号")} disabled={zoomBusy || zoom === null || zoom >= 2} onClick={() => changeZoom('in')}>{t("放大")}</button>
         <button type="button" className="btn btn-outline" disabled={zoomBusy || zoom === null || zoom === 1} onClick={() => changeZoom('reset')}>{t("恢复 100%")}</button>
       </div>
@@ -108,12 +120,22 @@ export default function AppearanceSettings({ active = true, showZoom = true }) {
     </div>}
     <div className="settings-group">
       <label className="settings-label" htmlFor="appearance-poster-size">{t("海报大小")}</label>
-      <select id="appearance-poster-size" className="input-field select-field" value={posterSize} onChange={changePosterSize} aria-describedby="appearance-poster-hint">
-        <option value="small">{t("小")}</option>
-        <option value="standard">{t("标准")}</option>
-        <option value="large">{t("大")}</option>
-        <option value="extra-large">{t("特大")}</option>
-      </select>
+      {activeSkin === 'soft' ? (
+        <SoftKnob
+          value={posterSize}
+          options={POSTER_KNOB_OPTIONS}
+          unit="%"
+          ariaLabel={t("海报大小")}
+          onChange={applyPosterSize}
+        />
+      ) : (
+        <select id="appearance-poster-size" className="input-field select-field" value={posterSize} onChange={changePosterSize} aria-describedby="appearance-poster-hint">
+          <option value="small">{t("小")}</option>
+          <option value="standard">{t("标准")}</option>
+          <option value="large">{t("大")}</option>
+          <option value="extra-large">{t("特大")}</option>
+        </select>
+      )}
       <p className="settings-hint" id="appearance-poster-hint">{t("发现页海报随窗口宽度自动排列；调大后每行显示更少。保持原有比例，立即生效并自动保存。")}</p>
       {error && <p className="appearance-error" role="alert">{t(error)}</p>}
     </div>

@@ -7,6 +7,7 @@ import './index.css';
 import './desktop-mist.css';
 import './silk-glass.css';
 import './skin-frosted.css';
+import './skin-soft.css';
 import { initializePosterSize, initializeSkin } from './theme';
 
 import { initializeLanguage } from './i18n';

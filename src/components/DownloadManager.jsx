@@ -1,6 +1,7 @@
 import { t, useLanguage, getLanguage } from '../i18n';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import useDialogKeyboard from './useDialogKeyboard';
+import { RollingNumber, SoftVerticalSwitch, useSkin } from './SoftControls';
 import './DownloadManager.css';
 import { AlertCircle, Check, Clock, Download, Trash2, RefreshCw, X, Film, Square, Folder, Zap, CheckSquare, Play, Pause, Layers, ChevronDown } from './icons';
 
@@ -80,6 +81,8 @@ const EPISODE_STATUS_TEXT = {
 function DownloadManager({ onNavigate, active = true }) {
   const mobile = window.electronAPI?.platform === 'android';
   useLanguage();
+  const skin = useSkin();
+  const [colorView, setColorView] = useState(true);
   const [tasks, setTasks] = useState([]);
   const [selected, setSelected] = useState(new Set());
   const [toast, setToast] = useState(null);
@@ -950,28 +953,68 @@ function DownloadManager({ onNavigate, active = true }) {
 
   return (
     <div className="dm-container">
-      <div className="dm-header">
-        <div className="dm-title duplicate-page-title">
-          <h2>{t("下载管理")}</h2>
+      {skin === 'soft' ? (
+        <section className="dm-soft-overview" data-lit={colorView} aria-label={t("状态分布")}>
+          <div className="dm-soft-overview-head">
+            <div className="dm-stats">
+              {statusCounts.map(([status, label, count, Icon]) =>
+                <StatusPill
+                  type={mobile ? undefined : 'button'}
+                  className={`dm-stat dm-stat-${status}`}
+                  data-empty={count === 0}
+                  key={status}
+                  onClick={mobile ? undefined : () => openStatusModal(status)}
+                  title={mobile ? undefined : t(`查看${label}任务列表`)}
+                >
+                  <Icon size={14} aria-hidden="true" />
+                  <span>{t(label)}{' '}</span><strong><RollingNumber value={count} /></strong>
+                </StatusPill>)}
+            </div>
+            <div className="dm-soft-overview-actions">
+              {!mobile && <button type="button" className="btn btn-outline btn-sm" popovertarget="dm-usage-notice">
+                <AlertCircle size={15} />{t("下载说明")}
+              </button>}
+              <SoftVerticalSwitch
+                checked={colorView}
+                onChange={setColorView}
+                ariaLabel={t("切换彩色状态条")}
+              />
+            </div>
+          </div>
+          <div className={`dm-soft-distribution${colorView ? ' is-lit' : ''}`} aria-hidden="true">
+            {statusCounts.map(([status, , count]) => (
+              <span
+                key={status}
+                className={`dm-soft-segment dm-soft-segment-${status}`}
+                style={{ flexGrow: Math.max(1, count) }}
+              />
+            ))}
+          </div>
+        </section>
+      ) : (
+        <div className="dm-header">
+          <div className="dm-title duplicate-page-title">
+            <h2>{t("下载管理")}</h2>
+          </div>
+          <div className="dm-stats">
+            {statusCounts.map(([status, label, count, Icon]) =>
+              <StatusPill
+                type={mobile ? undefined : 'button'}
+                className={`dm-stat dm-stat-${status}`}
+                data-empty={count === 0}
+                key={status}
+                onClick={mobile ? undefined : () => openStatusModal(status)}
+                title={mobile ? undefined : t(`查看${label}任务列表`)}
+              >
+                <Icon size={14} aria-hidden="true" />
+                <span>{t(label)}{' '}</span><strong>{t(count)}</strong>
+              </StatusPill>)}
+          </div>
+          {!mobile && <button type="button" className="btn btn-outline btn-sm" popovertarget="dm-usage-notice">
+            <AlertCircle size={15} />{t("下载说明")}
+          </button>}
         </div>
-        <div className="dm-stats">
-          {statusCounts.map(([status, label, count, Icon]) =>
-            <StatusPill
-              type={mobile ? undefined : 'button'}
-              className={`dm-stat dm-stat-${status}`}
-              data-empty={count === 0}
-              key={status}
-              onClick={mobile ? undefined : () => openStatusModal(status)}
-              title={mobile ? undefined : t(`查看${label}任务列表`)}
-            >
-              <Icon size={14} aria-hidden="true" />
-              <span>{t(label)}{' '}</span><strong>{t(count)}</strong>
-            </StatusPill>)}
-        </div>
-        {!mobile && <button type="button" className="btn btn-outline btn-sm" popovertarget="dm-usage-notice">
-          <AlertCircle size={15} />{t("下载说明")}
-        </button>}
-      </div>
+      )}
 
       <div id="dm-usage-notice" className={`dm-usage-notice${mobile ? '' : ' desktop-popover'}`}
         ref={usageNoticeRef} popover={mobile ? undefined : 'auto'} role={mobile ? 'note' : 'dialog'}

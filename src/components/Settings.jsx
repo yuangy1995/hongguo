@@ -8,6 +8,7 @@ import ShortcutSettings from './ShortcutSettings';
 import StealthWakeRegion from './StealthWakeRegion.jsx';
 import CustomSources from './CustomSources';
 import BuiltinSources from './BuiltinSources';
+import { RollingNumber, SoftKnob, SoftStatusBars, useSkin, useSoftCheckboxDrag } from './SoftControls';
 import { Settings, Folder, Check, Globe, X, RefreshCw, AlertCircle } from './icons';
 
 
@@ -55,10 +56,12 @@ const SETTINGS_SECTIONS = [
 
 function SettingsPage({ active = true, preview = false, configNote = '', wakeRegionFocus = 0 }) {
   useLanguage();
+  const skin = useSkin();
   const danmakuSource = useDanmakuSource();
   const [settings, setSettings] = useState(null);
   const [section, setSection] = useState('appearance');
   const settingsPage = useRef(null);
+  useSoftCheckboxDrag(settingsPage);
   useEffect(() => { if (wakeRegionFocus) setSection('playback'); }, [wakeRegionFocus]);
   const [saved, setSaved] = useState(false);
   const [confirmAutoDelete, setConfirmAutoDelete] = useState(false);
@@ -364,6 +367,7 @@ function SettingsPage({ active = true, preview = false, configNote = '', wakeReg
         <div className="settings-group" hidden={section !== 'playback'}>
           <span className="settings-label">{t("弹幕按钮设置")}</span>
           <label className="proxy-switch-row"><input type="checkbox" aria-label={t("显示弹幕按钮")} checked={settings.show_danmaku_controls !== false} onChange={event => update('show_danmaku_controls', event.target.checked)} /><span className="proxy-switch-text">{t("显示弹幕按钮")}<em>{t("更改立即生效。关闭时隐藏弹幕及弹幕设置按钮，并停用弹幕；再次开启会恢复原有弹幕偏好。")}</em></span></label>
+          <SoftStatusBars active={settings.show_danmaku_controls !== false} values={[48, 76, 62, 88, 70, 94, 80]} />
         </div>
         <div className="settings-group" hidden={section !== 'playback'}>
           <label className="settings-label" htmlFor="danmaku-source">{t("弹幕来源")}</label>
@@ -436,17 +440,29 @@ function SettingsPage({ active = true, preview = false, configNote = '', wakeReg
 
         <div className="settings-group" hidden={section !== 'downloads'}>
           <label className="settings-label">{t("最大并发下载数")}</label>
-          <select
-            className="input-field select-field"
-            aria-label={t("最大并发下载数")}
-            value={settings.max_concurrent || 3}
-            onChange={(e) => update('max_concurrent', parseInt(e.target.value, 10))}
-          >
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-              <option key={n} value={n}>{t(n)}{t(" 个同时下载")}</option>
-            ))}
-          </select>
-          <p className="settings-hint">{t("同时下载 ")}<b>{settings.max_concurrent || 3}</b>{t(" 集（更改立即生效）。并发越高越快，但可能触发接口限流，建议 3~5。")}</p>
+          {skin === 'soft' ? (
+            <SoftKnob
+              min={1}
+              max={10}
+              step={1}
+              value={settings.max_concurrent || 3}
+              recommendedRange={[3, 5]}
+              ariaLabel={t("最大并发下载数")}
+              onChange={val => update('max_concurrent', val)}
+            />
+          ) : (
+            <select
+              className="input-field select-field"
+              aria-label={t("最大并发下载数")}
+              value={settings.max_concurrent || 3}
+              onChange={(e) => update('max_concurrent', parseInt(e.target.value, 10))}
+            >
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
+                <option key={n} value={n}>{t(n)}{t(" 个同时下载")}</option>
+              ))}
+            </select>
+          )}
+          <p className="settings-hint">{t("同时下载 ")}<b><RollingNumber value={settings.max_concurrent || 3} /></b>{t(" 集（更改立即生效）。并发越高越快，但可能触发接口限流，建议 3~5。")}</p>
         </div>
 
 
@@ -455,6 +471,7 @@ function SettingsPage({ active = true, preview = false, configNote = '', wakeReg
           <label className="proxy-switch-row"><input type="checkbox" checked={settings.watch_updates_enabled !== false} onChange={event => update('watch_updates_enabled', event.target.checked)} /><span className="proxy-switch-text">{t("自动检查新集")}<em>{t("应用运行期间，每部剧约 6 小时检查一次；列表较多时分批检查")}</em></span></label>
           <label className="proxy-switch-row"><input type="checkbox" checked={settings.watch_sequels_enabled !== false} onChange={event => update('watch_sequels_enabled', event.target.checked)} /><span className="proxy-switch-text">{t("查找疑似新一季")}<em>{t("约每天按剧名搜索一次，仅提示同名且季数更高的剧；可能遗漏或误报")}</em></span></label>
           <label className="proxy-switch-row"><input type="checkbox" checked={settings.watch_notifications_enabled === true} onChange={event => update('watch_notifications_enabled', event.target.checked)} /><span className="proxy-switch-text">{t("发送系统通知")}<em>{t("默认关闭。开启后还需允许 macOS 通知；关闭不影响观看记录红点")}</em></span></label>
+          <SoftStatusBars active={settings.watch_updates_enabled !== false} values={[36, 58, 72, 64, 88, 78, 90]} />
         </div>
 
         {preview ? <>

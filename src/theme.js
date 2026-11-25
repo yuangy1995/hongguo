@@ -3,7 +3,8 @@ const PREFERENCES = ['system', 'light', 'dark'];
 const POSTER_SIZE_KEY = 'hongguo-experience-preview:poster-size';
 const POSTER_SIZES = ['small', 'standard', 'large', 'extra-large'];
 const SKIN_KEY = 'hongguo-experience-preview:skin';
-const SKINS = ['default', 'frosted'];
+const SKINS = ['default', 'frosted', 'soft'];
+const skinListeners = new Set();
 
 export function getSkin() {
   try {
@@ -22,6 +23,12 @@ export function setSkin(skin) {
   if (!SKINS.includes(skin)) throw new Error('请选择有效的皮肤');
   window.localStorage.setItem(SKIN_KEY, skin);
   initializeSkin();
+  for (const listener of skinListeners) listener(skin);
+}
+
+export function subscribeSkin(listener) {
+  skinListeners.add(listener);
+  return () => skinListeners.delete(listener);
 }
 
 export function getPosterSize() {

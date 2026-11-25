@@ -7,6 +7,7 @@ import { mediaSourceLabel } from './mediaSourcesModel.mjs';
 import { Film, RefreshCw, ExternalLink, Download, Play, Check, X, Search } from './icons';
 import { isSubmitKey, parseEpisodeRange } from './episodeRange';
 import { rememberCatalogTitles } from '../searchHistory';
+import { RollingNumber, SoftCardStack, useSkin } from './SoftControls';
 
 const PAGE_CACHE_TTL_MS = 60_000;
 const LIST_TIMEOUT_MS = 25_000;
@@ -92,6 +93,8 @@ function writePersistedPage(key, page) {
  */
 function Browse({ onNavigate, active = true }) {
   useLanguage();
+  const skin = useSkin();
+  const [stackIndex, setStackIndex] = useState(0);
   const mobile = window.electronAPI.platform === 'android';
   const FilterContainer = mobile ? 'details' : 'div';
   const [selectingDownloads, setSelectingDownloads] = useState(false);
@@ -334,6 +337,10 @@ function Browse({ onNavigate, active = true }) {
   useEffect(() => {
     loadCategories();
   }, [loadCategories]);
+
+  useEffect(() => {
+    setStackIndex(0);
+  }, [results]);
 
   useEffect(() => {
     if (!active) return;
@@ -703,7 +710,19 @@ function Browse({ onNavigate, active = true }) {
         {loading && results.length === 0 ? (
           <div className="browse-loading-state" role="status"><div className="browse-loading"><RefreshCw size={18} className="spin" /><span>{t("正在加载")}{t(categories.find((item) => item.slug === category)?.label || '短剧')}…</span><button className="btn btn-outline btn-sm" onClick={cancelList}>{t("取消加载")}</button></div><div className="poster-skeletons" aria-hidden="true">{t(Array.from({ length: 5 }, (_, i) => <div className="poster-skeleton" key={i}><div /><span /><span /></div>))}</div></div>
         ) : (
-          <div className="browse-grid">
+          <>
+            {skin === 'soft' && !mobile && visibleResults.length > 1 && (
+              <SoftCardStack
+                compact
+                items={visibleResults}
+                activeIndex={Math.min(stackIndex, visibleResults.length - 1)}
+                onSelectIndex={setStackIndex}
+                onExpandItem={item => openSeries(item, false)}
+                ranking={category.startsWith('hot-')}
+                sourceLabel={mediaSourceLabel(source, mediaSources)}
+              />
+            )}
+            <div className="browse-grid">
             {visibleResults.map((item) => {
               const dl = downloadedMap[String(item.series_id)];
               return (
@@ -752,7 +771,8 @@ function Browse({ onNavigate, active = true }) {
                 </div>
               );
             })}
-          </div>
+            </div>
+          </>
         )}
       </div>
 
@@ -816,7 +836,7 @@ function Browse({ onNavigate, active = true }) {
                       )}
                       {detail.episodes.some((ep) => ep.locked) && <div className="browse-drawer-sub">{t("标记“锁定”的集数需在来源平台解锁，本应用不提供解锁。")}</div>}
                       {(!mobile || selectingDownloads) && <>
-                      <div className="browse-drawer-sub">{t("选中 ")}{t(selectedIdx.size)}{t(" 集待下载")}</div>
+                      <div className="browse-drawer-sub">{t("选中 ")}<RollingNumber value={selectedIdx.size} />{t(" 集待下载")}</div>
                       <div className="browse-range-row">
                         <input
                           type="text"

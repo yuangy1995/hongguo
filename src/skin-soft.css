@@ -1,0 +1,1244 @@
+/* 新拟物（Soft UI）皮肤：暖米白同色底座、短距柔和投影 + 环绕边框高光营造精致凸起与凹陷，浮层融合温润磨砂玻璃。 */
+:root[data-skin="soft"] .desktop-mist {
+  --soft-surface: #ebe5db;
+  --soft-raised-bg: linear-gradient(180deg, #f2ece3 0%, #e9e3d8 100%);
+  --soft-hover-bg: linear-gradient(180deg, #f5f0e8 0%, #ece6dc 100%);
+  --soft-pressed-bg: #e3ddd2;
+
+  --soft-led: #2680ff;
+  --soft-led-glow: 0 0 6px rgba(38, 128, 255, 0.78), 0 0 12px rgba(38, 128, 255, 0.34);
+  --soft-led-off: inset 0 1px 2px rgba(136, 126, 110, 0.52), 0 1px 0 rgba(255, 253, 249, 0.78);
+
+  /* 环绕边框高光：顶部受光明棱 + 四周柔和亮边 + 底部微暗倒角，不向外扩散白雾 */
+  --soft-rim-highlight:
+    inset 0 1.5px 0.5px rgba(255, 254, 250, 0.90),
+    inset 0 0 0 1px rgba(255, 252, 246, 0.62),
+    inset 0 -1.5px 2px rgba(154, 143, 126, 0.20);
+  --soft-rim-hover:
+    inset 0 1.5px 0.5px rgba(255, 255, 252, 0.96),
+    inset 0 0 0 1.25px rgba(255, 254, 250, 0.86),
+    inset 0 -1.5px 2px rgba(154, 143, 126, 0.16);
+
+  /* 短距克制投影：相邻紧凑元素不串光、不混影 */
+  --soft-panel-shadow:
+    0 5px 14px -3px rgba(142, 131, 114, 0.25),
+    0 1.5px 3px rgba(142, 131, 114, 0.15),
+    var(--soft-rim-highlight);
+  --soft-card-shadow:
+    0 3px 9px -2px rgba(142, 131, 114, 0.23),
+    0 1px 2px rgba(142, 131, 114, 0.14),
+    var(--soft-rim-highlight);
+  --soft-keycap-shadow:
+    0 2px 4px rgba(140, 129, 112, 0.24),
+    0 1px 1.5px rgba(140, 129, 112, 0.15),
+    var(--soft-rim-highlight);
+  --soft-keycap-hover:
+    0 0 9px rgba(136, 125, 108, 0.24),
+    0 1.5px 3px rgba(136, 125, 108, 0.16),
+    var(--soft-rim-hover);
+  --soft-inset:
+    inset 0 2px 4px rgba(136, 126, 110, 0.38),
+    inset 0 1px 1.5px rgba(126, 116, 100, 0.24),
+    inset 0 0 0 1px rgba(152, 142, 126, 0.18),
+    0 1px 0 rgba(255, 253, 249, 0.72);
+  --soft-inset-sm:
+    inset 0 1.5px 3.5px rgba(136, 126, 110, 0.34),
+    inset 0 0 0 1px rgba(152, 142, 126, 0.16),
+    0 1px 0 rgba(255, 253, 249, 0.66);
+
+  --bg: #ebe5db;
+  --bg-canvas: #ebe5db;
+  --bg-subtle: #ebe5db;
+  --bg-elevated: #f1ece3;
+  --bg-card: #ebe5db;
+  --bg-inset: #e3ddd2;
+  --bg-hover: #efeae1;
+  --bg-input: #e5dfd4;
+  --sidebar-hover: #efeae1;
+  --sidebar-active: #e3ddd2;
+  --text: #2b2824;
+  --text-primary: #2b2824;
+  --text-secondary: #5b554d;
+  --text-tertiary: #7b746a;
+  --primary: #2680ff;
+  --primary-hover: #186ee8;
+  --accent: #2680ff;
+  --accent-text: #1762d1;
+  --accent-hover: #186ee8;
+  --accent-soft: #e3ddd2;
+  --accent-border: rgba(38, 128, 255, 0.34);
+  --border: transparent;
+  --border-default: transparent;
+  --border-color: transparent;
+  --border-muted: rgba(154, 144, 128, 0.18);
+  --border-strong: rgba(146, 136, 120, 0.28);
+  --focus-ring: #2680ff;
+  --focus-soft: rgba(38, 128, 255, 0.30);
+  --selection: #d2e4ff;
+  --skeleton: #e1dbd0;
+  --scroll-thumb: rgba(142, 132, 118, 0.44);
+  --success: #238757;
+  --success-bg: #e2ebe5;
+  --warning: #b57118;
+  --danger: #c73f3f;
+  --danger-bg: #f0e1de;
+  --radius: 13px;
+  --radius-lg: 24px;
+  --mist-side: 196px;
+  --mist-frame: transparent;
+  --mist-glass: #ebe5db;
+  --mist-glass-strong: #f0ebe2;
+  --mist-glass-subtle: #e4ded3;
+  --mist-controls: #ebe5db;
+  --mist-rim: rgba(255, 253, 249, 0.65);
+  --mist-border-outer: transparent;
+  --mist-shadow: rgba(144, 134, 118, 0.28);
+  --mist-shadow-lg: var(--soft-panel-shadow);
+  --mist-blur: none;
+  /* 纯净统一暖米白画布，去除左上角发白光斑 */
+  --mist-backdrop: #ebe5db;
+}
+
+:root[data-skin="soft"][data-theme="dark"] .desktop-mist {
+  --soft-surface: #252320;
+  --soft-raised-bg: linear-gradient(180deg, #2c2a26 0%, #24221f 100%);
+  --soft-hover-bg: linear-gradient(180deg, #312e2a 0%, #282622 100%);
+  --soft-pressed-bg: #1f1d1a;
+
+  --soft-led: #4796ff;
+  --soft-led-glow: 0 0 7px rgba(71, 150, 255, 0.85), 0 0 15px rgba(71, 150, 255, 0.42);
+  --soft-led-off: inset 0 1px 2px rgba(0, 0, 0, 0.80), 0 1px 0 rgba(255, 255, 255, 0.06);
+
+  --soft-rim-highlight:
+    inset 0 1px 0.5px rgba(255, 252, 245, 0.12),
+    inset 0 0 0 1px rgba(255, 252, 245, 0.06),
+    inset 0 -1.5px 2px rgba(0, 0, 0, 0.38);
+  --soft-rim-hover:
+    inset 0 1px 0.5px rgba(255, 252, 245, 0.18),
+    inset 0 0 0 1.25px rgba(255, 252, 245, 0.13),
+    inset 0 -1.5px 2px rgba(0, 0, 0, 0.30);
+
+  --soft-panel-shadow:
+    0 6px 16px -3px rgba(0, 0, 0, 0.52),
+    0 2px 4px rgba(0, 0, 0, 0.34),
+    var(--soft-rim-highlight);
+  --soft-card-shadow:
+    0 4px 10px -2px rgba(0, 0, 0, 0.46),
+    0 1px 3px rgba(0, 0, 0, 0.30),
+    var(--soft-rim-highlight);
+  --soft-keycap-shadow:
+    0 2px 5px rgba(0, 0, 0, 0.44),
+    0 1px 2px rgba(0, 0, 0, 0.28),
+    var(--soft-rim-highlight);
+  --soft-keycap-hover:
+    0 0 10px rgba(0, 0, 0, 0.50),
+    0 1.5px 3px rgba(0, 0, 0, 0.30),
+    var(--soft-rim-hover);
+  --soft-inset:
+    inset 0 2px 5px rgba(0, 0, 0, 0.68),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.36),
+    0 1px 0 rgba(255, 255, 255, 0.05);
+  --soft-inset-sm:
+    inset 0 1.5px 4px rgba(0, 0, 0, 0.60),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.30),
+    0 1px 0 rgba(255, 255, 255, 0.04);
+
+  --bg: #252320;
+  --bg-canvas: #252320;
+  --bg-subtle: #252320;
+  --bg-elevated: #2b2925;
+  --bg-card: #252320;
+  --bg-inset: #1f1d1a;
+  --bg-hover: #2c2925;
+  --bg-input: #201e1b;
+  --sidebar-hover: #2c2925;
+  --sidebar-active: #1f1d1a;
+  --text: #f2ede4;
+  --text-primary: #f2ede4;
+  --text-secondary: #beb6aa;
+  --text-tertiary: #91897e;
+  --primary: #3b8cff;
+  --primary-hover: #529bff;
+  --accent: #4796ff;
+  --accent-text: #7cb4ff;
+  --accent-hover: #9bc6ff;
+  --accent-soft: #1f1d1a;
+  --accent-border: rgba(71, 150, 255, 0.42);
+  --border-muted: rgba(255, 248, 236, 0.08);
+  --border-strong: rgba(255, 248, 236, 0.15);
+  --focus-ring: #4796ff;
+  --focus-soft: rgba(71, 150, 255, 0.36);
+  --selection: #24487a;
+  --skeleton: #2d2b27;
+  --scroll-thumb: rgba(180, 170, 156, 0.28);
+  --success: #5cd194;
+  --success-bg: rgba(46, 160, 100, 0.16);
+  --warning: #f0b85d;
+  --danger: #ff8282;
+  --danger-bg: rgba(220, 72, 72, 0.18);
+  --mist-glass: #252320;
+  --mist-glass-strong: #2b2925;
+  --mist-glass-subtle: #1f1d1a;
+  --mist-controls: #252320;
+  --mist-rim: rgba(255, 255, 255, 0.07);
+  --mist-backdrop: #252320;
+}
+
+/* ===== 风格底座：同色暖米白、环绕高光边框、紧凑投影与干净间距 ===== */
+:root[data-skin="soft"] .desktop-mist .window-toolbar {
+  border-bottom-color: transparent;
+}
+:root[data-skin="soft"] .desktop-mist .toolbar-actions {
+  gap: 10px;
+}
+
+:root[data-skin="soft"] .desktop-mist :is(
+  .account-card, .hongguo-card, .settings-card, .drama-feed-feature, .browse-continue,
+  .browse-header, .browse-category-shelf, .drama-feed-categories, .drama-feed-header,
+  .drama-feed-upcoming, .random-drama-stage, .player-empty, .player-library-bar,
+  .player-management, .community-panel, .player-footer-tools, .history-filter-bar,
+  .history-empty, .release-toolbar, .release-empty, .dm-toolbar, .settings-sections,
+  .browse-pager, .pagination-controls
+),
+:root[data-skin="soft"] .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar {
+  background: var(--soft-raised-bg);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-color: transparent;
+  border-radius: 24px;
+  box-shadow: var(--soft-panel-shadow);
+}
+
+:root[data-skin="soft"] .desktop-mist :is(
+  .browse-header, .browse-category-shelf, .drama-feed-categories, .drama-feed-header,
+  .history-filter-bar, .release-toolbar, .dm-toolbar, .browse-pager, .pagination-controls
+) {
+  border-radius: 20px;
+  padding: 10px 14px;
+  box-shadow: var(--soft-card-shadow);
+}
+
+/* 修复发现页分类条、题材行与滚动区顶边裁剪白条 */
+:root[data-skin="soft"] .desktop-mist .browse-cats {
+  background: transparent;
+  gap: 7px;
+  padding: 2px;
+}
+:root[data-skin="soft"] .desktop-mist .browse-genres {
+  gap: 8px;
+  padding: 2px 0;
+  margin-block: 6px 12px;
+}
+:root[data-skin="soft"] .desktop-mist.layout-landscape:not(.stealth-mode) .browse-list-area {
+  padding: 8px 10px 24px;
+  margin-inline: -10px;
+}
+:root[data-skin="soft"] .desktop-mist .browse-stat {
+  background: var(--soft-pressed-bg);
+  border-color: transparent;
+  box-shadow: var(--soft-inset-sm);
+}
+:root[data-skin="soft"] .desktop-mist .browse-rank-badge,
+:root[data-skin="soft"] .desktop-mist .browse-hover-play {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  box-shadow: 0 3px 10px rgba(24, 20, 16, 0.28), var(--soft-rim-highlight);
+}
+
+/* 修复播放器下方「下载清晰度」与「下载到 NAS」叠合处的白色光带 */
+:root[data-skin="soft"] .desktop-mist.layout-landscape:not(.stealth-mode) .player-container > .player-management:has(~ .player-footer > .player-footer-tools > *) {
+  border-radius: 22px;
+  border-bottom: 0;
+  box-shadow: var(--soft-card-shadow);
+}
+:root[data-skin="soft"] .desktop-mist.layout-landscape:not(.stealth-mode) .player-container > .player-management:not([hidden]) ~ .player-footer > .player-footer-tools {
+  margin-top: 0;
+  border-radius: 22px;
+  padding: 12px 18px;
+  box-shadow: var(--soft-card-shadow);
+}
+
+:root[data-skin="soft"] .desktop-mist :is(.history-row, .dm-task, .dm-series-card, .release-row, .merge-card) {
+  background: var(--soft-raised-bg);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-color: transparent;
+  border-radius: 20px;
+  box-shadow: var(--soft-card-shadow);
+}
+
+:root[data-skin="soft"] .desktop-mist .browse-card {
+  background: var(--soft-raised-bg);
+  border-radius: 18px;
+  padding: 9px;
+  box-shadow: var(--soft-card-shadow);
+  transform-origin: center;
+  transition: transform 0.2s cubic-bezier(0.25, 1, 0.5, 1), box-shadow 0.18s ease;
+}
+:root[data-skin="soft"] .desktop-mist .browse-card:hover:not(:disabled) {
+  background: var(--soft-hover-bg);
+  transform: scale(1.018);
+  box-shadow: var(--soft-keycap-hover);
+}
+:root[data-skin="soft"] .desktop-mist .browse-card:active:not(:disabled) {
+  background: var(--soft-pressed-bg);
+  transform: scale(0.988);
+  box-shadow: var(--soft-inset);
+}
+:root[data-skin="soft"] .desktop-mist :is(.poster, .drama-poster, .browse-card img, .hongguo-card img) {
+  border-radius: 14px;
+}
+
+/* 玻璃拟态 + 新拟物混搭：弹窗、抽屉与浮层采用温润磨砂玻璃 */
+:root[data-skin="soft"] .desktop-mist :is(.browse-drawer-mask, .proxy-modal-mask, .player-confirm-mask, .dm-modal-mask) {
+  background: rgba(42, 38, 32, 0.26);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+:root[data-skin="soft"][data-theme="dark"] .desktop-mist :is(.browse-drawer-mask, .proxy-modal-mask, .player-confirm-mask, .dm-modal-mask) {
+  background: rgba(8, 8, 7, 0.58);
+}
+:root[data-skin="soft"] .desktop-mist :is(.desktop-popover[popover], .browse-drawer, .proxy-modal, .player-confirm, .account-login-dialog, .dm-modal, .dm-more-menu) {
+  background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid rgba(255, 252, 246, 0.56);
+  border-radius: 24px;
+  box-shadow: inset 0 1px 0 rgba(255, 254, 250, 0.78), 0 20px 46px -16px rgba(48, 42, 34, 0.30);
+}
+:root[data-skin="soft"][data-theme="dark"] .desktop-mist :is(.desktop-popover[popover], .browse-drawer, .proxy-modal, .player-confirm, .account-login-dialog, .dm-modal, .dm-more-menu) {
+  border-color: rgba(255, 255, 255, 0.10);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10), 0 20px 46px -14px rgba(0, 0, 0, 0.68);
+}
+
+/* ===== 1. 实体按键：凸起键帽 + 环绕边框高光、悬停微浮起、按下变内阴影下沉、松手回弹、当前项亮蓝灯 ===== */
+:root[data-skin="soft"] .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-menu {
+  gap: 8px;
+  padding: 12px 13px 8px;
+}
+:root[data-skin="soft"] .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-footer {
+  gap: 9px;
+  padding: 10px 13px 13px;
+}
+:root[data-skin="soft"] .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-brand .logo {
+  border-radius: 11px;
+  background: var(--soft-raised-bg);
+  color: var(--primary);
+  box-shadow: var(--soft-keycap-shadow);
+}
+:root[data-skin="soft"] .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-account {
+  background: var(--soft-pressed-bg);
+  border-radius: 16px;
+  box-shadow: var(--soft-inset-sm);
+}
+
+:root[data-skin="soft"] .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-item,
+:root[data-skin="soft"] .desktop-mist .settings-sections button {
+  position: relative;
+  border: 0;
+  border-radius: 13px;
+  background: var(--soft-raised-bg);
+  color: var(--text-secondary);
+  padding-right: 28px;
+  box-shadow: var(--soft-keycap-shadow);
+  transform-origin: center;
+  transition:
+    transform 0.2s cubic-bezier(0.25, 1, 0.5, 1),
+    box-shadow 0.16s ease,
+    color 0.16s ease,
+    background 0.16s ease;
+}
+:root[data-skin="soft"] .desktop-mist .settings-sections {
+  gap: 8px;
+  padding: 12px;
+}
+
+/* 键帽右侧指示灯槽 */
+:root[data-skin="soft"] .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-item::after,
+:root[data-skin="soft"] .desktop-mist .settings-sections button::after {
+  content: '';
+  position: absolute;
+  right: 11px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin-top: -3.5px;
+  border-radius: 50%;
+  background: rgba(154, 144, 128, 0.28);
+  box-shadow: var(--soft-led-off);
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* 悬停水平垂直双向居中微凸起 */
+:root[data-skin="soft"] .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-item:hover:not(:disabled):not(.active),
+:root[data-skin="soft"] .desktop-mist .settings-sections button:hover:not(:disabled):not([aria-current="page"]) {
+  background: var(--soft-hover-bg);
+  color: var(--text-primary);
+  transform: scale(1.024);
+  box-shadow: var(--soft-keycap-hover);
+}
+
+/* 按下时外阴影变内阴影并向内按压下沉 */
+:root[data-skin="soft"] .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-item:active:not(:disabled),
+:root[data-skin="soft"] .desktop-mist .settings-sections button:active:not(:disabled) {
+  background: var(--soft-pressed-bg) !important;
+  transform: scale(0.98);
+  box-shadow: var(--soft-inset) !important;
+}
+
+/* 当前项保持按下凹陷态并亮蓝色指示灯 */
+:root[data-skin="soft"] .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-item.active,
+:root[data-skin="soft"] .desktop-mist .settings-sections button[aria-current="page"] {
+  background: var(--soft-pressed-bg) !important;
+  color: var(--accent-text) !important;
+  font-weight: 650;
+  transform: scale(1);
+  box-shadow: var(--soft-inset) !important;
+}
+:root[data-skin="soft"] .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-item.active::before {
+  display: none;
+}
+:root[data-skin="soft"] .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-item.active::after,
+:root[data-skin="soft"] .desktop-mist .settings-sections button[aria-current="page"]::after {
+  background: radial-gradient(circle at 35% 35%, #a8d2ff, var(--soft-led) 68%, #0e5ec7);
+  box-shadow: var(--soft-led-glow);
+}
+
+/* 通用按钮、分类键帽与筛选键帽（严格排除暗色视频画面区 .player-stage 内部控件） */
+:root[data-skin="soft"] .desktop-mist :is(
+  .btn, .browse-cat, .genre-chip, .btn-chip, .pager-item, .ep-chip, .icon-btn,
+  .history-filter button, .release-filter button, .account-history-views button,
+  .compact-navigation button
+):not(.player-stage *) {
+  border-color: transparent;
+  border-radius: 12px;
+  background: var(--soft-raised-bg);
+  color: var(--text-primary);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: var(--soft-keycap-shadow);
+  transform-origin: center;
+  transition:
+    transform 0.2s cubic-bezier(0.25, 1, 0.5, 1),
+    box-shadow 0.16s ease,
+    color 0.16s ease,
+    background 0.16s ease;
+}
+
+:root[data-skin="soft"] .desktop-mist :is(
+  .btn, .browse-cat, .genre-chip, .btn-chip, .pager-item, .ep-chip, .icon-btn,
+  .history-filter button, .release-filter button, .account-history-views button,
+  .compact-navigation button
+):not(.player-stage *):hover:not(:disabled):not(.active):not([aria-pressed="true"]):not([aria-current="page"]) {
+  background: var(--soft-hover-bg);
+  border-color: transparent;
+  transform: scale(1.045);
+  box-shadow: var(--soft-keycap-hover);
+}
+
+:root[data-skin="soft"] .desktop-mist :is(
+  .btn, .browse-cat, .genre-chip, .btn-chip, .pager-item, .ep-chip, .icon-btn,
+  .history-filter button, .release-filter button, .account-history-views button,
+  .compact-navigation button
+):not(.player-stage *):active:not(:disabled) {
+  background: var(--soft-pressed-bg) !important;
+  transform: scale(0.968);
+  box-shadow: var(--soft-inset) !important;
+}
+
+/* 亮面区域所有激活态键帽：保持凹陷按下态（排除 .player-stage 暗色视频控制栏） */
+:root[data-skin="soft"] .desktop-mist :is(
+  .active, [aria-pressed="true"], [aria-selected="true"], [aria-current="page"], .btn-chip-primary, .ep-picked
+):not(.sidebar-item):not(.player-stage *):not(:disabled) {
+  background: var(--soft-pressed-bg) !important;
+  color: var(--accent-text) !important;
+  border-color: transparent !important;
+  transform: scale(1);
+  box-shadow: var(--soft-inset) !important;
+}
+
+:root[data-skin="soft"] .desktop-mist .history-seasons-list > .btn:hover:not(:disabled) {
+  transform: scale(1.018);
+}
+:root[data-skin="soft"] .desktop-mist .history-seasons-list > .btn[aria-current="true"]:not(:disabled) {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+:root[data-skin="soft"] .desktop-mist :is(.browse-cat, .history-filter button, .release-filter button) {
+  position: relative;
+  padding-inline: 13px;
+}
+:root[data-skin="soft"] .desktop-mist :is(
+  .browse-cat.active,
+  .history-filter button[aria-pressed="true"],
+  .release-filter button[aria-pressed="true"]
+) {
+  padding-right: 23px;
+}
+:root[data-skin="soft"] .desktop-mist :is(
+  .browse-cat.active,
+  .history-filter button[aria-pressed="true"],
+  .release-filter button[aria-pressed="true"]
+)::after {
+  content: '';
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #a8d2ff, var(--soft-led) 70%);
+  box-shadow: var(--soft-led-glow);
+}
+
+/* 主要行动按钮（含播放器内「播放本集」）：立体饱满凸起 + 环绕边框明亮高光，无任何外扩白雾 */
+:root[data-skin="soft"] .desktop-mist .btn-primary:not(:disabled) {
+  border-radius: 13px;
+  border-color: transparent !important;
+  background: linear-gradient(180deg, #4b9aff 0%, #257eff 52%, #1866de 100%) !important;
+  color: #ffffff !important;
+  transform-origin: center;
+  box-shadow:
+    0 3px 8px -1px rgba(22, 90, 204, 0.34),
+    0 1px 2px rgba(16, 56, 130, 0.22),
+    inset 0 1.5px 0.5px rgba(255, 255, 255, 0.65),
+    inset 0 0 0 1px rgba(186, 222, 255, 0.56),
+    inset 0 -2px 2.5px rgba(8, 44, 108, 0.40) !important;
+  transition: transform 0.2s cubic-bezier(0.25, 1, 0.5, 1), box-shadow 0.16s ease, background 0.16s ease;
+}
+:root[data-skin="soft"] .desktop-mist .btn-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #5aa4ff 0%, #2d85ff 52%, #1d6ee8 100%) !important;
+  transform: scale(1.04);
+  box-shadow:
+    0 0 12px rgba(38, 128, 255, 0.34),
+    0 2px 5px rgba(16, 56, 130, 0.24),
+    inset 0 1.5px 0.5px rgba(255, 255, 255, 0.80),
+    inset 0 0 0 1.25px rgba(210, 234, 255, 0.72),
+    inset 0 -2px 2.5px rgba(8, 44, 108, 0.34) !important;
+}
+:root[data-skin="soft"] .desktop-mist .btn-primary:active:not(:disabled) {
+  transform: scale(0.968);
+  background: linear-gradient(180deg, #1d6fe6 0%, #247bff 100%) !important;
+  box-shadow:
+    inset 0 2px 5px rgba(8, 42, 104, 0.62),
+    inset 0 0 0 1px rgba(140, 196, 255, 0.38) !important;
+}
+
+/* 暗色播放器舞台内部专属适配：彻底杜绝浅色投影与米白底色渗入视频区 */
+:root[data-skin="soft"] .desktop-mist .player-stage .btn-primary:not(:disabled) {
+  border-radius: 999px;
+  padding-inline: 18px;
+  box-shadow:
+    0 6px 16px rgba(0, 0, 0, 0.50),
+    0 2px 4px rgba(0, 0, 0, 0.36),
+    inset 0 1.5px 0.5px rgba(255, 255, 255, 0.68),
+    inset 0 0 0 1px rgba(190, 224, 255, 0.62),
+    inset 0 -2px 2.5px rgba(6, 36, 92, 0.46) !important;
+}
+:root[data-skin="soft"] .desktop-mist .player-stage .btn-primary:hover:not(:disabled) {
+  box-shadow:
+    0 8px 20px rgba(0, 0, 0, 0.56),
+    0 2px 5px rgba(0, 0, 0, 0.40),
+    inset 0 1.5px 0.5px rgba(255, 255, 255, 0.80),
+    inset 0 0 0 1px rgba(214, 236, 255, 0.74),
+    inset 0 -2px 2.5px rgba(6, 36, 92, 0.42) !important;
+}
+:root[data-skin="soft"] .desktop-mist .player-stage :is([aria-pressed="true"], [aria-expanded="true"], [aria-current="true"], .active):not(:disabled) {
+  background: linear-gradient(180deg, rgba(64, 148, 255, 0.36), rgba(30, 108, 230, 0.28)) !important;
+  color: #ffffff !important;
+  border-color: transparent !important;
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.36),
+    inset 0 1px 0.5px rgba(255, 255, 255, 0.42),
+    inset 0 0 0 1px rgba(146, 198, 255, 0.45) !important;
+}
+
+/* 输入框与下拉选择器：文本输入凹槽、下拉选择凸起键帽 */
+:root[data-skin="soft"] .desktop-mist :is(.input-field, select.history-scope, .account-history-search, .proxy-status-row) {
+  background: var(--soft-pressed-bg);
+  border-color: transparent;
+  border-radius: 12px;
+  box-shadow: var(--soft-inset-sm);
+}
+:root[data-skin="soft"] .desktop-mist select.input-field,
+:root[data-skin="soft"] .desktop-mist select.history-scope {
+  background: var(--soft-raised-bg);
+  box-shadow: var(--soft-keycap-shadow);
+}
+:root[data-skin="soft"] :is(.desktop-mist, [data-desktop-player-popup]) select option:checked {
+  background: var(--primary);
+  color: #ffffff;
+}
+
+/* 进度条凹槽 */
+:root[data-skin="soft"] .desktop-mist .dm-progress-bar {
+  height: 9px;
+  border-radius: 999px;
+  background: var(--soft-pressed-bg);
+  box-shadow: var(--soft-inset-sm);
+}
+:root[data-skin="soft"] .desktop-mist .dm-progress-fill {
+  border-radius: 999px;
+  background: linear-gradient(90deg, #4da0ff, #2680ff);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+/* ===== 2. 旋钮调节：刻度吸附、外圈亮起已选范围、数值与图表目标线实时联动 ===== */
+.soft-knob-panel {
+  display: grid;
+  grid-template-columns: auto minmax(150px, 1fr);
+  align-items: center;
+  gap: 18px;
+  padding: 14px 16px;
+  border-radius: 20px;
+  background: var(--soft-pressed-bg);
+  box-shadow: var(--soft-inset-sm);
+  user-select: none;
+}
+
+.soft-knob-unit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.soft-knob-dial-wrap {
+  position: relative;
+  width: 108px;
+  height: 108px;
+  display: grid;
+  place-items: center;
+  cursor: grab;
+  touch-action: none;
+  border-radius: 50%;
+}
+.soft-knob-dial-wrap:active,
+.soft-knob-panel.is-dragging .soft-knob-dial-wrap {
+  cursor: grabbing;
+}
+
+.soft-knob-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.soft-knob-track-arc {
+  stroke: rgba(154, 144, 128, 0.34);
+}
+:root[data-skin="soft"][data-theme="dark"] .soft-knob-track-arc {
+  stroke: rgba(255, 255, 255, 0.12);
+}
+
+.soft-knob-active-arc {
+  stroke: var(--soft-led);
+  filter: drop-shadow(0 0 4px rgba(38, 128, 255, 0.55));
+  transition: d 0.14s ease;
+}
+
+.soft-knob-tick {
+  fill: rgba(148, 138, 122, 0.45);
+  transition: fill 0.18s ease, r 0.18s ease;
+}
+.soft-knob-tick.is-lit {
+  fill: var(--soft-led);
+  filter: drop-shadow(0 0 3px rgba(38, 128, 255, 0.65));
+}
+
+.soft-knob-cap {
+  position: relative;
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 24%, rgba(255, 255, 255, 0.48), transparent 58%), var(--soft-raised-bg);
+  box-shadow:
+    0 4px 10px rgba(132, 122, 106, 0.34),
+    0 1.5px 3px rgba(132, 122, 106, 0.22),
+    var(--soft-rim-highlight);
+  transition: transform 0.18s cubic-bezier(0.34, 1.48, 0.64, 1);
+}
+:root[data-skin="soft"][data-theme="dark"] .soft-knob-cap {
+  background: radial-gradient(circle at 32% 24%, rgba(255, 255, 255, 0.08), transparent 58%), var(--soft-raised-bg);
+  box-shadow:
+    0 5px 12px rgba(0, 0, 0, 0.56),
+    0 2px 4px rgba(0, 0, 0, 0.36),
+    var(--soft-rim-highlight);
+}
+.soft-knob-panel.is-dragging .soft-knob-cap {
+  transition: transform 0.07s linear;
+}
+
+.soft-knob-indicator {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  width: 4px;
+  height: 13px;
+  margin-left: -2px;
+  border-radius: 999px;
+  background: var(--soft-led);
+  box-shadow: var(--soft-led-glow);
+}
+
+.soft-knob-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.soft-knob-value {
+  font-size: 16px;
+  font-weight: 750;
+  color: var(--text-primary);
+}
+.soft-knob-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.soft-knob-chart {
+  position: relative;
+  height: 98px;
+  padding: 14px 12px 12px;
+  border-radius: 15px;
+  background: var(--soft-surface);
+  box-shadow: var(--soft-inset);
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+
+.soft-knob-bars {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.soft-knob-bar {
+  flex: 1;
+  min-width: 6px;
+  border-radius: 6px 6px 3px 3px;
+  background: rgba(154, 144, 128, 0.26);
+  cursor: pointer;
+  transition: background 0.22s ease, box-shadow 0.22s ease;
+}
+.soft-knob-bar.is-recommended {
+  background: rgba(154, 144, 128, 0.38);
+}
+.soft-knob-bar.is-active {
+  background: linear-gradient(180deg, #63abff, #2680ff);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.soft-target-line {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 0;
+  border-top: 1.5px dashed var(--soft-led);
+  pointer-events: none;
+  transition: bottom 0.2s cubic-bezier(0.28, 1.32, 0.56, 1);
+}
+
+.soft-target-tag {
+  position: absolute;
+  right: 2px;
+  bottom: 3px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--soft-led);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+  box-shadow: 0 2px 5px rgba(24, 96, 212, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.42);
+}
+
+.soft-chart-caption {
+  position: absolute;
+  left: 10px;
+  top: 6px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  pointer-events: none;
+}
+
+/* ===== 3. 波动开关：右上角竖向拨杆 + 指示灯 + 图表灰彩渐变 + 吸附回弹 ===== */
+.soft-rocker {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  touch-action: none;
+  flex-shrink: 0;
+}
+
+.soft-rocker-led {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(154, 144, 128, 0.30);
+  box-shadow: var(--soft-led-off);
+  transition: background 0.24s ease, box-shadow 0.24s ease;
+}
+.soft-rocker.is-on .soft-rocker-led {
+  background: radial-gradient(circle at 35% 35%, #a8d2ff, var(--soft-led) 70%);
+  box-shadow: var(--soft-led-glow);
+}
+
+.soft-rocker-slot {
+  position: relative;
+  width: 28px;
+  height: 46px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--soft-pressed-bg);
+  box-shadow: var(--soft-inset);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.soft-rocker-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--soft-raised-bg);
+  box-shadow:
+    0 2px 4px rgba(132, 122, 106, 0.34),
+    var(--soft-rim-highlight);
+  transform: translateY(0);
+  transition: transform 0.32s cubic-bezier(0.34, 1.68, 0.64, 1);
+}
+.soft-rocker.is-on .soft-rocker-thumb {
+  transform: translateY(-18px);
+}
+
+/* 原生开关行（设置页与来源页）：右上角竖向波动开关 + 顶部蓝灯 + 吸附回弹 */
+:root[data-skin="soft"] .desktop-mist :is(.proxy-switch-row, .builtin-source-row, .builtin-source-row:last-of-type) {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 16px;
+  border-bottom: 0;
+  border-radius: 18px;
+  background: var(--soft-raised-bg);
+  box-shadow: var(--soft-card-shadow);
+}
+:root[data-skin="soft"] .desktop-mist .proxy-switch-row + .proxy-switch-row,
+:root[data-skin="soft"] .desktop-mist .builtin-source-row + .builtin-source-row {
+  margin-top: 9px;
+}
+:root[data-skin="soft"] .desktop-mist .proxy-switch-row > .proxy-switch-text {
+  order: 1;
+  flex: 1;
+  min-width: 0;
+}
+:root[data-skin="soft"] .desktop-mist :is(.proxy-switch-row, .builtin-source-row) > input[type="checkbox"],
+:root[data-skin="soft"] .desktop-mist :is(.proxy-switch-row, .builtin-source-row) > input[type="checkbox"]:checked {
+  order: 2;
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: 0 0 28px;
+  width: 28px;
+  min-width: 28px;
+  max-width: 28px;
+  height: 44px;
+  margin: 12px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--soft-pressed-bg);
+  box-shadow: var(--soft-inset);
+  cursor: pointer;
+  touch-action: none;
+}
+:root[data-skin="soft"] .desktop-mist :is(.proxy-switch-row, .builtin-source-row) > input[type="checkbox"]:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+:root[data-skin="soft"] .desktop-mist :is(.proxy-switch-row, .builtin-source-row) > input[type="checkbox"]::before {
+  content: '';
+  position: absolute;
+  top: auto;
+  right: auto;
+  left: 4px;
+  bottom: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--soft-raised-bg);
+  box-shadow:
+    0 2px 4px rgba(132, 122, 106, 0.34),
+    var(--soft-rim-highlight);
+  transform: translateY(var(--soft-thumb-y, 0px));
+  transition: transform 0.32s cubic-bezier(0.34, 1.68, 0.64, 1);
+}
+:root[data-skin="soft"] .desktop-mist :is(.proxy-switch-row, .builtin-source-row) > input[type="checkbox"]:checked::before {
+  background: var(--soft-raised-bg);
+  transform: translateY(var(--soft-thumb-y, -16px));
+}
+:root[data-skin="soft"] .desktop-mist :is(.proxy-switch-row, .builtin-source-row) > input[type="checkbox"][data-dragging="true"]::before {
+  transition: none;
+}
+:root[data-skin="soft"] .desktop-mist :is(.proxy-switch-row, .builtin-source-row) > input[type="checkbox"]::after {
+  content: '';
+  position: absolute;
+  top: -11px;
+  bottom: auto;
+  left: 50%;
+  width: 7px;
+  height: 7px;
+  margin-left: -3.5px;
+  border-radius: 50%;
+  background: rgba(154, 144, 128, 0.30);
+  box-shadow: var(--soft-led-off);
+  transition: background 0.24s ease, box-shadow 0.24s ease;
+}
+:root[data-skin="soft"] .desktop-mist :is(.proxy-switch-row, .builtin-source-row) > input[type="checkbox"]:checked::after {
+  background: radial-gradient(circle at 35% 35%, #a8d2ff, var(--soft-led) 70%);
+  box-shadow: var(--soft-led-glow);
+}
+
+/* 模块图表：拨下时柔和灰色，拨上时渐变为彩色 */
+.soft-module-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  height: 36px;
+  margin-top: 10px;
+  padding: 7px 10px;
+  border-radius: 12px;
+  background: var(--soft-pressed-bg);
+  box-shadow: var(--soft-inset-sm);
+  filter: grayscale(1) saturate(0);
+  opacity: 0.45;
+  transition: filter 0.42s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.42s ease;
+}
+.soft-module-chart.is-lit,
+:root[data-skin="soft"] .desktop-mist :is(.proxy-switch-row, .builtin-source-row, .settings-group):has(input[type="checkbox"]:checked) .soft-module-chart {
+  filter: grayscale(0) saturate(1.06);
+  opacity: 1;
+}
+.soft-module-bar {
+  flex: 1;
+  min-width: 5px;
+  border-radius: 4px 4px 2px 2px;
+  background: linear-gradient(180deg, #56a3ff, #2680ff);
+  transition: height 0.3s ease;
+}
+.soft-module-bar[data-tone="1"] { background: linear-gradient(180deg, #4fd195, #1f9d66); }
+.soft-module-bar[data-tone="2"] { background: linear-gradient(180deg, #74b6ff, #3b82f6); }
+.soft-module-bar[data-tone="3"] { background: linear-gradient(180deg, #ffb85c, #ec8b26); }
+
+/* 下载管理顶部概览模块 */
+.dm-soft-overview {
+  width: 100%;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+  border-radius: 24px;
+  background: var(--soft-raised-bg);
+  box-shadow: var(--soft-panel-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.dm-soft-overview-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.dm-soft-overview-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.dm-soft-distribution {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 15px;
+  padding: 3.5px 6px;
+  border-radius: 999px;
+  background: var(--soft-pressed-bg);
+  box-shadow: var(--soft-inset-sm);
+  filter: grayscale(1) saturate(0);
+  opacity: 0.44;
+  transition: filter 0.42s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.42s ease;
+}
+.dm-soft-distribution.is-lit {
+  filter: grayscale(0) saturate(1.08);
+  opacity: 1;
+}
+.dm-soft-segment {
+  height: 100%;
+  min-width: 10px;
+  border-radius: 999px;
+  transition: flex-grow 0.38s cubic-bezier(0.25, 1, 0.5, 1);
+}
+.dm-soft-segment-active { background: linear-gradient(90deg, #59a6ff, #2680ff); }
+.dm-soft-segment-retry { background: linear-gradient(90deg, #f8be62, #e08b1e); }
+.dm-soft-segment-done { background: linear-gradient(90deg, #52cf93, #239660); }
+.dm-soft-segment-fail { background: linear-gradient(90deg, #f57e7e, #d44242); }
+.dm-soft-distribution:not(.is-lit) ~ .dm-stats .dm-stat,
+.dm-soft-overview[data-lit="false"] .dm-stat {
+  filter: grayscale(1) saturate(0);
+  opacity: 0.68;
+}
+:root[data-skin="soft"] .desktop-mist .dm-stats {
+  gap: 9px;
+}
+:root[data-skin="soft"] .desktop-mist .dm-stat {
+  background: var(--soft-raised-bg);
+  border-color: transparent;
+  border-radius: 12px;
+  padding: 6px 12px;
+  box-shadow: var(--soft-keycap-shadow);
+  transform-origin: center;
+  transition: filter 0.38s ease, opacity 0.38s ease, transform 0.2s cubic-bezier(0.25, 1, 0.5, 1), box-shadow 0.16s ease;
+}
+:root[data-skin="soft"] .desktop-mist .dm-stat:hover {
+  background: var(--soft-hover-bg);
+  transform: scale(1.04);
+  box-shadow: var(--soft-keycap-hover);
+}
+:root[data-skin="soft"] .desktop-mist .dm-stat:active {
+  background: var(--soft-pressed-bg);
+  transform: scale(0.97);
+  box-shadow: var(--soft-inset);
+}
+
+/* ===== 4. 机械数字：滚轮计数器，每位独立滚动、低位更快、过冲回弹 ===== */
+.soft-odometer {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: -0.12em;
+  padding: 0.04em 0.28em;
+  margin-inline: 1px;
+  border-radius: 7px;
+  background: var(--soft-pressed-bg);
+  box-shadow: var(--soft-inset-sm);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.24;
+}
+
+.soft-digit-wheel {
+  position: relative;
+  display: inline-block;
+  width: 0.65em;
+  height: 1.24em;
+  overflow: hidden;
+  text-align: center;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 16%, #000 84%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0%, #000 16%, #000 84%, transparent 100%);
+}
+
+.soft-digit-strip {
+  display: flex;
+  flex-direction: column;
+  will-change: transform;
+  transition-property: transform;
+  transition-timing-function: cubic-bezier(0.24, 1.42, 0.48, 1);
+}
+.soft-digit-strip.is-snapping {
+  transition: none !important;
+}
+
+.soft-digit-cell {
+  display: block;
+  height: 1.24em;
+  line-height: 1.24em;
+}
+
+.soft-odometer-symbol {
+  display: inline-block;
+  padding-inline: 0.05em;
+  opacity: 0.82;
+}
+
+/* ===== 5. 卡片抽拉：堆叠展示、抽出顶卡时后卡依次下沉、不足弹回、超阈值展开详情 ===== */
+.drama-feed-stack-col {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+}
+.drama-feed-stack-col > .soft-stack-stage {
+  margin-bottom: 0;
+}
+
+.soft-stack-stage {
+  margin-bottom: 20px;
+}
+.soft-stack-stage.is-compact {
+  margin-bottom: 18px;
+}
+
+.soft-stack-deck {
+  position: relative;
+  padding-bottom: 30px;
+}
+
+.soft-stack-rear {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 28px;
+  height: calc(100% - 34px);
+  border-radius: 24px;
+  background: var(--soft-raised-bg);
+  box-shadow: var(--soft-card-shadow);
+  pointer-events: none;
+  will-change: transform, opacity;
+  transition:
+    transform 0.44s cubic-bezier(0.32, 1.52, 0.58, 1),
+    opacity 0.32s ease,
+    box-shadow 0.32s ease;
+}
+.soft-stack-rear.is-dragging {
+  transition: none;
+}
+
+.soft-stack-top {
+  position: relative;
+  border-radius: 24px;
+  padding: 13px 22px 22px;
+  background: var(--soft-raised-bg);
+  box-shadow: var(--soft-panel-shadow);
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+  will-change: transform;
+  transition:
+    transform 0.44s cubic-bezier(0.32, 1.52, 0.58, 1),
+    box-shadow 0.28s ease;
+}
+.soft-stack-top.is-dragging {
+  cursor: grabbing;
+  transition: none;
+  box-shadow:
+    0 14px 28px -6px rgba(132, 121, 104, 0.38),
+    0 4px 10px rgba(132, 121, 104, 0.20),
+    var(--soft-rim-hover);
+}
+
+.soft-stack-grip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.soft-stack-grip-bar {
+  width: 40px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--soft-pressed-bg);
+  box-shadow: var(--soft-inset-sm);
+  transition: background 0.2s ease, box-shadow 0.2s ease, width 0.2s ease;
+}
+.soft-stack-top.is-ready .soft-stack-grip-bar {
+  width: 54px;
+  background: var(--soft-led);
+  box-shadow: var(--soft-led-glow);
+}
+.soft-stack-top.is-ready .soft-stack-grip-hint {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.soft-stack-body {
+  display: grid;
+  grid-template-columns: clamp(120px, 16vw, 184px) minmax(0, 1fr);
+  gap: 22px;
+  align-items: center;
+}
+.soft-stack-stage.is-compact .soft-stack-body {
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 18px;
+}
+
+.soft-stack-poster {
+  width: 100%;
+  border-radius: 15px;
+  box-shadow: 0 4px 12px -2px rgba(96, 86, 72, 0.28);
+}
+
+.soft-stack-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.soft-stack-copy h3 {
+  font-size: 22px;
+  line-height: 1.35;
+  margin: 2px 0;
+  color: var(--text-primary);
+}
+
+.soft-stack-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+:root[data-skin="soft"] .desktop-mist .drama-feed-rank,
+.soft-stack-ep,
+.soft-stack-heat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: var(--soft-pressed-bg);
+  color: var(--accent-text);
+  border: 0;
+  box-shadow: var(--soft-inset-sm);
+}
+
+.soft-stack-detail-intro {
+  margin-top: 6px;
+  padding: 12px 14px;
+  border-radius: 15px;
+  background: var(--soft-pressed-bg);
+  box-shadow: var(--soft-inset);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.soft-stack-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+@media (max-width: 720px) {
+  .soft-knob-panel {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: stretch;
+  }
+  .soft-stack-body,
+  .soft-stack-stage.is-compact .soft-stack-body {
+    grid-template-columns: 96px minmax(0, 1fr);
+    gap: 14px;
+  }
+}

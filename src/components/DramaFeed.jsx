@@ -6,6 +6,7 @@ import useMediaSources from './useMediaSources';
 import { mediaSourceLabel } from './mediaSourcesModel.mjs';
 import { feedCacheKey, readFeedCache, writeFeedCache } from './feedCache.mjs';
 import { loadRandomPool, playRecommendedDrama, waitForRequest } from './randomDramaModel.mjs';
+import { SoftCardStack, useSkin } from './SoftControls';
 import './DramaFeed.css';
 
 const CATALOG_CHANNEL_KEY = 'hongguo.feed.catalog.channel.v1';
@@ -23,6 +24,7 @@ function clockOf(timestamp) {
 // 先显示会话内上次片单，再后台更新；更新失败保留旧内容。只有“刷新片单”强制取最新。
 function DramaFeed({ active = true, onNavigate }) {
   useLanguage();
+  const skin = useSkin();
   const mobile = window.electronAPI?.platform === 'android';
   const [source, setSource] = useState('hongguo');
   const [catalogChannel, setCatalogChannel] = useState(() => {
@@ -229,19 +231,34 @@ function DramaFeed({ active = true, onNavigate }) {
           {onNavigate && <button className="btn btn-outline" onClick={() => onNavigate('download')}>{t("按剧名搜索")}</button>}</div>
       </div>}
       {selected && <div className="drama-feed-presentation">
-        <div className="drama-feed-feature">
-          <DramaPoster item={selected} />
-          <div className="drama-feed-copy">
-            <p className="drama-feed-rank">{t(ranking && selected.rank > 0 ? `榜单第 ${selected.rank} 名` : `本次片单第 ${index + 1} 部`)}{t(ranking && selected.heat ? ` · ${selected.heat}` : '')}</p>
-            <h3>{selected.series_title}</h3>
-            <p className="drama-feed-tags">{[selected.episode_count > 0 && t('{0} 集', [selected.episode_count]), ...(selected.tags || [])].filter(Boolean).join(' · ') || t('来自{0}片单', [sourceLabel])}</p>
-            {typeof introduction === 'string' && introduction.trim() && <p className="drama-feed-intro">{introduction}</p>}
-            {mobile && <p className="drama-feed-play-note">{t("在「播放器」选集、播放，接着上次继续看。")}</p>}
-            <div className="drama-feed-actions"><button className="btn btn-primary" disabled={resolving} onClick={startItem}><Play size={16} />{t(resolving ? '正在打开播放器…' : '在播放器播放')}</button>
-              {resolving && <button className="btn btn-outline" onClick={() => { playController.current?.abort(); setResolving(false); setPlayError('已取消加载，可重试本剧。'); }}>{t("取消加载")}</button>}</div>
+        {skin === 'soft' ? (
+          <div className="drama-feed-stack-col">
+            <SoftCardStack
+              items={items}
+              activeIndex={index}
+              onSelectIndex={selectItem}
+              onPlayItem={() => startItem()}
+              resolving={resolving}
+              ranking={ranking}
+              sourceLabel={sourceLabel}
+            />
             {playError && <p className="drama-inline-error" role="alert">{t(playError)}</p>}
           </div>
-        </div>
+        ) : (
+          <div className="drama-feed-feature">
+            <DramaPoster item={selected} />
+            <div className="drama-feed-copy">
+              <p className="drama-feed-rank">{t(ranking && selected.rank > 0 ? `榜单第 ${selected.rank} 名` : `本次片单第 ${index + 1} 部`)}{t(ranking && selected.heat ? ` · ${selected.heat}` : '')}</p>
+              <h3>{selected.series_title}</h3>
+              <p className="drama-feed-tags">{[selected.episode_count > 0 && t('{0} 集', [selected.episode_count]), ...(selected.tags || [])].filter(Boolean).join(' · ') || t('来自{0}片单', [sourceLabel])}</p>
+              {typeof introduction === 'string' && introduction.trim() && <p className="drama-feed-intro">{introduction}</p>}
+              {mobile && <p className="drama-feed-play-note">{t("在「播放器」选集、播放，接着上次继续看。")}</p>}
+              <div className="drama-feed-actions"><button className="btn btn-primary" disabled={resolving} onClick={startItem}><Play size={16} />{t(resolving ? '正在打开播放器…' : '在播放器播放')}</button>
+                {resolving && <button className="btn btn-outline" onClick={() => { playController.current?.abort(); setResolving(false); setPlayError('已取消加载，可重试本剧。'); }}>{t("取消加载")}</button>}</div>
+              {playError && <p className="drama-inline-error" role="alert">{t(playError)}</p>}
+            </div>
+          </div>
+        )}
         <div className="drama-feed-navigation">
           <div className="drama-feed-actions pagination-controls" role="group" aria-label={t("切换推荐短剧")}>
             <button className="btn btn-outline" disabled={index === 0 || resolving} onClick={() => selectItem(index - 1)}>{t("上一部")}</button>
