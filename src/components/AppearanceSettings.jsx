@@ -2,6 +2,7 @@ import { t, useLanguage } from '../i18n';
 import LanguageSettings from './LanguageSettings';
 import React, { useEffect, useRef, useState } from 'react';
 import { getThemePreference, setThemePreference, getPosterSize, setPosterSize, getSkin, setSkin } from '../theme';
+import { APP_ICONS, getAppIcon, getAppIconOption, setLocalAppIcon, subscribeAppIcon } from '../appIcons';
 import { RollingNumber, SoftKnob, useSkin } from './SoftControls';
 
 const POSTER_KNOB_OPTIONS = [
@@ -16,6 +17,10 @@ export default function AppearanceSettings({ active = true, showZoom = true }) {
   const activeSkin = useSkin();
   const [preference, setPreference] = useState(getThemePreference);
   const [skin, setSkinPreference] = useState(getSkin);
+  const [appIcon, setAppIconState] = useState(getAppIcon);
+  const [iconBusy, setIconBusy] = useState(false);
+  const [iconMenuOpen, setIconMenuOpen] = useState(false);
+  const iconDropdownRef = useRef(null);
   const [posterSize, setPosterPreference] = useState(getPosterSize);
   const [zoom, setZoom] = useState(null);
   const [zoomBusy, setZoomBusy] = useState(false);
@@ -30,12 +35,19 @@ export default function AppearanceSettings({ active = true, showZoom = true }) {
       changed = true;
       if (!cancelled) setZoom(value);
     });
+    const unsubIcon = subscribeAppIcon(value => {
+      if (!cancelled) setAppIconState(value);
+    });
     window.electronAPI.getSettings().then(settings => {
       if (!cancelled && !changed) setZoom(settings.ui_zoom ?? 1);
+      if (!cancelled && settings?.app_icon) {
+        setLocalAppIcon(settings.app_icon);
+        setAppIconState(settings.app_icon);
+      }
     }).catch(() => {
       if (!cancelled) setError('界面大小读取失败，请重新进入设置。');
     });
-    return () => { cancelled = true; unsubscribe?.(); };
+    return () => { cancelled = true; unsubscribe?.(); unsubIcon(); };
   }, [active]);
 
   const changeZoom = async direction => {
@@ -87,6 +99,45 @@ export default function AppearanceSettings({ active = true, showZoom = true }) {
     }
   };
 
+  useEffect(() => {
+    if (!iconMenuOpen) return undefined;
+    const onPointerDown = (event) => {
+      if (iconDropdownRef.current && !iconDropdownRef.current.contains(event.target)) {
+        setIconMenuOpen(false);
+      }
+    };
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') setIconMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [iconMenuOpen]);
+
+  const changeAppIcon = async (iconId) => {
+    setIconMenuOpen(false);
+    if (iconBusy || iconId === appIcon) return;
+    setIconBusy(true);
+    setError('');
+    try {
+      const normalized = setLocalAppIcon(iconId);
+      setAppIconState(normalized);
+      if (window.electronAPI?.setAppIcon) {
+        const result = await window.electronAPI.setAppIcon(normalized);
+        if (!result?.success) throw new Error(result?.error || '应用图标切换失败，请重试。');
+      }
+    } catch (err) {
+      setError(err?.message || '应用图标切换失败，请重试。');
+    } finally {
+      setIconBusy(false);
+    }
+  };
+
+  const currentIconOption = getAppIconOption(appIcon);
+
   return (
     <>
     <LanguageSettings />
@@ -107,6 +158,55 @@ export default function AppearanceSettings({ active = true, showZoom = true }) {
         <option value="soft">{t("新拟物")}</option>
       </select>
       <p className="settings-hint" id="appearance-skin-hint">{t("立即生效并自动保存，浅色和深色外观都适用。")}</p>
+    </div>}
+    {showZoom && <div className="settings-group">
+      <span className="settings-label" id="appearance-icon-label">{t("应用图标")}</span>
+      <div className="app-icon-dropdown" ref={iconDropdownRef}>
+        <button
+          type="button"
+          className={`input-field select-field app-icon-trigger ${iconMenuOpen ? 'is-open' : ''}`}
+          aria-labelledby="appearance-icon-label"
+          aria-describedby="appearance-icon-hint"
+          aria-haspopup="listbox"
+          aria-expanded={iconMenuOpen}
+          disabled={iconBusy}
+          onClick={() => setIconMenuOpen(open => !open)}
+        >
+          <span className="app-icon-trigger-value">
+            <img className="app-icon-thumb" src={currentIconOption.src} alt="" draggable="false" />
+            <span className="app-icon-trigger-text">{t(currentIconOption.name)}</span>
+          </span>
+          <svg className="app-icon-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </button>
+        {iconMenuOpen && (
+          <div className="app-icon-popover" role="listbox" aria-labelledby="appearance-icon-label">
+            {APP_ICONS.map(item => {
+              const selected = appIcon === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  disabled={iconBusy}
+                  className={`app-icon-option ${selected ? 'is-selected' : ''}`}
+                  onClick={() => changeAppIcon(item.id)}
+                >
+                  <img className="app-icon-option-img" src={item.src} alt="" draggable="false" />
+                  <span className="app-icon-option-meta">
+                    <span className="app-icon-option-name">{t(item.name)}</span>
+                    <span className="app-icon-option-style">{t(item.style)}</span>
+                  </span>
+                  {selected && <span className="app-icon-option-check" aria-hidden="true">✓</span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      <p className="settings-hint" id="appearance-icon-hint">{t("点击即可切换应用左上角和系统程序坞／任务栏图标，立即生效并自动保存。")}</p>
     </div>}
     {showZoom && <div className="settings-group">
       <span className="settings-label" id="appearance-zoom-label">{t("界面与字号")}</span>

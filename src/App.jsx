@@ -10,6 +10,7 @@ import Browse from './components/Browse';
 import PageMenu from './components/PageMenu';
 import WatchHistory from './components/WatchHistory';
 import { initializeTheme } from './theme';
+import { getAppIcon, getAppIconOption, setLocalAppIcon, subscribeAppIcon } from './appIcons';
 import useStealthWindow from './components/useStealthWindow';
 import './components/StealthWindow.css';
 import AppUpdateNotice from './components/AppUpdateNotice';
@@ -58,6 +59,8 @@ export default function App({ platformPages = {} }) {
   const [visited, setVisited] = useState(['browse']);
   const [storageError, setStorageError] = useState('');
   const [appInfo, setAppInfo] = useState(null); // { version, brand, appName }
+  const [appIconId, setAppIconId] = useState(getAppIcon);
+  const currentAppIcon = getAppIconOption(appIconId);
   const [playerMounted, setPlayerMounted] = useState(false);
   const accountCheckpoint = useRef(null);
   const captureAccountCheckpoint = useCallback((freeze = false) => accountCheckpoint.current?.(freeze), []);
@@ -76,6 +79,17 @@ export default function App({ platformPages = {} }) {
     window.electronAPI.getAppInfo().then((info) => {
       setAppInfo(info);
     });
+    window.electronAPI.getSettings?.().then((settings) => {
+      if (settings?.app_icon) setLocalAppIcon(settings.app_icon);
+    }).catch(() => {});
+    const unsubLocal = subscribeAppIcon(setAppIconId);
+    const unsubMain = window.electronAPI.onAppIconChanged?.((iconId) => {
+      setLocalAppIcon(iconId);
+    });
+    return () => {
+      unsubLocal();
+      unsubMain?.();
+    };
   }, []);
 
   useEffect(() => window.electronAPI.onStorageError?.((data) => {
@@ -201,7 +215,7 @@ export default function App({ platformPages = {} }) {
       <aside className="sidebar" aria-label={t("主导航")}>
         <div className="sidebar-window-drag" aria-hidden="true" />
         <div className="sidebar-brand">
-          <div className="logo"><Play size={mobile ? 21 : 16} /></div>
+          <div className="logo logo-custom"><img className="logo-img" src={currentAppIcon.src} alt="" draggable="false" /></div>
           <div><div className="brand-text">{t(appInfo?.appName || '红果短剧')}</div>{mobile && <div className="brand-sub">{t(appInfo?.preview ? '独立体验 · 本机保存' : '每一集，都值得期待')}</div>}</div>
         </div>
         <nav className="sidebar-menu">

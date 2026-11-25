@@ -1,8 +1,8 @@
 {
   "name": "hongguo-downloader",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "macRelease": {
-    "version": "1.0.9"
+    "version": "1.0.10"
   },
   "description": "红果短剧播放与下载",
   "main": "main.js",
@@ -64,6 +64,7 @@
       "main.js",
       "preload.js",
       "dist-react/**/*",
+      "build/app-icons/*.png",
       "build/sdk-playback/darwin-*/hongguo-sdk-playback",
       "build/sdk-playback/win32-x64/hongguo-sdk-playback.exe",
       "build/sdk-playback/README.txt",
@@ -253,7 +254,7 @@
     "appImage": {
       "executableArgs": []
     },
-    "buildVersion": "1.0.9"
+    "buildVersion": "1.0.10"
   },
   "engines": {
     "node": ">=22.12"

@@ -9,11 +9,13 @@
   --bg-input: rgba(255, 255, 255, 0.70);
   --sidebar-hover: rgba(255, 255, 255, 0.62);
   --sidebar-active: rgba(255, 255, 255, 0.88);
-  --text: #23292e;
-  --text-secondary: #5b646c;
-  --text-tertiary: #505a63;
+  --text: #1f262c;
+  --text-secondary: #525c65;
+  --text-tertiary: #66707a;
   --primary: #33424c;
   --primary-hover: #26323a;
+  --on-primary: #ffffff;
+  --on-primary-muted: rgba(255, 255, 255, 0.78);
   --accent: #4a5a66;
   --accent-text: #2b363e;
   --accent-hover: #33424c;
@@ -63,11 +65,13 @@
   --bg-elevated: #2a3136;
   --bg-card: rgba(44, 51, 57, 0.58);
   --bg-hover: rgba(70, 80, 88, 0.70);
-  --text: #eef1f3;
-  --text-secondary: #b6bec5;
-  --text-tertiary: #959ea6;
-  --primary: #c9d2d9;
-  --primary-hover: #e1e7eb;
+  --text: #eef1f4;
+  --text-secondary: #bcc5cd;
+  --text-tertiary: #95a0aa;
+  --primary: #d3dce2;
+  --primary-hover: #e5ecf0;
+  --on-primary: #1a2228;
+  --on-primary-muted: rgba(26, 34, 40, 0.74);
   --accent: #c9d2d9;
   --accent-text: #f1f4f6;
   --accent-soft: rgba(80, 92, 102, 0.70);
@@ -102,7 +106,7 @@
 .desktop-mist .btn-primary,
 .desktop-mist .btn-primary:hover:not(:disabled) {
   background: var(--primary);
-  color: var(--bg-elevated);
+  color: var(--on-primary);
   box-shadow: 0 6px 16px -8px rgba(30, 40, 48, 0.55);
 }
 .desktop-mist .btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
@@ -118,7 +122,7 @@
 .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-brand { border-bottom: 0; }
 .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-brand .logo {
   background: var(--primary);
-  color: var(--bg-elevated);
+  color: var(--on-primary);
   box-shadow: 0 4px 12px -4px rgba(30, 40, 48, 0.45);
 }
 .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-item { border-radius: 14px; }
@@ -136,23 +140,37 @@
 /* 海报：圆角加大 */
 .desktop-mist :is(.poster, .drama-poster, .browse-card img, .hongguo-card img) { border-radius: 14px; }
 
-/* 选中状态：统一深石板实心 + 白字，与未选中的透明玻璃明确区分 */
-.desktop-mist :is(.active, [aria-pressed="true"], [aria-selected="true"], [aria-current="page"]):not(.sidebar-item):not(:disabled) {
+/* 选中状态：统一深石板实心 + 高对比度反色文字，与未选中的透明玻璃明确区分（排除暗色播放器控制区） */
+.desktop-mist :is(.active, [aria-pressed="true"], [aria-selected="true"], [aria-current="page"]):not(.sidebar-item):not(.player-stage *):not(:disabled) {
   background: var(--primary) !important;
-  color: var(--bg-elevated) !important;
+  color: var(--on-primary) !important;
   border-color: transparent !important;
   box-shadow: 0 4px 12px -6px rgba(30, 40, 48, 0.55) !important;
 }
+/* 仅默认皮肤对选中项内部子元素同步反色文字变量，避免深底黑字／浅底白字，不影响磨砂与新拟物皮肤 */
+:root:not([data-skin="frosted"]):not([data-skin="soft"]) .desktop-mist :is(.active, [aria-pressed="true"], [aria-selected="true"], [aria-current="page"]):not(.sidebar-item):not(.player-stage *):not(:disabled) {
+  --text: var(--on-primary);
+  --text-primary: var(--on-primary);
+  --text-secondary: var(--on-primary-muted);
+  --text-tertiary: var(--on-primary-muted);
+  --accent-text: var(--on-primary);
+}
+:root:not([data-skin="frosted"]):not([data-skin="soft"]) .desktop-mist .app-icon-option.is-selected:hover:not(:disabled) {
+  background: var(--primary-hover) !important;
+}
+:root:not([data-skin="frosted"]):not([data-skin="soft"]) .desktop-mist .app-icon-option.is-selected .app-icon-option-check {
+  color: var(--on-primary);
+}
 .desktop-mist.layout-landscape:not(.stealth-mode) .sidebar-item.active {
   background: var(--primary);
-  color: var(--bg-elevated);
+  color: var(--on-primary);
   border-color: transparent;
   box-shadow: 0 6px 14px -8px rgba(30, 40, 48, 0.6);
 }
 @supports (appearance: base-select) {
   :is(.desktop-mist, [data-desktop-player-popup]) select option:checked {
     background: var(--primary);
-    color: var(--bg-elevated);
+    color: var(--on-primary);
   }
   :is(.desktop-mist, [data-desktop-player-popup]) select option:checked:hover { background: var(--primary-hover); }
 }

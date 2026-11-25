@@ -44,6 +44,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('app-update-preference', listener);
   },
   getAppInfo: () => ipcRenderer.invoke('get-app-info'),
+  setAppIcon: (iconId) => ipcRenderer.invoke('set-app-icon', iconId),
+  onAppIconChanged: (cb) => {
+    const listener = (_event, iconId) => cb(iconId);
+    ipcRenderer.on('app-icon-changed', listener);
+    return () => ipcRenderer.removeListener('app-icon-changed', listener);
+  },
   setInterfaceLanguage: language => ipcRenderer.invoke('set-interface-language', language),
   openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
 

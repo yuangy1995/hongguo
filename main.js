@@ -9,7 +9,7 @@
  *   4. 下载管理：进度推送、暂停/取消、重试、删除、打开所在文件夹
  *   5. 设置：下载目录、命名规则、并发数（JSON 文件持久化）
  */
-const { app, BrowserWindow, BaseWindow, View, WebContentsView, globalShortcut, ipcMain: rawIpcMain, dialog, shell, session, protocol, Menu, Notification, screen, safeStorage } = require('electron');
+const { app, BrowserWindow, BaseWindow, View, WebContentsView, globalShortcut, ipcMain: rawIpcMain, dialog, shell, session, protocol, Menu, Notification, screen, safeStorage, nativeImage } = require('electron');
 const path = require('path');
 const appPackage = require('./package.json');
 const IS_PREVIEW = appPackage.name === 'hongguo-experience-preview';
@@ -260,6 +260,7 @@ function getDefaultSettings() {
     name_format: '剧名 集数',
     max_concurrent: 3,
     ui_zoom: 1,
+    app_icon: 'ruby-glass',
     download_quality: 'auto',
     download_metadata: false,
     custom_sources: [],
@@ -5741,6 +5742,51 @@ function applyInterfaceLanguage(language) {
   ]));
 }
 
+const APP_ICON_IDS = new Set([
+  'ruby-glass',
+  'minimal-red',
+  'obsidian-cinema',
+  'ticket-glass',
+  'retro-film',
+  'liquid-glass',
+  'cyber-neon',
+  'oriental-seal',
+]);
+const DEFAULT_APP_ICON = 'ruby-glass';
+
+function normalizeAppIcon(iconId) {
+  return typeof iconId === 'string' && APP_ICON_IDS.has(iconId) ? iconId : DEFAULT_APP_ICON;
+}
+
+function applyAppIcon(iconId) {
+  const normalized = normalizeAppIcon(iconId);
+  const iconPath = path.join(__dirname, 'build', 'app-icons', `${normalized}.png`);
+  try {
+    const img = nativeImage.createFromPath(iconPath);
+    if (img.isEmpty()) return false;
+    if (process.platform === 'darwin') {
+      app.dock?.setIcon(img);
+    } else if (mainWindow && !mainWindow.isDestroyed() && typeof mainWindow.setIcon === 'function') {
+      mainWindow.setIcon(img);
+    }
+    return true;
+  } catch (error) {
+    console.warn('[AppIcon] 应用图标切换失败:', error?.message || error);
+    return false;
+  }
+}
+
+ipcMain.handle('set-app-icon', (_event, iconId) => {
+  if (typeof iconId !== 'string' || !APP_ICON_IDS.has(iconId)) {
+    return { success: false, error: '请选择有效的应用图标' };
+  }
+  const current = getCurrentSettings();
+  store.saveSettings({ ...current, app_icon: iconId });
+  applyAppIcon(iconId);
+  sendToRenderer('app-icon-changed', iconId);
+  return { success: true, icon: iconId };
+});
+
 ipcMain.handle('set-interface-language', (_event, language) => {
   if (!['zh-CN', 'en'].includes(language)) return { success: false, error: 'Unsupported interface language' };
   applyInterfaceLanguage(language);
@@ -6035,6 +6081,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
       app.setAboutPanelOptions?.({ applicationVersion: APP_VERSION, version: '' });
       applyInterfaceLanguage(/^zh(?:[-_.@]|$)/i.test(app.getPreferredSystemLanguages?.()[0] || app.getLocale()) ? 'zh-CN' : 'en');
     }
+    applyAppIcon(settings.app_icon);
     // Warm the official-host trusted DNS cache before the first catalog card request.
     // This is best-effort and must never block startup or a user action.
     if (!proxyStartupFallback && resolveProxyConfig(getCurrentSettings()).mode === 'direct') {
@@ -6042,6 +6089,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
     }
     startupStage = '创建主窗口';
     createWindow();
+    applyAppIcon(settings.app_icon);
     if (proxyStartup.fallback) {
       // 只停自动任务；窗口仍打开，用户可在设置中修复代理或明确关闭代理。
       setTimeout(() => {
