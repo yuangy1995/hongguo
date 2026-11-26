@@ -66,6 +66,21 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: 准备对应的媒体工具和源码
         run: python3 scripts/restore-release-mac-media.py "$ARCH" "$RUNNER_TEMP/hongguo-media"
+      - uses: actions/cache@v4
+        id: sdk-playback-cache
+        with:
+          path: build/sdk-playback/darwin-${{ matrix.arch }}/hongguo-sdk-playback
+          key: mac-sdk-playback-${{ matrix.arch }}-py312-${{ hashFiles('scripts/build-sdk-playback-mac.sh', 'scripts/sdk-playback/resolve_cli.py', 'scripts/sdk-playback/vendor/**') }}
+      - name: 构建 macOS SDK 播放取源组件
+        if: ${{ steps.sdk-playback-cache.outputs.cache-hit != 'true' }}
+        run: PYTHON="$(command -v python3)" sh scripts/build-sdk-playback-mac.sh "$ARCH"
+      - name: 核验 macOS SDK 播放取源组件
+        run: |
+          helper="build/sdk-playback/darwin-$ARCH/hongguo-sdk-playback"
+          test -x "$helper"
+          if [ "$ARCH" = x64 ]; then expected=x86_64; else expected=arm64; fi
+          test "$(lipo "$helper" -archs)" = "$expected"
+          "$helper" --help 2>&1 | grep -F -- '--video'
       - name: 构建并检查最终 DMG
         run: |
           npm run build:react
@@ -84,6 +99,10 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$version"
           if [ "$ARCH" = x64 ]; then expected=x86_64; else expected=arm64; fi
           test "$(lipo "$app/Contents/MacOS/红果短剧" -archs)" = "$expected"
+          packaged_sdk="$app/Contents/Resources/app.asar.unpacked/build/sdk-playback/darwin-$ARCH/hongguo-sdk-playback"
+          test -x "$packaged_sdk"
+          test "$(lipo "$packaged_sdk" -archs)" = "$expected"
+          "$packaged_sdk" --help 2>&1 | grep -F -- '--video'
           ditto "$app" "$tested/红果短剧.app"
           hdiutil detach "$mount"
           trap - EXIT
