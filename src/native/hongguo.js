@@ -939,44 +939,44 @@ async function fetchPlayUrlFresh(vid, sid, skipWeb = false, signal, quality = 'a
   throw unavailableSources(sources, allowLowerQuality ? 'auto' : quality);
 }
 
+const AV_BASE64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const AV_BASE64_TABLE = new Int8Array(128).fill(-1);
+for (let i = 0; i < AV_BASE64_CHARS.length; i++) AV_BASE64_TABLE[AV_BASE64_CHARS.charCodeAt(i)] = i;
+
 /**
  * FFmpeg 兼容 Base64 解码
  */
 function avBase64Decode(s) {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  const table = {};
-  for (let i = 0; i < chars.length; i++) table[chars.charCodeAt(i)] = i;
   const dst = [];
   let i = 0;
   while (i + 4 <= s.length) {
-    const vals = [];
-    let ok = true;
-    for (let j = 0; j < 4; j++) {
-      const c = s.charCodeAt(i + j);
-      if (c in table) {
-        vals.push(table[c]);
-      } else {
-        ok = false;
-        break;
-      }
+    let v0 = -1, v1 = -1, v2 = -1, v3 = -1;
+    const c0 = s.charCodeAt(i);
+    if (c0 < 128) v0 = AV_BASE64_TABLE[c0];
+    if (v0 >= 0) {
+      const c1 = s.charCodeAt(i + 1);
+      if (c1 < 128) v1 = AV_BASE64_TABLE[c1];
     }
-    if (!ok) {
-      let v = 0;
-      for (let j2 = 0; j2 < vals.length; j2++) {
-        v = (v << 6) | vals[j2];
-      }
-      if (vals.length === 3) {
-        dst.push((v >> 10) & 0xff);
-        dst.push((v >> 2) & 0xff);
-      } else if (vals.length === 2) {
+    if (v1 >= 0) {
+      const c2 = s.charCodeAt(i + 2);
+      if (c2 < 128) v2 = AV_BASE64_TABLE[c2];
+    }
+    if (v2 >= 0) {
+      const c3 = s.charCodeAt(i + 3);
+      if (c3 < 128) v3 = AV_BASE64_TABLE[c3];
+    }
+    if (v3 < 0) {
+      if (v2 >= 0) {
+        const v = (v0 << 12) | (v1 << 6) | v2;
+        dst.push((v >> 10) & 0xff, (v >> 2) & 0xff);
+      } else if (v1 >= 0) {
+        const v = (v0 << 6) | v1;
         dst.push((v >> 4) & 0xff);
       }
       break;
     }
-    const v = (vals[0] << 18) | (vals[1] << 12) | (vals[2] << 6) | vals[3];
-    dst.push((v >> 16) & 0xff);
-    dst.push((v >> 8) & 0xff);
-    dst.push(v & 0xff);
+    const v = (v0 << 18) | (v1 << 12) | (v2 << 6) | v3;
+    dst.push((v >> 16) & 0xff, (v >> 8) & 0xff, v & 0xff);
     i += 4;
   }
   return Buffer.from(dst);
@@ -1035,32 +1035,41 @@ function deriveKey(spadeA) {
   }
 }
 
-/**
- * AES-128-ECB 加密
- */
-function aes128EcbEncrypt(key16, data) {
-  const cipher = crypto.createCipheriv('aes-128-ecb', key16, null);
+function aes128EcbEncrypt(key, block) {
+  const cipher = crypto.createCipheriv('aes-128-ecb', key, null);
   cipher.setAutoPadding(false);
-  return Buffer.concat([cipher.update(data), cipher.final()]);
+  return Buffer.concat([cipher.update(block), cipher.final()]);
 }
 
+const SAMPLE_CTR_IV = Buffer.alloc(16);
+
 /**
- * CENC-AES-CTR 解密 sample
+ * CENC-AES-CTR 解密 sample（桌面端采用原生硬件加速 aes-128-ctr，移动端桥接保持 ECB 契约）
  */
 function decryptSample(key, nonce, cipher) {
   if (!cipher || cipher.length === 0) return Buffer.alloc(0);
-  const nblocks = Math.ceil(cipher.length / 16);
-  const full = Buffer.alloc(nblocks * 16);
-  for (let k = 0; k < nblocks; k++) {
-    nonce.copy(full, k * 16, 0, 8);
-    full.writeBigUInt64BE(BigInt(k), k * 16 + 8);
+  if (typeof HONGGUO_ANDROID_WEBVIEW !== 'undefined' && HONGGUO_ANDROID_WEBVIEW) {
+    const out = Buffer.alloc(cipher.length);
+    const counter = Buffer.alloc(16, 0);
+    nonce.copy(counter, 0, 0, Math.min(8, nonce.length));
+    const nblocks = Math.ceil(cipher.length / 16);
+    for (let i = 0; i < nblocks; i++) {
+      counter.writeBigUInt64BE(BigInt(i), 8);
+      const ks = aes128EcbEncrypt(key, counter);
+      const start = i * 16;
+      const end = Math.min(start + 16, cipher.length);
+      for (let j = start; j < end; j++) {
+        out[j] = cipher[j] ^ ks[j - start];
+      }
+    }
+    return out;
   }
-  const ks = aes128EcbEncrypt(key, full);
-  const plain = Buffer.alloc(cipher.length);
-  for (let i = 0; i < cipher.length; i++) {
-    plain[i] = cipher[i] ^ ks[i];
-  }
-  return plain;
+  SAMPLE_CTR_IV.fill(0);
+  nonce.copy(SAMPLE_CTR_IV, 0, 0, Math.min(8, nonce.length));
+  const decipher = crypto.createDecipheriv('aes-128-ctr', key, SAMPLE_CTR_IV);
+  const first = decipher.update(cipher);
+  const tail = decipher.final();
+  return tail.length === 0 ? first : Buffer.concat([first, tail]);
 }
 
 /**

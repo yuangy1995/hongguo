@@ -288,9 +288,18 @@ function signPlaybackV5(input) {
   if (hasBody) try { gunzipSync(body, { maxOutputLength: 2 * 1024 * 1024 }); } catch { throw new TypeError('V5 body must contain valid bounded gzip data'); }
   const ts = Math.floor(now / 1000), bodyHash = hasBody ? md5(body) : md5(Buffer.alloc(0));
   if (Object.hasOwn(who, 'ts')) who.ts = String(ts);
+  // 预先编码除 _rticket 外的固定字段并保持原枚举顺序，避免最多 1024 次碰撞循环重复 URL 编码
+  const beforeTicket = [], afterTicket = [];
+  let seenTicket = false;
+  for (const [key, value] of Object.entries(who)) {
+    if (key === '_rticket') { seenTicket = true; continue; }
+    (seenTicket ? afterTicket : beforeTicket).push(`${encode(key)}=${encode(value)}`);
+  }
+  const prefix = beforeTicket.length ? `${beforeTicket.join('&')}&` : '';
+  const suffix = afterTicket.length ? `&${afterTicket.join('&')}` : '';
   for (let offset = 0; offset < 1024; offset++) {
     const ticket = String(now + offset);
-    const query = Object.entries({ ...who, _rticket: ticket }).map(([key, value]) => `${encode(key)}=${encode(value)}`).join('&');
+    const query = `${prefix}_rticket=${encode(ticket)}${suffix}`;
     const queryHash = sm3(Buffer.from(query));
     if (branch(queryHash, bodyHash, ts) !== 12) continue;
     const f13 = hashF13(queryHash, bodyHash, ts);

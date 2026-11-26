@@ -9,9 +9,24 @@ const episodeLikeIds = value => {
   return [...new Set(value.map(id => id.trim()))];
 };
 
+const SHANGHAI_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Shanghai',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+let cachedStorage = null;
+let cachedRaw = undefined;
+let cachedItems = [];
+
 export function readLocalLibrary() {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const storage = window.localStorage;
+    const raw = storage.getItem(STORAGE_KEY);
+    if (storage === cachedStorage && raw === cachedRaw) {
+      return { items: cachedItems.slice(), error: '' };
+    }
     const items = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(items) || items.some(item => !item || typeof item.id !== 'string' || !item.id || typeof item.title !== 'string' || typeof item.favorite !== 'boolean' || (item.published_at !== null && !validPublishedAt(item.published_at)))) {
       throw new Error('保存的数据格式不正确');
@@ -21,8 +36,14 @@ export function readLocalLibrary() {
       if (!liked_episode_ids) throw new Error('保存的数据格式不正确');
       return { ...item, liked_episode_ids };
     });
-    return { items: normalized, error: '' };
+    cachedStorage = storage;
+    cachedRaw = raw;
+    cachedItems = normalized;
+    return { items: normalized.slice(), error: '' };
   } catch (error) {
+    cachedStorage = null;
+    cachedRaw = undefined;
+    cachedItems = [];
     return { items: [], error: `无法读取本机收藏与日历：${error.message}。原有数据未改动。` };
   }
 }
@@ -82,7 +103,7 @@ export function subscribeLocalLibrary(callback) {
 
 export function publicDateKey(timestamp) {
   if (!validPublishedAt(timestamp)) return '';
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(timestamp);
+  const parts = SHANGHAI_DATE_FORMATTER.formatToParts(timestamp);
   const part = type => parts.find(item => item.type === type).value;
   return `${part('year')}-${part('month')}-${part('day')}`;
 }

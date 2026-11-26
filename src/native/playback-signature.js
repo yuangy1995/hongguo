@@ -49,9 +49,10 @@ const Simon = {
     }
     return expanded;
   },
-  encrypt(left, right, key) {
+  encrypt(left, right, key, precomputedRounds = null) {
     let x = u64(integer(left)), y = u64(integer(right));
-    for (const roundKey of Simon.keyExpansion(key)) {
+    const rounds = precomputedRounds || Simon.keyExpansion(key);
+    for (const roundKey of rounds) {
       const previous = y;
       y = u64(x ^ (rol64(y, 1) & rol64(y, 8)) ^ rol64(y, 2) ^ roundKey);
       x = previous;
@@ -59,6 +60,13 @@ const Simon = {
     return [x, y];
   },
 };
+// 预计算固定常量密钥与嵌套字段，避免每次签名及每 16B 分组重复派生
+const DEFAULT_SIMON_KEY = Object.freeze(Array.from({ length: 4 }, (_, i) => SIGN_KEY.readBigUInt64LE(i * 8)));
+const DEFAULT_SIMON_ROUNDS = Object.freeze(Simon.keyExpansion(DEFAULT_SIMON_KEY));
+const EMPTY_SM3_PREFIX6 = Buffer.from(sm3(Buffer.alloc(16)).subarray(0, 6));
+const ZERO8 = Buffer.alloc(8);
+const NESTED_FIELD_15 = new ProtoBuf().putVarint(1, 1).putVarint(2, 1).putVarint(3, 1).putVarint(7, 0xc792eccc).toBuf();
+const NESTED_FIELD_23 = new ProtoBuf().putUtf8(1, 'NX551J').putVarint(2, 8196).putVarint(4, 0x80e0d800).toBuf();
 const pad16 = data => Buffer.concat([data, Buffer.alloc(16 - data.length % 16, 16 - data.length % 16)]);
 function queryParam(query, name) {
   const decode = value => { try { return decodeURIComponent(value.replace(/\+/g, ' ')); } catch { return value; } };
@@ -70,26 +78,26 @@ function queryParam(query, name) {
 }
 const Argus = {
   bodyHash(stubHex) {
-    if (!stubHex) return sm3(Buffer.alloc(16)).subarray(0, 6);
+    if (!stubHex) return EMPTY_SM3_PREFIX6;
     const bytes = /^(?:[a-f\d]{2})+$/i.test(stubHex) ? Buffer.from(stubHex, 'hex') : Buffer.alloc(0);
     return sm3(bytes).subarray(0, 6);
   },
-  queryHash(query) { return sm3(query ? Buffer.from(query, 'utf8') : Buffer.alloc(16)).subarray(0, 6); },
+  queryHash(query) { return query ? sm3(Buffer.from(query, 'utf8')).subarray(0, 6) : EMPTY_SM3_PREFIX6; },
   sign(query, stubHex, ts, aid, licenseId, deviceId, installId, randField) {
     if (typeof query !== 'string' || typeof stubHex !== 'string' || typeof deviceId !== 'string' || typeof installId !== 'string') throw new TypeError('String protocol fields required');
     const bean = new ProtoBuf().putVarint(1, 1077940818).putVarint(2, 2).putVarint(3, randField)
       .putUtf8(4, String(integer(aid) === 0n ? 1967n : integer(aid))).putUtf8(5, deviceId)
       .putUtf8(6, String(integer(licenseId) === 0n ? LICENSE_ID : integer(licenseId)))
       .putUtf8(7, queryParam(query, 'version_name') || '').putUtf8(8, 'v04.04.05-ov-android')
-      .putVarint(9, 134744640).putBytes(10, Buffer.alloc(8)).putVarint(11, 0).putVarint(12, integer(ts) << 1n)
+      .putVarint(9, 134744640).putBytes(10, ZERO8).putVarint(11, 0).putVarint(12, integer(ts) << 1n)
       .putBytes(13, Argus.bodyHash(stubHex)).putBytes(14, Argus.queryHash(query))
-      .putProtobuf(15, new ProtoBuf().putVarint(1, 1).putVarint(2, 1).putVarint(3, 1).putVarint(7, 0xc792eccc))
+      .putBytes(15, NESTED_FIELD_15)
       .putUtf8(16, installId).putUtf8(20, 'none').putVarint(21, 738)
-      .putProtobuf(23, new ProtoBuf().putUtf8(1, 'NX551J').putVarint(2, 8196).putVarint(4, 0x80e0d800)).putVarint(25, 2);
-    const protobuf = pad16(bean.toBuf()), key = Array.from({ length: 4 }, (_, i) => SIGN_KEY.readBigUInt64LE(i * 8));
+      .putBytes(23, NESTED_FIELD_23).putVarint(25, 2);
+    const protobuf = pad16(bean.toBuf());
     const blocks = [];
     for (let at = 0; at < protobuf.length; at += 16) {
-      const encrypted = Simon.encrypt(protobuf.readBigUInt64LE(at), protobuf.readBigUInt64LE(at + 8), key);
+      const encrypted = Simon.encrypt(protobuf.readBigUInt64LE(at), protobuf.readBigUInt64LE(at + 8), DEFAULT_SIMON_KEY, DEFAULT_SIMON_ROUNDS);
       blocks.push(le64(encrypted[0]), le64(encrypted[1]));
     }
     const framed = Buffer.concat([MAGIC8, ...blocks, TAIL9]);

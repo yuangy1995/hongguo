@@ -4,6 +4,8 @@ import { readLocalLibrary, saveLocalSeries } from '../localLibrary';
 export const EMPTY_ACCOUNT_LIST = { items: [], loaded: false, busy: false, error: '' };
 const REFRESH_INTERVAL = 30000;
 const newSession = id => ({ id, requests: new Map(), writes: new Set(), updatedAt: new Map() });
+const sameAccountState = (a, b) => a.signedIn === b.signedIn && (a.sessionId || '') === (b.sessionId || '')
+  && a.ready === b.ready && a.statusError === b.statusError;
 
 export default function useAccountLibrary() {
   const api = window.electronAPI;
@@ -17,8 +19,9 @@ export default function useAccountLibrary() {
     let revision = 0;
     const clear = () => {
       current.current = newSession('');
-      setLists({});
+      setLists(prev => Object.keys(prev).length === 0 ? prev : {});
     };
+    const updateAccount = next => setAccount(prev => sameAccountState(prev, next) ? prev : next);
     const readStatus = async () => {
       const checking = ++revision;
       try {
@@ -29,20 +32,20 @@ export default function useAccountLibrary() {
         if (result.signedIn && !id) throw new Error('暂时无法读取红果账号状态');
         if (id !== current.current.id) {
           current.current = newSession(id);
-          setLists({});
+          setLists(prev => Object.keys(prev).length === 0 ? prev : {});
         }
-        setAccount({ signedIn: !!id, sessionId: id, ready: true, statusError: '' });
+        updateAccount({ signedIn: !!id, sessionId: id, ready: true, statusError: '' });
       } catch (error) {
         if (checking !== revision) return;
         clear();
-        setAccount({ signedIn: false, ready: false, statusError: error.message || '暂时无法读取红果账号状态' });
+        updateAccount({ signedIn: false, ready: false, statusError: error.message || '暂时无法读取红果账号状态' });
       }
     };
     const unsubscribe = api.onAccountUpdated?.(result => {
       if (result?.signedIn === undefined) return;
       revision++;
       clear();
-      setAccount({ signedIn: false, ready: !result.signedIn, statusError: '' });
+      updateAccount({ signedIn: false, ready: !result.signedIn, statusError: '' });
       if (result.signedIn) void readStatus();
     });
     window.addEventListener('focus', readStatus);
@@ -161,5 +164,10 @@ export default function useAccountLibrary() {
     }
   }, [api, updateList]);
 
-  return { ...account, lists, watch, refresh, change };
+  const resultRef = useRef(null);
+  const deps = [account, lists, watch, refresh, change];
+  if (!resultRef.current || resultRef.current.deps.some((v, i) => !Object.is(v, deps[i]))) {
+    resultRef.current = { deps, value: { ...account, lists, watch, refresh, change } };
+  }
+  return resultRef.current.value;
 }

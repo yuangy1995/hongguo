@@ -31,9 +31,20 @@ export function useCommentDanmaku({ seriesId, episodeId, active }) {
   }, []);
 
   useEffect(() => {
-    if (!running) return;
+    if (!running) {
+      feed._resume = null;
+      return;
+    }
+    let timer = 0;
+    const stopTimer = () => {
+      if (timer) {
+        window.clearInterval(timer);
+        timer = 0;
+      }
+    };
     const fetchNext = async () => {
-      if (document.hidden || feed.loading || !feed.hasMore || feed.error || (feed.groupedComments || feed.comments).length - feed.animation.cursor >= 10 || Date.now() - feed.lastRequest < 1500) return;
+      if (!feed.hasMore || feed.error) { stopTimer(); return; }
+      if (document.hidden || feed.loading || (feed.groupedComments || feed.comments).length - feed.animation.cursor >= 10 || Date.now() - feed.lastRequest < 1500) return;
       feed.loading = true;
       feed.lastRequest = Date.now();
       refresh(value => value + 1);
@@ -45,12 +56,23 @@ export function useCommentDanmaku({ seriesId, episodeId, active }) {
         if (currentFeed.current === feed) feed.error = '本集评论加载失败，可重试继续加载';
       } finally {
         feed.loading = false;
-        if (currentFeed.current === feed) refresh(value => value + 1);
+        if (currentFeed.current === feed) {
+          if (!feed.hasMore || feed.error) stopTimer();
+          refresh(value => value + 1);
+        }
       }
     };
-    fetchNext();
-    const timer = window.setInterval(fetchNext, 1500);
-    return () => window.clearInterval(timer);
+    const ensurePolling = () => {
+      if (!feed.hasMore || feed.error) return;
+      fetchNext();
+      if (!timer && feed.hasMore && !feed.error) timer = window.setInterval(fetchNext, 1500);
+    };
+    feed._resume = ensurePolling;
+    ensurePolling();
+    return () => {
+      feed._resume = null;
+      stopTimer();
+    };
   }, [running, feed]);
 
   const update = patch => {
@@ -66,7 +88,7 @@ export function useCommentDanmaku({ seriesId, episodeId, active }) {
       : feed.comments.length ? `已读取本集 ${feed.comments.length} 条评论${feed.hasMore ? '，播放时继续加载' : '，当前可用评论已读取'}` : '本集暂无可显示的公开评论');
   return { enabled, supported, running, settings, feed, comments: feed.groupedComments || feed.comments, status, saveError, error: feed.error,
     loading: running && feed.loading, toggle: () => update({ enabled: !preferences.enabled }), update,
-    reset: () => update(DEFAULT_DANMAKU_SETTINGS), retry: () => { feed.error = ''; feed.emptyPages = 0; refresh(value => value + 1); } };
+    reset: () => update(DEFAULT_DANMAKU_SETTINGS), retry: () => { feed.error = ''; feed.emptyPages = 0; refresh(value => value + 1); feed._resume?.(); } };
 }
 
 export default function CommentDanmaku({ videoRef, source, available, danmaku }) {
@@ -128,7 +150,7 @@ export default function CommentDanmaku({ videoRef, source, available, danmaku })
         setItems([...state.items]);
       }
       paint();
-      frame = requestAnimationFrame(tick);
+      if (comments.length > 0 || state.items.length > 0) frame = requestAnimationFrame(tick);
     };
     const start = () => { if (!frame && canAdvance()) { previous = 0; frame = requestAnimationFrame(tick); } };
     const stop = () => { cancelAnimationFrame(frame); frame = 0; previous = 0; };

@@ -1,5 +1,6 @@
 import { t, useLanguage } from '../i18n';
 import React, { useEffect, useRef, useState } from 'react';
+import useDialogKeyboard from './useDialogKeyboard';
 import { X } from './icons';
 import './AppUpdateNotice.css';
 
@@ -316,6 +317,7 @@ export default function AppUpdateNotice({ playbackActive: initialPlaybackActive 
     setVisible(false);
     setError('');
   };
+  useDialogKeyboard(visible, close, '.app-update-notice');
   const act = async kind => {
     if (kind === 'openAppUpdate') {
       if (!enabled.current || openingRelease.current) return;
@@ -383,7 +385,7 @@ export default function AppUpdateNotice({ playbackActive: initialPlaybackActive 
   const installLabel = fallbackManual ? '打开安装包' : '立即重启更新';
   const visualState = updateError ? 'error' : downloaded ? 'ready' : (checking || downloading || installing || preparingDownload) ? 'busy' : version ? 'available' : 'idle';
   return <div className="app-update-mask" onClick={close}>
-    <section className="app-update-notice" data-state={visualState} role="dialog" aria-modal="true" aria-label={t("软件更新")} aria-describedby="app-update-description" onClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); close(); } }}>
+    <section className="app-update-notice" data-state={visualState} role="dialog" aria-modal="true" aria-label={t("软件更新")} aria-describedby="app-update-description" tabIndex={-1} onClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); close(); } }}>
       <div className="app-update-head">
         <span className="app-update-pill"><span className="app-update-dot" aria-hidden="true" /><span>{t("软件更新")}</span></span>
         <button type="button" className="icon-btn app-update-close" aria-label={t("关闭更新提醒")} title={t("关闭更新提醒")} onClick={close}><X size={16} /></button>

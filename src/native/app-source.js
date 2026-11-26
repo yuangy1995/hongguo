@@ -154,9 +154,16 @@ function signedRoute(base, values, body, route = {}, { field21, method = 'POST' 
     };
 }
 function md5(value) { return crypto.createHash('md5').update(value).digest('hex').toUpperCase(); }
+const largeIntPatternCache = new Map();
 function preserveLargeJsonIntegers(raw, fields) {
-    const names = fields.map(field => String(field).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-    const pattern = new RegExp(`("(?:${names})"\\s*:\\s*)(-?\\d{16,})(?=\\s*[,}\\]])`, 'g');
+    const cacheKey = fields.join('\0');
+    let pattern = largeIntPatternCache.get(cacheKey);
+    if (!pattern) {
+        const names = fields.map(field => String(field).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+        pattern = new RegExp(`("(?:${names})"\\s*:\\s*)(-?\\d{16,})(?=\\s*[,}\\]])`, 'g');
+        if (largeIntPatternCache.size >= 32) largeIntPatternCache.delete(largeIntPatternCache.keys().next().value);
+        largeIntPatternCache.set(cacheKey, pattern);
+    }
     return raw.replace(pattern, '$1"$2"');
 }
 
@@ -249,7 +256,14 @@ function helios(khronos) {
     return Buffer.concat([le32(random), ...output]).toString('base64');
 }
 
-function branchOf(url, body, khronos) { const bodyMd5 = body ? crypto.createHash('md5').update(body).digest() : Buffer.alloc(16); const q = sm3(url.split('?')[1]); const iv = getIv(getIv(getIv(0x20230928, q), bodyMd5), le32(khronos)); const low = iv & 15; return low - (((low * 171) >> 9) * 3); }
+const EMPTY_BODY_MD5 = Buffer.alloc(16);
+function branchOf(url, body, khronos, preBodyMd5, preTsBytes) {
+    const bodyMd5 = preBodyMd5 || (body ? crypto.createHash('md5').update(body).digest() : EMPTY_BODY_MD5);
+    const q = sm3(url.split('?')[1]);
+    const iv = getIv(getIv(getIv(0x20230928, q), bodyMd5), preTsBytes || le32(khronos));
+    const low = iv & 15;
+    return low - (((low * 171) >> 9) * 3);
+}
 function playbackRequest(payload, identity, videoId = '', routeId = 'legacy') {
     const route = { ...(routeId === 'legacy' ? { auth: 'player' } : {}), ...(sourcePolicy.route(routeId) || {}) };
     const body = gzipSync(Buffer.from(payload));
@@ -336,12 +350,15 @@ function signedSearchRequest({ keyword, page = 1, cursor = null, identity } = {}
     if (cursor?.passback) base.passback = cursor.passback;
     const offset = parseSearchInteger(cursor?.next_offset) ?? (pg - 1) * 20;
     base.offset = String(offset);
+    // 预编码固定查询参数前缀，避免 128 次分支搜索循环中重复执行全量 URL 编码
+    const queryPrefix = `${pythonUrlEncode({ ...base, ts: String(khronos) })}&_rticket=`;
+    const tsBytes = le32(khronos);
     let requestTicket = ticketBase, query = '', url = '';
     for (let n = 0; n < 128; n += 1) {
         requestTicket = ticketBase + n;
-        query = pythonUrlEncode({ ...base, ts: String(khronos), _rticket: String(requestTicket) });
+        query = `${queryPrefix}${requestTicket}`;
         url = `${SEARCH_API}?${query}`;
-        if (branchOf(url, null, khronos) === 0) break;
+        if (branchOf(url, null, khronos, EMPTY_BODY_MD5, tsBytes) === 0) break;
         if (n === 127) throw new Error('无法生成搜索请求签名');
     }
     const random = Math.floor(Math.random() * 65536);
@@ -368,12 +385,15 @@ function signedMetadataRequest(apiPath, values = {}, payload = null) {
         ? { ...metadataDevice, iid: localId(), device_id: localId() } : metadataDevice;
     const body = payload === null ? null : Buffer.from(JSON.stringify(payload));
     const khronos = Math.floor(Date.now() / 1000), ticketBase = Date.now();
+    const queryPrefix = `${pythonUrlEncode({ ...values, ...device, ts: String(khronos) })}&_rticket=`;
+    const bodyMd5 = body ? crypto.createHash('md5').update(body).digest() : EMPTY_BODY_MD5;
+    const tsBytes = le32(khronos);
     let query, url, requestTicket;
     for (let n = 0; n < 128; n += 1) {
         requestTicket = ticketBase + n;
-        query = pythonUrlEncode({ ...values, ...device, ts: String(khronos), _rticket: String(requestTicket) });
+        query = `${queryPrefix}${requestTicket}`;
         url = `https://api5-normal-sinfonlineb.fqnovel.com${apiPath}?${query}`;
-        if (branchOf(url, body, khronos) === 0) break;
+        if (branchOf(url, body, khronos, bodyMd5, tsBytes) === 0) break;
         if (n === 127) throw new Error('无法生成 App 目录请求签名');
     }
     const headers = {
@@ -407,12 +427,15 @@ function signedAccountRequest(apiPath, values = {}, identity, payload) {
     const device = { ...DEVICE, version_code: '72232', version_name: '7.2.2.32', manifest_version_code: '72232',
         update_version_code: '72232', pv_player: '72232', iid: identity.iid, device_id: identity.device_id, cdid: identity.cdid };
     const khronos = Math.floor(Date.now() / 1000), ticketBase = Date.now();
+    const queryPrefix = `${pythonUrlEncode({ ...values, ...device, ts: String(khronos) })}&_rticket=`;
+    const bodyMd5 = body ? crypto.createHash('md5').update(body).digest() : EMPTY_BODY_MD5;
+    const tsBytes = le32(khronos);
     let query, url, requestTicket;
     for (let n = 0; n < 128; n += 1) {
         requestTicket = ticketBase + n;
-        query = pythonUrlEncode({ ...values, ...device, ts: String(khronos), _rticket: String(requestTicket) });
+        query = `${queryPrefix}${requestTicket}`;
         url = `https://api5-normal-sinfonlinea.fqnovel.com${apiPath}?${query}`;
-        if (branchOf(url, body, khronos) === 0) break;
+        if (branchOf(url, body, khronos, bodyMd5, tsBytes) === 0) break;
         if (n === 127) throw new Error('无法生成账号请求签名');
     }
     const headers = {
@@ -598,6 +621,7 @@ async function fetchAppPlayUrl(vid, options = {}) {
             for (;;) {
                 try {
                     const result = await fetchAppPlayUrlFresh(vid, options);
+                    playbackRejection = null;
                     if (sdkFailure) result.sdkFailure = sdkFailure;
                     return result;
                 }
@@ -644,8 +668,8 @@ async function fetchAppPlayUrl(vid, options = {}) {
                 return result;
             }
             if (sdkFailure) error.sdkFailure = sdkFailure;
-            // An explicit refusal also stops work queued before it was received.
-            if ([403, 429].includes(error.status) || error.code === 'BUSINESS_REJECTED' && Number(error.businessCode) !== 110001
+            // 仅在网关级限流/封禁或设备注册被拒时中止同批排队请求，单集业务不可用不牵连其他分集
+            if ([403, 429].includes(error.status)
                 || (error.code === 'DEVICE_REGISTRATION_FAILED'
                   && ['BUSINESS_REJECTED', 'HTTP_403', 'HTTP_429'].includes(error.registrationFailure))) playbackRejection = error;
             throw error;

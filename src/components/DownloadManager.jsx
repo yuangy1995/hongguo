@@ -25,6 +25,7 @@ const isWaitingRetry = task => task.status === 'failed' && !!task.retryAt;
 const needsManualRetry = task => task.status === 'stopped' || task.status === 'failed' && !isWaitingRetry(task);
 const seriesKey = task => task.hongguoInfo?.series_id != null ? `series:${task.hongguoInfo.series_id}` : `task:${task.id}`;
 const seriesLabel = task => task.hongguoInfo?.series_title || task.title || task.filename || '';
+const ZH_NUMERIC_COLLATOR = new Intl.Collator('zh-CN', { numeric: true });
 
 function sortTasks(list) {
   const key = seriesKey;
@@ -37,7 +38,7 @@ function sortTasks(list) {
   }
   return [...list].sort((a, b) => {
     const ka = key(a), kb = key(b), ga = groups.get(ka), gb = groups.get(kb);
-    if (ka !== kb) return ga.rank - gb.rank || gb.time - ga.time || ka.localeCompare(kb, 'zh-CN', { numeric: true });
+    if (ka !== kb) return ga.rank - gb.rank || gb.time - ga.time || ZH_NUMERIC_COLLATOR.compare(ka, kb);
     return (Number(a.hongguoInfo?.vid_index) || 0) - (Number(b.hongguoInfo?.vid_index) || 0) || (a.startTime || 0) - (b.startTime || 0);
   });
 }
@@ -234,6 +235,7 @@ function DownloadManager({ onNavigate, active = true }) {
     loadSeriesList();
     loadMergeTasks();
     const patches = new Map();
+    const mergePatches = new Map();
     let batchTimer = null, fullRefresh = false, reorder = false, seriesDirty = false, queueDirty = false;
     const schedule = () => {
       if (batchTimer !== null) return;
@@ -244,6 +246,11 @@ function DownloadManager({ onNavigate, active = true }) {
           const updates = new Map(patches);
           setTasks(previous => previous.map(task => updates.has(task.id) ? { ...task, ...updates.get(task.id) } : task));
           if (reorder) setOrderVersion(value => value + 1);
+        }
+        if (mergePatches.size) {
+          const mUpdates = new Map(mergePatches);
+          mergePatches.clear();
+          setMergeTasks(prev => prev.map(item => mUpdates.has(item.id) ? { ...item, ...mUpdates.get(item.id) } : item));
         }
         if (seriesDirty) loadSeriesList(false);
         if (queueDirty) loadQueue();
@@ -278,13 +285,14 @@ function DownloadManager({ onNavigate, active = true }) {
         fullRefresh = queueDirty = seriesDirty = true;
         schedule();
       }),
-      window.electronAPI.onMergeTaskAdded(() => loadMergeTasks()),
+      window.electronAPI.onMergeTaskAdded(() => { mergePatches.clear(); loadMergeTasks(); }),
       window.electronAPI.onMergeProgress((data) => {
-        setMergeTasks((prev) =>
-          prev.map((t) => (t.id === data.id ? { ...t, ...data } : t))
-        );
+        if (!data?.id) return;
+        mergePatches.set(data.id, { ...mergePatches.get(data.id), ...data });
+        schedule();
       }),
       window.electronAPI.onMergeCompleted((data) => {
+        if (data?.id) mergePatches.delete(data.id);
         loadMergeTasks();
         if (data.cleanedCount || data.cleanupWarning) {
           refresh();
@@ -298,6 +306,7 @@ function DownloadManager({ onNavigate, active = true }) {
         else showToast('合并完成：' + name, 'success');
       }),
       window.electronAPI.onMergeFailed((data) => {
+        if (data?.id) mergePatches.delete(data.id);
         loadMergeTasks();
         showToast('合并失败：' + (data.error || '未知错误'), 'error');
       }),
@@ -634,7 +643,7 @@ function DownloadManager({ onNavigate, active = true }) {
       groups.set(key, group);
     }
     return [...groups.values()].sort((a, b) =>
-      a.label.localeCompare(b.label, 'zh-CN', { numeric:true }));
+      ZH_NUMERIC_COLLATOR.compare(a.label, b.label));
   }, [tasks]);
   const activeFilter = seriesOptions.some(option => option.key === seriesFilter) ? seriesFilter : '';
   const scopedTasks = useMemo(() => activeFilter
@@ -692,13 +701,17 @@ function DownloadManager({ onNavigate, active = true }) {
   const currentPage = Math.min(page, pageCount);
   const visibleGroups = seriesGroups.slice((currentPage - 1) * SERIES_PAGE_SIZE, currentPage * SERIES_PAGE_SIZE);
 
-  const activeCount = scopedTasks.filter((t) => t.status === 'downloading' || t.status === 'pending').length;
-  const completedCount = scopedTasks.filter((t) => t.status === 'completed').length;
-  const retryingCount = scopedTasks.filter(isWaitingRetry).length;
-  const failedTasks = useMemo(
-    () => scopedTasks.filter(needsManualRetry),
-    [scopedTasks]
-  );
+  const { activeCount, completedCount, retryingCount, failedTasks } = useMemo(() => {
+    let activeCnt = 0, completedCnt = 0, retryingCnt = 0;
+    const failed = [];
+    for (const task of scopedTasks) {
+      if (task.status === 'downloading' || task.status === 'pending') activeCnt++;
+      else if (task.status === 'completed') completedCnt++;
+      else if (isWaitingRetry(task)) retryingCnt++;
+      if (needsManualRetry(task)) failed.push(task);
+    }
+    return { activeCount: activeCnt, completedCount: completedCnt, retryingCount: retryingCnt, failedTasks: failed };
+  }, [scopedTasks]);
   const failedCount = failedTasks.length;
 
   const statusModalTasks = useMemo(() => {
@@ -872,7 +885,7 @@ function DownloadManager({ onNavigate, active = true }) {
         {showCover && (
           <div className="dm-task-cover">
             {task.videoInfo && task.videoInfo.cover ? (
-              <img src={task.videoInfo.cover} alt="" />
+              <img src={task.videoInfo.cover} alt="" loading="lazy" decoding="async" />
             ) : (
               <div className="cover-placeholder"><Film size={18} /></div>
             )}
@@ -1280,7 +1293,7 @@ function DownloadManager({ onNavigate, active = true }) {
                   />
                   <div className="dm-series-cover">
                     {group.cover ? (
-                      <img src={group.cover} alt="" />
+                      <img src={group.cover} alt="" loading="lazy" decoding="async" />
                     ) : (
                       <div className="cover-placeholder"><Film size={22} /></div>
                     )}

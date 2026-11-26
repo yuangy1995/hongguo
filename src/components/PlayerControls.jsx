@@ -15,7 +15,7 @@ const Icon = ({ children }) => <svg width="18" height="18" viewBox="0 0 24 24" f
 const PLAYBACK_RATES = Array.from({ length: 16 }, (_, index) => (index + 1) / 4);
 
 export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAULT_SHORTCUTS, onToggleFullscreen, videoRef, stageRef, source, available, floating = false, onToggleFloating, continuing = false, autoContinue = false, rate, onRateChange, onError, pictureMode = 'fit', onPictureModeChange, portrait = false, windowFill = false, onWindowFill, seriesTitle = '', episodes = [], currentIndex, onEpisodeChange, cachedEpisodeIndexes, onEpisodeMenuOpen, onEpisodeDownload, onlineQuality = 'auto', supportsOnlineQuality = false, onQualityChange, onOpenSettings, episodesOpen = false, onOpenEpisodes, onOpenDownloads, cacheNext = false, autoNext = false, autoDelete = false, playbackSettingsBusy = false, onToggleCacheNext, onToggleAutoNext, onToggleAutoDelete, onControlsHiddenChange, decoderMode = 'auto', onDecoderChange, decoderBusy = false }) {
-  useLanguage();
+  const languageKey = useLanguage();
   const mobile = window.electronAPI?.platform === 'android';
   const controlsIdleMs = 1000;
   const [media, setMedia] = useState({ paused: true, ended: false, time: 0, duration: 0, muted: false, volume: 1 });
@@ -166,9 +166,32 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
     setSelectionPanel(null);
     const video = videoRef.current;
     if (!video) return;
-    const sync = () => setMedia({ paused: video.paused, ended: video.ended, time: Number.isFinite(video.currentTime) ? video.currentTime : 0,
-      duration: Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0, muted: video.muted, volume: video.volume,
-      width: available ? video.videoWidth : 0, height: available ? video.videoHeight : 0 });
+    const sync = () => {
+      const rawTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+      const time = Math.round(rawTime * 10) / 10;
+      const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
+      const width = available ? video.videoWidth : 0;
+      const height = available ? video.videoHeight : 0;
+      setMedia(prev => (
+        prev.paused === video.paused &&
+        prev.ended === video.ended &&
+        prev.time === time &&
+        prev.duration === duration &&
+        prev.muted === video.muted &&
+        prev.volume === video.volume &&
+        prev.width === width &&
+        prev.height === height
+      ) ? prev : {
+        paused: video.paused,
+        ended: video.ended,
+        time,
+        duration,
+        muted: video.muted,
+        volume: video.volume,
+        width,
+        height,
+      });
+    };
     const events = ['play', 'pause', 'ended', 'timeupdate', 'loadedmetadata', 'durationchange', 'volumechange', 'emptied', 'resize'];
     events.forEach(name => video.addEventListener(name, sync));
     sync();
@@ -224,12 +247,13 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
       setDanmakuOpen(false); (mobile ? menuButtonRef : danmakuButtonRef).current?.focus();
     };
     measure();
-    const observer = new stageWindow.ResizeObserver(measure);
-    if (stageRef.current) observer.observe(stageRef.current);
-    if (controlsRef.current) observer.observe(controlsRef.current);
+    const Observer = stageWindow.ResizeObserver;
+    const observer = typeof Observer === 'function' ? new Observer(measure) : null;
+    if (stageRef.current) observer?.observe(stageRef.current);
+    if (controlsRef.current) observer?.observe(controlsRef.current);
     stageDocument.addEventListener('pointerdown', outside);
     stageDocument.addEventListener('keydown', escape);
-    return () => { observer.disconnect(); stageDocument.removeEventListener('pointerdown', outside); stageDocument.removeEventListener('keydown', escape); };
+    return () => { observer?.disconnect(); stageDocument.removeEventListener('pointerdown', outside); stageDocument.removeEventListener('keydown', escape); };
   }, [danmakuOpen, floating, stageRef]);
 
   useEffect(() => {
@@ -304,6 +328,37 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
     video.muted = video.volume === 0;
   };
 
+  const episodeMemoRef = useRef(null);
+  const episodeDeps = [episodes, cachedEpisodeIndexes, currentIndex, onEpisodeDownload, onEpisodeChange, languageKey];
+  if (!episodeMemoRef.current || episodeMemoRef.current.deps.some((val, i) => !Object.is(val, episodeDeps[i]))) {
+    episodeMemoRef.current = {
+      deps: episodeDeps,
+      value: episodes.map(episode => {
+        const index = episode.vid_index;
+        const downloaded = episode.status === 'completed' && !!episode.fileUrl;
+        const stored = episode.locked ? '' : downloaded ? '已下载' : cachedEpisodeIndexes?.has(index) ? '已缓存' : '';
+        const label = stored ? t("播放第 {0} 集，{1}", [index, t(stored)]) : t(`播放第 ${index} 集`);
+        const canDownload = !episode.locked && episode.status !== 'completed' && !!onEpisodeDownload;
+        const play = () => { setSelectionPanel(null); episodeButtonRef.current?.focus(); onEpisodeChange(index); };
+        return <button type="button" key={index} aria-label={label} aria-current={index === currentIndex ? 'true' : undefined}
+          disabled={episode.locked} title={episode.locked ? t("来源未开放本集") : canDownload ? t("{0} · 双击下载", [label]) : label}
+          onClick={event => {
+            clearTimeout(episodeClickTimer.current);
+            if (!canDownload || !event?.detail) play();
+            else episodeClickTimer.current = setTimeout(play, 250);
+          }}
+          onDoubleClick={canDownload ? () => {
+            clearTimeout(episodeClickTimer.current);
+            onEpisodeDownload(index);
+          } : undefined}>
+          {t(index)}{episode.locked && <small>{t("未开放")}</small>}
+          {stored && <Check size={13} className="player-episode-check" aria-hidden="true" />}
+        </button>;
+      }),
+    };
+  }
+  const episodeButtons = episodeMemoRef.current.value;
+
   return (
     <div className={`player-controls ${controlsHidden ? 'controls-hidden' : ''}`} role="group" aria-label={t("视频播放控制")}>
       {expanded && <div className="player-now-playing" aria-label={t("当前播放信息")}>
@@ -336,28 +391,7 @@ export default function PlayerControls({ danmaku, enhancement, shortcuts = DEFAU
           {selectionPanel === 'episodes' && <div className="player-controls-popover player-episode-popover" role="dialog" aria-label={t("选集面板")} style={{ maxHeight: selectionHeight }}>
             <div className="player-popover-heading"><strong>{t("选集")}</strong><span>{t("第 {0} 集 / 共 {1} 集", [currentIndex, episodes.length])}</span></div>
             <div className="player-episode-grid">
-              {episodes.map(episode => {
-                const index = episode.vid_index;
-                const downloaded = episode.status === 'completed' && !!episode.fileUrl;
-                const stored = episode.locked ? '' : downloaded ? '已下载' : cachedEpisodeIndexes?.has(index) ? '已缓存' : '';
-                const label = stored ? t("播放第 {0} 集，{1}", [index, t(stored)]) : t(`播放第 ${index} 集`);
-                const canDownload = !episode.locked && episode.status !== 'completed' && !!onEpisodeDownload;
-                const play = () => { setSelectionPanel(null); episodeButtonRef.current?.focus(); onEpisodeChange(index); };
-                return <button type="button" key={index} aria-label={label} aria-current={index === currentIndex ? 'true' : undefined}
-                  disabled={episode.locked} title={episode.locked ? t("来源未开放本集") : canDownload ? t("{0} · 双击下载", [label]) : label}
-                  onClick={event => {
-                    clearTimeout(episodeClickTimer.current);
-                    if (!canDownload || !event?.detail) play();
-                    else episodeClickTimer.current = setTimeout(play, 250);
-                  }}
-                  onDoubleClick={canDownload ? () => {
-                    clearTimeout(episodeClickTimer.current);
-                    onEpisodeDownload(index);
-                  } : undefined}>
-                  {t(index)}{episode.locked && <small>{t("未开放")}</small>}
-                  {stored && <Check size={13} className="player-episode-check" aria-hidden="true" />}
-                </button>;
-              })}
+              {episodeButtons}
             </div>
           </div>}
           {selectionPanel === 'quality' && <div className="player-controls-popover player-quality-popover" role="dialog" aria-label={t("清晰度面板")} style={{ maxHeight: selectionHeight }}>

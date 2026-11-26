@@ -113,13 +113,15 @@ function createSourcePackService({
 
   function persist(next = record) {
     const snapshot = JSON.stringify(next, null, 2);
-    writeChain = writeChain.then(async () => {
+    // 隔离前序写入异常，避免单次写盘失败导致后续持久化队列永久死锁
+    const nextWrite = writeChain.catch(() => {}).then(async () => {
       fs.mkdirSync(path.dirname(statePath), { recursive: true });
       const temp = `${statePath}.${process.pid}.tmp`;
       await fs.promises.writeFile(temp, snapshot, { mode: 0o600 });
       await fs.promises.rename(temp, statePath);
     });
-    return writeChain;
+    writeChain = nextWrite;
+    return nextWrite;
   }
 
   async function commit(nextRecord, nextActive) {

@@ -424,7 +424,7 @@ function loadDownloadTasks() {
     } catch (_) {}
   }
   if (migrated) {
-    try { saveDownloadTasks(); } catch (_) { /* The next user-approved save will retry the migration. */ }
+    try { saveDownloadTasks({ notify: false }); } catch (_) { /* The next user-approved save will retry the migration. */ }
   }
 }
 
@@ -486,7 +486,7 @@ function rebuildSeriesRegistryFromTasks() {
   }
 }
 
-function saveDownloadTasks() {
+function saveDownloadTasks({ notify = true } = {}) {
   invalidateSeriesProgress();
   const serializable = downloadTasks.map((task) => {
     const { cancelSource, writer, ...rest } = task;
@@ -494,7 +494,7 @@ function saveDownloadTasks() {
     return rest;
   });
   store.saveTasks(serializable);
-  sendToRenderer('download-queue-changed', {});
+  if (notify) sendToRenderer('download-queue-changed', {});
 }
 
 /** 重试/继续类操作在持久化失败时恢复任务字段与队列，避免未保存的任务随后被启动。 */
@@ -574,7 +574,9 @@ function upsertSeriesRegistry(data, { bindPlayback = true } = {}) {
   }
   else {
     const previous = seriesRegistry[idx];
-    const record = bindPlayback ? store.getPlayback?.()?.[sid] : null;
+    const record = bindPlayback
+      ? (typeof store.getPlaybackItem === 'function' ? store.getPlaybackItem(sid) : store.getPlayback?.()?.[sid])
+      : null;
     if (record && (!record.episode_id || (record.completedEpisode && !record.completedEpisodeId))) {
       const bound = watchHistory.bindPlaybackEpisodes(record, previous);
       if (bound.episode_id !== record.episode_id || bound.completedEpisodeId !== record.completedEpisodeId) {
@@ -755,7 +757,6 @@ function armSourceRetry(task) {
       sendToRenderer('download-queue-changed', {});
       return;
     }
-    sendToRenderer('download-queue-changed', {});
     pumpQueue();
   }, Math.max(1000, at - Date.now())));
 }
@@ -801,7 +802,6 @@ function pauseAllTasks() {
     try { task.writer?.destroy(); } catch (_) {}
     delete task.cancelSource; delete task.writer;
   }
-  sendToRenderer('download-queue-changed', {});
   return tasks.length;
 }
 
@@ -833,8 +833,9 @@ function resumeAllTasks() {
     try { saveDownloadTasks(); }
     catch (error) { restoreQueueTasks(snapshot); throw error; }
     pumpQueue();
+  } else {
+    sendToRenderer('download-queue-changed', {});
   }
-  sendToRenderer('download-queue-changed', {});
   return count;
 }
 
@@ -911,8 +912,7 @@ async function verifyDownloadQuality(file, quality, existing = false, verifyDeco
   return `${Math.min(info.w, info.h)}p`;
 }
 
-function publishDownloadFile(temporary, destination) {
-  // A hard link would change the final file's ctime when deferred temporary cleanup runs.
+async function publishDownloadFile(temporary, destination) {
   fs.copyFileSync(temporary, destination, fs.constants.COPYFILE_EXCL);
 }
 
@@ -976,7 +976,7 @@ async function executeHongguoDownload(task) {
       fs.mkdirSync(downloadDir, { recursive: true });
       if (!task.directoryIdentity) {
         task.directoryIdentity = readDirectoryIdentity(downloadDir);
-        if (downloadTasks.includes(task)) saveDownloadTasks();
+        if (downloadTasks.includes(task)) saveDownloadTasks({ notify: false });
       }
     }
     // Recheck source access before reusing an existing third-party file or URL.
@@ -1001,7 +1001,7 @@ async function executeHongguoDownload(task) {
       if (!downloadTasks.includes(task) || task.temporaryDownloads != null && !Array.isArray(task.temporaryDownloads)) throw new Error('任务记录已变化，已保留文件和记录，请重试');
       task.temporaryDownloads ||= [];
       if (!task.temporaryDownloads.includes(record)) task.temporaryDownloads.push(record);
-      saveDownloadTasks();
+      saveDownloadTasks({ notify: false });
     } });
     tmpPath = temporary.input;
     const sourceId = /^custom:[^:]+/.exec(String(vid))?.[0] || /^(xifan|hema|reelshort|dramabox):/.exec(String(vid))?.[1] || 'hongguo';
@@ -1036,7 +1036,7 @@ async function executeHongguoDownload(task) {
         await temporary.checkInput();
         source.token.throwIfRequested();
         checkCustomAccess(vid);
-        publishDownloadFile(tmpPath, finalPath);
+        await publishDownloadFile(tmpPath, finalPath);
         task.receivedBytes = task.totalBytes = cached.size;
         cached.lastUsed = Date.now();
         return true;
@@ -1098,7 +1098,7 @@ async function executeHongguoDownload(task) {
         task.actualQuality = await verifyReceived(tmpPath, playInfo.duration);
         await temporary.checkInput();
         source.token.throwIfRequested(); checkCustomAccess(vid);
-        publishDownloadFile(tmpPath,finalPath);
+        await publishDownloadFile(tmpPath,finalPath);
         return;
       }
       const response = await requestMedia(playInfo, { cancelToken: source.token });
@@ -1124,13 +1124,21 @@ async function executeHongguoDownload(task) {
         try {
           if (playInfo.codec === 'bytevc2') {
             const notice = task.qualityNotice;
-            let conversionMeta;
+            let conversionMeta, lastSentProgress = -1, lastSentNotice = '', lastProgressAt = 0;
             const progress = (seconds, phase = 'transcoding', meta = conversionMeta) => {
               conversionMeta = meta;
-              task.progress = Math.min(99, Math.floor(seconds / playInfo.duration * 100));
-              task.qualityNotice = phase === 'queued' ? '视频已下载，等待其他视频转换完成'
+              const nextProgress = Math.min(99, Math.floor(seconds / playInfo.duration * 100));
+              const nextNotice = phase === 'queued' ? '视频已下载，等待其他视频转换完成'
                 : conversionNotice(meta) || '视频已下载，正在转换为可播放格式';
-              sendToRenderer('download-progress', { id, progress: task.progress, qualityNotice: task.qualityNotice });
+              task.progress = nextProgress;
+              task.qualityNotice = nextNotice;
+              const now = Date.now();
+              if (nextNotice !== lastSentNotice || (nextProgress !== lastSentProgress && now - lastProgressAt >= 150)) {
+                lastSentProgress = nextProgress;
+                lastSentNotice = nextNotice;
+                lastProgressAt = now;
+                sendToRenderer('download-progress', { id, progress: task.progress, qualityNotice: task.qualityNotice });
+              }
             };
             try {
               await convertBytevc2({ executable: bytevc2Executable, input: tmpPath, output: decodedPath,
@@ -1145,7 +1153,7 @@ async function executeHongguoDownload(task) {
           task.actualQuality = await verifyReceived(decodedPath, playInfo.duration);
           await temporary.checkOutput();
           source.token.throwIfRequested();
-          publishDownloadFile(decodedPath, finalPath);
+          await publishDownloadFile(decodedPath, finalPath);
         } catch (error) {
           await temporary.removeOutput().catch(() => {});
           throw error;
@@ -1161,7 +1169,7 @@ async function executeHongguoDownload(task) {
           task.actualQuality = await verifyReceived(decodedPath, playInfo.duration);
           await temporary.checkOutput();
           source.token.throwIfRequested();
-          publishDownloadFile(decodedPath, finalPath);
+          await publishDownloadFile(decodedPath, finalPath);
         }
         catch (error) {
           await temporary.removeOutput().catch(() => {});
@@ -1171,7 +1179,7 @@ async function executeHongguoDownload(task) {
         task.actualQuality = await verifyReceived(tmpPath, playInfo.duration);
         await temporary.checkInput();
         source.token.throwIfRequested();
-        publishDownloadFile(tmpPath, finalPath);
+        await publishDownloadFile(tmpPath, finalPath);
       }
     });
     task.published = true;
@@ -1242,7 +1250,7 @@ async function executeHongguoDownload(task) {
       if (!result?.missing) console.warn('下载临时文件未清理完毕，已保留身份记录供后续安全清理');
       if (result?.missing) {
         task.temporaryDownloads = task.temporaryDownloads.filter(record => record !== temporary.record);
-        try { saveDownloadTasks(); } catch (_) { /* The stored receipt remains recoverable on restart. */ }
+        try { saveDownloadTasks({ notify: false }); } catch (_) { /* The stored receipt remains recoverable on restart. */ }
       }
     }
     if (task.cancelSource === source) delete task.cancelSource;
@@ -1428,6 +1436,8 @@ const BROWSE_META_JS = `(() => {
 async function runSniffOnUrl(url, label, { deadline = 0 } = {}) {
   // 同一窗口串行执行，避免并发导航互相打断
   const task = async () => {
+    clearTimeout(runSniffOnUrl._idleTimer);
+    runSniffOnUrl._idleTimer = null;
     const budget = deadline > 0 ? Math.min(SEARCH_TIMEOUT_MS, deadline - Date.now()) : SEARCH_TIMEOUT_MS;
     if (budget <= 0) throw new Error('搜索超时，请稍后重试');
     const win = getSearchWindow(true);
@@ -1525,7 +1535,18 @@ async function runSniffOnUrl(url, label, { deadline = 0 } = {}) {
       return { success: true, results, meta };
     };
     try { return await Promise.race([sniff(), timeout]); }
-    finally { clearTimeout(timer); }
+    finally {
+      clearTimeout(timer);
+      clearTimeout(runSniffOnUrl._idleTimer);
+      if (typeof sniffWindow !== 'undefined' && sniffWindow && !sniffWindow.isDestroyed()) {
+        const idle = setTimeout(() => {
+          runSniffOnUrl._idleTimer = null;
+          if (typeof sniffWindow !== 'undefined' && sniffWindow && !sniffWindow.isDestroyed()) sniffWindow.destroy();
+        }, 60 * 1000);
+        idle.unref?.();
+        runSniffOnUrl._idleTimer = idle;
+      }
+    }
   };
 
   // 串行化；deadline 同时覆盖排队时间，避免排队后又拿到完整的 15 秒。
@@ -1576,7 +1597,7 @@ async function invalidateCustomSource(id) {
 }
 ipcMain.handle('get-custom-sources', async () => ({success:true,sources:getCurrentSettings().custom_sources || []}));
 ipcMain.handle('get-media-sources', async () => ({ success: true, sources: require('./src/native/media-sources').getMediaSources(getCurrentSettings()) }));
-ipcMain.handle('set-builtin-source-enabled', async (_event, id, enabled) => {
+ipcMain.handle('set-builtin-source-enabled', (_event, id, enabled) => enqueueSettingsMutation(async () => {
   try {
     store.saveSettings(require('./src/native/media-sources').setBuiltinSourceEnabled(getCurrentSettings(), id, enabled));
     for (const win of new Set([mainWindow, ...BrowserWindow.getAllWindows()])) {
@@ -1584,8 +1605,8 @@ ipcMain.handle('set-builtin-source-enabled', async (_event, id, enabled) => {
     }
     return { success: true };
   } catch (error) { return { success: false, error: error.message }; }
-});
-ipcMain.handle('save-custom-source', async (_event,draft) => {
+}));
+ipcMain.handle('save-custom-source', (_event,draft) => enqueueSettingsMutation(async () => {
   try {
     const source = require('./src/native/custom-source').validateSource(draft);
     const settings = getCurrentSettings(), sources = settings.custom_sources || [];
@@ -1596,15 +1617,15 @@ ipcMain.handle('save-custom-source', async (_event,draft) => {
     await invalidateCustomSource(source.id);
     return {success:true,source};
   } catch (error) { return {success:false,error:error.message}; }
-});
-ipcMain.handle('delete-custom-source', async (_event,id) => {
+}));
+ipcMain.handle('delete-custom-source', (_event,id) => enqueueSettingsMutation(async () => {
   try {
     const settings = getCurrentSettings();
     if (!(settings.custom_sources || []).some(source => source.id === id)) throw new Error('播放源不存在');
     store.saveSettings({...settings,custom_sources:settings.custom_sources.filter(source => source.id !== id)});
     await invalidateCustomSource(id); return {success:true};
   } catch (error) { return {success:false,error:error.message}; }
-});
+}));
 ipcMain.handle('test-custom-source', async (_event,draft) => {
   try { return await require('./src/native/custom-source').testCustomSource(draft); }
   catch (error) { return {success:false,error:error.message}; }
@@ -2178,29 +2199,42 @@ const mergeRuns = new Map();
 
 function resolveFfmpeg(name) {
   const executable = process.platform === 'win32' ? `${name}.exe` : name;
+  const checkExecutable = candidate => {
+    if (!candidate) return false;
+    try {
+      fs.accessSync(candidate, process.platform === 'win32' ? fs.constants.F_OK : fs.constants.X_OK);
+      return fs.statSync(candidate).isFile();
+    } catch (_) { return false; }
+  };
   // 正式包只用随包二进制。PATH / WinGet 只留给开发运行，避免打包后误用系统上的任意同名程序。
   const devLookup = typeof app !== 'undefined' && app.isPackaged !== true;
-  const candidates = [
+  const bundledCandidates = [
     // 可执行资源必须位于 asar 外；Finder 启动不依赖终端的 PATH。
     process.resourcesPath ? path.join(process.resourcesPath, 'bin', executable) : null,
     path.join(__dirname, 'build', 'ffmpeg', `${process.platform}-${process.arch}`, executable),
     path.join(__dirname, 'build', 'ffmpeg', executable),
   ];
-  if (devLookup) {
-    for (const dir of (process.env.PATH || '').split(path.delimiter)) {
-      const bare = process.platform === 'win32' ? dir.replace(/^"(.*)"$/, '$1') : dir;
-      if (bare) candidates.push(path.join(bare, executable));
+  for (const c of bundledCandidates) {
+    if (checkExecutable(c)) return c;
+  }
+  if (!devLookup) return null;
+  // 开发模式下按环境变量快照缓存命中结果并在返回前核验文件存在性，避免高频重复扫描 PATH 与 WinGet 目录
+  resolveFfmpeg._devCache ||= new Map();
+  const cacheKey = `${name}\0${process.env.PATH || ''}\0${process.env.LOCALAPPDATA || ''}`;
+  const cached = resolveFfmpeg._devCache.get(cacheKey);
+  if (cached && checkExecutable(cached)) return cached;
+  if (cached) resolveFfmpeg._devCache.delete(cacheKey);
+  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
+    const bare = process.platform === 'win32' ? dir.replace(/^"(.*)"$/, '$1') : dir;
+    if (!bare) continue;
+    const candidate = path.join(bare, executable);
+    if (checkExecutable(candidate)) {
+      resolveFfmpeg._devCache.set(cacheKey, candidate);
+      return candidate;
     }
   }
-  for (const c of candidates) {
-    if (!c) continue;
-    try {
-      fs.accessSync(c, process.platform === 'win32' ? fs.constants.F_OK : fs.constants.X_OK);
-      if (fs.statSync(c).isFile()) return c;
-    } catch (_) {}
-  }
   // 兜底：开发时扫 winget 安装目录
-  if (!devLookup || process.platform !== 'win32' || !process.env.LOCALAPPDATA) return null;
+  if (process.platform !== 'win32' || !process.env.LOCALAPPDATA) return null;
   try {
     const base = path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WinGet', 'Packages');
     if (base && fs.existsSync(base)) {
@@ -2208,7 +2242,10 @@ function resolveFfmpeg(name) {
         if (!/ffmpeg/i.test(d)) continue;
         const exe = path.join(base, d);
         const found = findFileRecursive(exe, `${name}.exe`, 6);
-        if (found) return found;
+        if (found && checkExecutable(found)) {
+          resolveFfmpeg._devCache.set(cacheKey, found);
+          return found;
+        }
       }
     }
   } catch (_) {}
@@ -2442,6 +2479,7 @@ function quarantineAndRemove(file) {
     const stat = fs.lstatSync(quarantine);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('文件类型已变化');
     fs.unlinkSync(quarantine);
+    mediaAccess.revoke?.(original);
     return { count: 1, freed: stat.size, failed: 0 };
   } catch (error) {
     if (fs.existsSync(quarantine)) restoreQuarantinedFile(quarantine, original);
@@ -3248,6 +3286,7 @@ ipcMain.handle('get-playback-position', async (event, seriesId) => {
   const sid = String(seriesId);
   const accountResume = accountController.takeResumePosition(sid);
   if (accountResume) return accountResume;
+  if (typeof store.getPlaybackItem === 'function') return store.getPlaybackItem(sid);
   const map = store.getPlayback() || {};
   return map[sid] || null;
 });
@@ -3575,10 +3614,16 @@ function registerStreamProtocol() {
           headers: range ? { Range: range } : {}, validateStatus: status => [200, 206, 416].includes(status) });
         try { checkIdentity(); } catch (error) { upstream.data.destroy(); throw error; }
         entry.playInfo = playInfo;
+        const destroyUpstream = () => upstream.data.destroy();
+        controller.signal.addEventListener('abort', destroyUpstream, { once: true });
         upstream.data.once('error', () => {
           if (!controller.signal.aborted) hongguo.markWebMediaFailure?.(playInfo);
         });
-        upstream.data.once('close', cleanup);
+        upstream.data.once('close', () => {
+          controller.signal.removeEventListener('abort', destroyUpstream);
+          cleanup();
+        });
+        if (controller.signal.aborted) destroyUpstream();
         const headers = { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' };
         for (const name of ['content-length', 'content-range', 'accept-ranges']) {
           if (upstream.headers[name]) headers[name] = upstream.headers[name];
@@ -3614,13 +3659,18 @@ function localPlayUrl(filePath, validate) {
  * 「Not allowed to load local resource」拒绝 file:// 请求（表现为播放器黑屏、进度 0:00）。
  * 走自定义协议后开发/打包两种模式行为一致，并且支持 Range 拖动进度。
  */
-function localMediaBody(file, options) {
+function localMediaBody(file, options, signal) {
   const stream = fs.createReadStream(file, options);
   localFileReaders.set(file, (localFileReaders.get(file) || 0) + 1);
+  const onAbort = () => stream.destroy();
+  signal?.addEventListener('abort', onAbort, { once: true });
+  stream.on('error', () => stream.destroy());
   stream.once('close', () => {
-    const remaining = localFileReaders.get(file) - 1;
-    if (remaining) localFileReaders.set(file, remaining); else localFileReaders.delete(file);
+    signal?.removeEventListener('abort', onAbort);
+    const remaining = (localFileReaders.get(file) || 1) - 1;
+    if (remaining > 0) localFileReaders.set(file, remaining); else localFileReaders.delete(file);
   });
+  if (signal?.aborted) stream.destroy();
   return Readable.toWeb(stream);
 }
 
@@ -3629,7 +3679,7 @@ function registerLocalProtocol() {
     try {
       if (!['GET', 'HEAD'].includes(request.method)) return new Response(null, { status: 405 });
       const filePath = mediaAccess.resolveLocal(request.url);
-      if (!filePath || !mediaAccess.isValid(request.url)) {
+      if (!filePath || !(await mediaAccess.isValidAsync(request.url))) {
         return new Response('bad path', { status: 400, headers: { 'Content-Type': 'text/plain' } });
       }
       // 只允许取视频文件，避免该协议被用来读取任意本地文件
@@ -3649,7 +3699,7 @@ function registerLocalProtocol() {
       if (range === false) return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } });
       if (range) {
         const { start, end } = range;
-        return new Response(request.method === 'HEAD' ? null : localMediaBody(filePath, { start, end }), {
+        return new Response(request.method === 'HEAD' ? null : localMediaBody(filePath, { start, end }, request.signal), {
           status: 206,
           headers: {
             'Content-Type': 'video/mp4',
@@ -3660,7 +3710,7 @@ function registerLocalProtocol() {
         });
       }
 
-      return new Response(request.method === 'HEAD' ? null : localMediaBody(filePath), {
+      return new Response(request.method === 'HEAD' ? null : localMediaBody(filePath, undefined, request.signal), {
         status: 200,
         headers: {
           'Content-Type': 'video/mp4',
@@ -3789,7 +3839,7 @@ async function fetchDecryptedEpisodeOnce(vid, onProgress, seriesId, playInfo, si
     if (onProgress) onProgress(buf.length, buf.length, 'decrypting');
     const key = hongguo.deriveKey(playInfo.spadeA);
     if (!key) throw new Error('密钥派生失败');
-    buf = await decryptInWorker({ buffer: buf, key }, { signal });
+    buf = await decryptInWorker({ buffer: buf, key }, { signal, transferInput: true });
   }
   return buf;
 }
@@ -3811,6 +3861,15 @@ ipcMain.handle('prepare-online-play', async (event, payload) => {
   let quality;
   try { quality = playbackQuality(payload.quality, vid); } catch (error) { return { success: false, error: error.message }; }
   const sourceVid = String(vid), key = onlineCacheKey(sourceVid, quality), streamId = randomUUID();
+  // 淘汰已无在途请求和准备任务的最旧空闲会话，防止异常未释放时无限累积
+  while (onlineSessions.size >= 32) {
+    let evictId = null;
+    for (const [candidateId, candidate] of onlineSessions) {
+      if (candidate.requests.size === 0 && !candidate.job) { evictId = candidateId; break; }
+    }
+    if (!evictId) break;
+    releaseOnlineSession(evictId);
+  }
   const session = { vid: sourceVid, seriesId: String(seriesId || ''), vidIndex: Number(vidIndex), cacheKey: key, requestId, prefetch, requests: new Set(), entry: null };
   onlineSessions.set(streamId, session);
   try {
@@ -4037,16 +4096,18 @@ function compatPathFor(seriesId, vidIndex, quality = 'auto', episodeId) {
 }
 
 function compatCacheStatus() {
-  const dir = getCompatDir();
-  let files = 0;
-  let bytes = 0;
-  try {
-    for (const f of fs.readdirSync(dir)) {
-      if (!f.endsWith('.mp4') || f.startsWith('.tmp_')) continue;
-      try { bytes += fs.statSync(path.join(dir, f)).size; files++; } catch (_) {}
-    }
-  } catch (_) {}
-  return { dir, files, bytes };
+  return (async () => {
+    const dir = getCompatDir();
+    let files = 0;
+    let bytes = 0;
+    try {
+      for (const f of await fsp.readdir(dir)) {
+        if (!f.endsWith('.mp4') || f.startsWith('.tmp_')) continue;
+        try { bytes += (await fsp.stat(path.join(dir, f))).size; files++; } catch (_) {}
+      }
+    } catch (_) {}
+    return { dir, files, bytes };
+  })();
 }
 
 function trimCompatCache(currentOutput) {
@@ -4058,13 +4119,17 @@ function trimCompatCache(currentOutput) {
   }
   let entries = [];
   try {
-    entries = fs.readdirSync(dir)
+    entries = fs
+      .readdirSync(dir)
       .filter((f) => f.endsWith('.mp4') && !f.startsWith('.tmp_'))
       .map((f) => {
-        const p = path.join(dir, f);
-        const st = fs.statSync(p);
-        return { p, size: st.size, at: st.atimeMs || st.mtimeMs };
-      });
+        try {
+          const p = path.join(dir, f);
+          const st = fs.statSync(p);
+          return { p, size: st.size, at: st.atimeMs || st.mtimeMs };
+        } catch (_) { return null; }
+      })
+      .filter(Boolean);
   } catch (_) { return; }
   let total = entries.reduce((s, e) => s + e.size, 0);
   if (total <= COMPAT_MAX_BYTES) return;
@@ -4072,7 +4137,7 @@ function trimCompatCache(currentOutput) {
   for (const e of entries) {
     if (total <= COMPAT_MAX_BYTES) break;
     if (protectedFiles.has(e.p)) continue;
-    try { fs.unlinkSync(e.p); total -= e.size; } catch (_) {}
+    try { fs.unlinkSync(e.p); mediaAccess.revoke?.(e.p); total -= e.size; } catch (_) {}
   }
 }
 
@@ -4325,6 +4390,8 @@ async function transcodeForPlayback(payload, job = { controller: new AbortContro
         signal.addEventListener('abort', abort, { once: true });
         if (signal.aborted) abort();
         let buf = '';
+        let lastPct = -1;
+        let lastReportAt = 0;
         child.stdout.on('data', (d) => {
           buf += d.toString();
           const lines = buf.split('\n');
@@ -4334,7 +4401,12 @@ async function transcodeForPlayback(payload, job = { controller: new AbortContro
             if (m && duration > 0) {
               const sec = parseInt(m[1], 10) / 1e6;
               const pct = Math.max(0, Math.min(99, Math.floor((sec / duration) * 100)));
-              reportProgress({ seriesId: String(seriesId), vidIndex: Number(vidIndex), percent: pct, ...(notice ? {notice} : {}) });
+              const now = Date.now();
+              if (pct !== lastPct && now - lastReportAt >= 150) {
+                lastPct = pct;
+                lastReportAt = now;
+                reportProgress({ seriesId: String(seriesId), vidIndex: Number(vidIndex), percent: pct, ...(notice ? {notice} : {}) });
+              }
             }
           }
         });
@@ -4382,13 +4454,13 @@ async function transcodeForPlayback(payload, job = { controller: new AbortContro
     signal.removeEventListener('abort', abortPreparation);
     if (diskInput) { diskInput.disk.readers--; disposeOnlineDisk(diskInput); }
     for (const temporary of [tmpInput, tmpOut]) {
-      if (temporary) { try { await fsp.unlink(temporary); } catch (_) {} }
+      if (temporary && fs.existsSync(temporary)) { try { fs.unlinkSync(temporary); } catch (_) {} }
     }
   }
 }
 
 ipcMain.handle('compat-cache-status', async () => {
-  const st = compatCacheStatus();
+  const st = await compatCacheStatus();
   return { success: true, ...st, maxBytes: COMPAT_MAX_BYTES };
 });
 
@@ -4396,14 +4468,20 @@ ipcMain.handle('clear-compat-cache', async () => {
   if (compatClearing) return compatClearing;
   const jobs = [...compatPreparing.values()];
   for (const job of jobs) cancelCompatJob(job);
-  const clearing = Promise.all(jobs.map(job => job.promise)).then(() => {
+  const clearing = Promise.all(jobs.map(job => job.promise)).then(async () => {
     const dir = getCompatDir();
     let freed = 0, count = 0, failed = 0;
     try {
-      for (const f of fs.readdirSync(dir)) {
+      for (const f of await fsp.readdir(dir)) {
         if (!f.endsWith('.mp4') && !f.endsWith('.part')) continue;
         const p = path.join(dir, f);
-        try { const size = fs.statSync(p).size; fs.unlinkSync(p); freed += size; count++; } catch (_) { failed++; }
+        try {
+          const size = (await fsp.stat(p)).size;
+          await fsp.unlink(p);
+          mediaAccess.revoke?.(p);
+          freed += size;
+          count++;
+        } catch (_) { failed++; }
       }
     } catch (_) { failed++; }
     return { success: failed === 0, count, freed, error: failed ? '部分兼容缓存删除失败，请稍后重试' : undefined };
@@ -4861,6 +4939,12 @@ function applyEditableSettings(current, incoming) {
     if (key === 'proxy_password') continue;
     if (Object.prototype.hasOwnProperty.call(source, key)) merged[key] = source[key];
   }
+  if (Object.prototype.hasOwnProperty.call(source, 'root')) {
+    if (typeof source.root !== 'string') throw new Error('下载保存目录路径无效');
+    const trimmedRoot = source.root.trim();
+    if (trimmedRoot && !path.isAbsolute(trimmedRoot)) throw new Error('下载保存目录必须为绝对路径');
+    merged.root = trimmedRoot || current.root;
+  }
   if (Object.prototype.hasOwnProperty.call(source, 'stealth_wake_region')) merged.stealth_wake_region = validateStealthWakeRegion(source.stealth_wake_region);
   if (Object.prototype.hasOwnProperty.call(source, 'export_text')) merged.export_text = normalizeTextExportKinds(source.export_text);
   if (Object.prototype.hasOwnProperty.call(source, 'playback_source_order')) {
@@ -4879,7 +4963,7 @@ ipcMain.handle('get-playback-source-order', () => ({
   order: playbackSourceOrder.getSourceOrder(),
   availability: { sdk: sdkPlaybackAvailable() },
 }));
-ipcMain.handle('set-playback-source-order', async (_event, value) => {
+ipcMain.handle('set-playback-source-order', (_event, value) => enqueueSettingsMutation(async () => {
   try {
     const order = playbackSourceOrder.normalizeSourceOrder(value);
     store.saveSettings({ ...getCurrentSettings(), playback_source_order: order });
@@ -4888,7 +4972,7 @@ ipcMain.handle('set-playback-source-order', async (_event, value) => {
   } catch (error) {
     return { success: false, error: error.message };
   }
-});
+}));
 
 async function saveSettings(settings) {
   try {
@@ -4928,11 +5012,12 @@ async function saveSettings(settings) {
 }
 
 let settingsSaveQueue = Promise.resolve();
-ipcMain.handle('save-settings', (_event, settings) => {
-  const result = settingsSaveQueue.then(() => saveSettings(settings));
+function enqueueSettingsMutation(run) {
+  const result = settingsSaveQueue.then(() => run());
   settingsSaveQueue = result.catch(() => {});
   return result;
-});
+}
+ipcMain.handle('save-settings', (_event, settings) => enqueueSettingsMutation(() => saveSettings(settings)));
 
 // ===== IPC：网络代理 =====
 ipcMain.handle('get-proxy-status', async () => {
@@ -5458,6 +5543,9 @@ ipcMain.handle('stop-download', async (event, taskId) => {
 ipcMain.handle('retry-task', async (event, taskId) => {
   const task = downloadTasks.find((t) => t.id === taskId);
   if (!task) return { success: false, error: '任务不存在' };
+  if (['failed', 'stopped'].includes(task.status) && downloadRuns.has(task.id)) {
+    await downloadRuns.get(task.id);
+  }
   if (!['failed', 'stopped'].includes(task.status) && !(task.status === 'completed' && !hasCompleteTaskFile(task))) return { success: false, error: '任务仍在进行中或已完成' };
 
   const snapshot = snapshotQueueTasks([task]);
@@ -5482,6 +5570,11 @@ ipcMain.handle('retry-task', async (event, taskId) => {
 
 ipcMain.handle('retry-tasks', async (event, taskIds) => {
   if (!Array.isArray(taskIds) || taskIds.length === 0) return { success: false, error: '没有要重试的任务' };
+  const windingDown = taskIds
+    .map(id => downloadTasks.find(t => t.id === id))
+    .filter(t => t && ['failed', 'stopped'].includes(t.status) && downloadRuns.has(t.id))
+    .map(t => downloadRuns.get(t.id));
+  if (windingDown.length) await Promise.allSettled(windingDown);
   let count = 0;
   const changed = [];
   for (const taskId of taskIds) {
@@ -5516,7 +5609,13 @@ ipcMain.handle('retry-tasks', async (event, taskIds) => {
 ipcMain.handle('pause-all', async () => ({ success: true, count: pauseAllTasks() }));
 
 ipcMain.handle('resume-all', async () => {
-  try { return { success: true, count: resumeAllTasks() }; }
+  try {
+    const windingDown = downloadTasks
+      .filter(t => ['failed', 'stopped'].includes(t.status) && downloadRuns.has(t.id))
+      .map(t => downloadRuns.get(t.id));
+    if (windingDown.length) await Promise.allSettled(windingDown);
+    return { success: true, count: resumeAllTasks() };
+  }
   catch (error) { return { success: false, count: 0, error: error.message }; }
 });
 
@@ -5569,6 +5668,14 @@ ipcMain.handle('open-folder', async (event, taskId) => {
   if (task.savePath) {
     const parentDir = path.dirname(task.savePath);
     if (fs.existsSync(parentDir)) {
+      try {
+        if (task.directoryIdentity) validateDirectoryIdentity(task.directoryIdentity, task.savePath);
+        const stat = fs.lstatSync(parentDir);
+        if (!stat.isDirectory() || stat.isSymbolicLink()) return { success: false, error: '路径不存在' };
+        if (!task.directoryIdentity && !isInsideMediaRoot(parentDir)) return { success: false, error: '只能打开下载目录中的文件夹' };
+      } catch (_) {
+        return { success: false, error: '下载目录不可用或挂载已变化，已保留文件和任务记录；请确认原目录后重试' };
+      }
       await shell.openPath(parentDir);
       return { success: true };
     }
@@ -5825,7 +5932,7 @@ function applyAppIcon(iconId) {
   }
 }
 
-ipcMain.handle('set-app-icon', (_event, iconId) => {
+ipcMain.handle('set-app-icon', (_event, iconId) => enqueueSettingsMutation(() => {
   if (typeof iconId !== 'string' || !APP_ICON_IDS.has(iconId)) {
     return { success: false, error: '请选择有效的应用图标' };
   }
@@ -5834,7 +5941,7 @@ ipcMain.handle('set-app-icon', (_event, iconId) => {
   applyAppIcon(iconId);
   sendToRenderer('app-icon-changed', iconId);
   return { success: true, icon: iconId };
-});
+}));
 
 ipcMain.handle('set-interface-language', (_event, language) => {
   if (!['zh-CN', 'en'].includes(language)) return { success: false, error: 'Unsupported interface language' };
@@ -6035,6 +6142,13 @@ function createWindow() {
   mainWindow.webContents.once('did-finish-load', () => {
     if (storageError) sendToRenderer('storage-error', storageError);
   });
+  // 页面重载或渲染进程崩溃时主动回收遗留的在线播放会话
+  mainWindow.webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) clearOnlineCache();
+  });
+  mainWindow.webContents.on('render-process-gone', () => {
+    clearOnlineCache();
+  });
 
   // 开发模式加载 vite dev server，生产模式加载打包产物
   const devUrl = process.env.VITE_DEV_SERVER_URL;
@@ -6077,6 +6191,11 @@ function createWindow() {
 // ===== 应用生命周期 =====
 // Remote pages get no permissions; the trusted player keeps fullscreen and clipboard controls.
 app.on('web-contents-created', (_event, contents) => {
+  const configured = (app.__hgPermissionSessions ||= new WeakSet());
+  if (contents?.session && typeof contents.session === 'object') {
+    if (configured.has(contents.session)) return;
+    configured.add(contents.session);
+  }
   const allowed = (webContents, permission, details) => ['fullscreen', 'clipboard-read', 'clipboard-sanitized-write'].includes(permission)
     && details?.isMainFrame === true && rendererSecurity.isTrustedUrl(details.requestingUrl)
     && rendererSecurity.isTrustedSender({ sender: webContents, senderFrame: webContents?.mainFrame }, mainWindow);

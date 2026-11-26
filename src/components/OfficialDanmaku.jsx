@@ -170,7 +170,7 @@ export default function OfficialDanmaku({ videoRef, source, available, danmaku }
         setItems([...state.items]);
       }
       paint();
-      if (emitting || state.items.length) frame = requestAnimationFrame(tick);
+      if ((emitting && list.length > 0) || state.items.length > 0) frame = requestAnimationFrame(tick);
     };
     const start = () => { if (!frame && canAnimate()) frame = requestAnimationFrame(tick); };
     const stop = () => { cancelAnimationFrame(frame); frame = 0; lastFrame = undefined; };

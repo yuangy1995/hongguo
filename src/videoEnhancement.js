@@ -77,6 +77,9 @@ export async function createAnime4KRenderer(video, canvas, { signal, onError }) 
     signal.removeEventListener('abort', dispose);
     uploader?.dispose();
     context?.unconfigure();
+    // 释放 2x 超分画布的后备显存缓冲
+    canvas.width = 0;
+    canvas.height = 0;
     device.destroy();
   };
   if (signal.aborted) { dispose(); signal.throwIfAborted(); }

@@ -96,17 +96,7 @@ export default function App({ platformPages = {} }) {
     setStorageError(data === null ? '' : data?.error || '数据保存失败，请检查磁盘空间和目录权限后重试。');
   }), []);
 
-  // 主进程发来的导航指令（例如浏览页点「立即播放」）
-  useEffect(() => {
-    if (!window.electronAPI.onNavigate) return undefined;
-    return window.electronAPI.onNavigate((data) => {
-      if (!data || !data.page) return;
-      if (data.payload) setPlayerTarget({ ...data.payload, ts: Date.now() });
-      navigate(data.page);
-    });
-  }, []);
-
-  const navigate = (nextPage) => {
+  const navigate = useCallback((nextPage) => {
     setMoreOpen(false);
     if (mobile && nextPage !== pageRef.current) {
       if (!backNavigation.current) navigationHistory.current.push(nextPage);
@@ -121,7 +111,17 @@ export default function App({ platformPages = {} }) {
     if (nextPage === 'player' || (nextPage === 'feed' && !floatingPlayer.current)) setPlayerMounted(nextPage === 'player');
     setVisited((pages) => pages.includes(nextPage) ? pages : [...pages, nextPage]);
     setPage(nextPage);
-  };
+  }, [mobile]);
+
+  // 主进程发来的导航指令（例如浏览页点「立即播放」）
+  useEffect(() => {
+    if (!window.electronAPI.onNavigate) return undefined;
+    return window.electronAPI.onNavigate((data) => {
+      if (!data || !data.page) return;
+      if (data.payload) setPlayerTarget({ ...data.payload, ts: Date.now() });
+      navigate(data.page);
+    });
+  }, [navigate]);
 
   useEffect(() => {
     if (!mobile) return;
@@ -139,7 +139,7 @@ export default function App({ platformPages = {} }) {
       return false;
     };
     return () => { delete window.appBack; };
-  }, [mobile, moreOpen, episodesOpen]);
+  }, [mobile, moreOpen, episodesOpen, navigate]);
 
   const renderPage = (id) => {
     switch (id) {

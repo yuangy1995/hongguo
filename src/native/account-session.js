@@ -186,13 +186,18 @@ function secureSessionStore({ filePath, safeStorage }) {
     save(credentials) {
       if (!encryptionAvailable()) throw new Error('系统安全存储不可用，本次登录只保留到应用退出');
       const encrypted = safeStorage.encryptString(JSON.stringify(credentials));
-      const temporary = `${filePath}.tmp`;
+      const temporary = `${filePath}.${randomUUID()}.tmp`;
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      const fd = fs.openSync(temporary, 'w', 0o600);
-      try { fs.writeFileSync(fd, encrypted); fs.fsyncSync(fd); }
-      finally { fs.closeSync(fd); }
-      fs.renameSync(temporary, filePath);
-      try { fs.chmodSync(filePath, 0o600); } catch {}
+      try {
+        const fd = fs.openSync(temporary, 'wx', 0o600);
+        try { fs.writeFileSync(fd, encrypted); fs.fsyncSync(fd); }
+        finally { fs.closeSync(fd); }
+        fs.renameSync(temporary, filePath);
+        try { fs.chmodSync(filePath, 0o600); } catch {}
+      } catch (error) {
+        try { fs.unlinkSync(temporary); } catch {}
+        throw error;
+      }
     },
     load() {
       if (!fs.existsSync(filePath)) return null;

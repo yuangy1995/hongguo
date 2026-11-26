@@ -98,13 +98,20 @@ async function search(keyword, page = 1, options = {}) {
   } catch (error) { return { success: false, error: error.message }; }
 }
 
+const detailPending = new Map();
 async function detail(seriesId) {
-  const { source, duanjuId } = parseId(seriesId);
-  const result = await request('/xifan/drama/getDuanjuInfo', { source, duanjuId });
-  if (result.source !== source || String(result.duanjuId) !== duanjuId || !Array.isArray(result.episodeList)) {
-    throw new Error('西饭返回的剧集与请求不一致');
-  }
-  return result;
+  const { source, duanjuId, seriesId: canonicalId } = parseId(seriesId);
+  if (detailPending.has(canonicalId)) return detailPending.get(canonicalId);
+  // 仅合并同一时刻在途请求，请求完成后立即移除，确保后续请求仍实时验锁
+  const pending = (async () => {
+    const result = await request('/xifan/drama/getDuanjuInfo', { source, duanjuId });
+    if (result.source !== source || String(result.duanjuId) !== duanjuId || !Array.isArray(result.episodeList)) {
+      throw new Error('西饭返回的剧集与请求不一致');
+    }
+    return result;
+  })().finally(() => detailPending.delete(canonicalId));
+  detailPending.set(canonicalId, pending);
+  return pending;
 }
 
 // Only exact, verified upstream metadata conflicts. Do not infer a conflict from a

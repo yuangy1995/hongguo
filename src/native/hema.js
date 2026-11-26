@@ -118,25 +118,32 @@ async function search(keyword, page = 1, options = {}) {
   } catch (error) { return { success: false, error: error.message }; }
 }
 
+const detailPending = new Map();
 async function detail(seriesId) {
-  const { bookId } = parseId(seriesId);
-  const html = await request(`/drama/${bookId}`);
-  const match = typeof html === 'string' && html.match(/<script\b[^>]*\bid=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
-  let result;
-  try { result = JSON.parse(match?.[1]).props.pageProps; }
-  catch (_) { throw new Error('河马详情数据异常，请稍后重试'); }
-  if (String(result?.bookInfoVo?.bookId) !== bookId || !Array.isArray(result?.chapterList)) {
-    throw new Error('河马返回的剧集与请求不一致');
-  }
-  const seen = new Set();
-  for (const episode of result.chapterList) {
-    const id = String(episode?.chapterId || '');
-    if (!ID.test(id) || seen.has(id) || (episode.bookId != null && String(episode.bookId) !== bookId)) {
-      throw new Error('河马分集数据异常，请稍后重试');
+  const { bookId, seriesId: canonicalId } = parseId(seriesId);
+  if (detailPending.has(canonicalId)) return detailPending.get(canonicalId);
+  // 仅合并同一时刻在途的详情请求，不保留跨次缓存以确保每次校验最新收费状态
+  const pending = (async () => {
+    const html = await request(`/drama/${bookId}`);
+    const match = typeof html === 'string' && html.match(/<script\b[^>]*\bid=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+    let result;
+    try { result = JSON.parse(match?.[1]).props.pageProps; }
+    catch (_) { throw new Error('河马详情数据异常，请稍后重试'); }
+    if (String(result?.bookInfoVo?.bookId) !== bookId || !Array.isArray(result?.chapterList)) {
+      throw new Error('河马返回的剧集与请求不一致');
     }
-    seen.add(id);
-  }
-  return result;
+    const seen = new Set();
+    for (const episode of result.chapterList) {
+      const id = String(episode?.chapterId || '');
+      if (!ID.test(id) || seen.has(id) || (episode.bookId != null && String(episode.bookId) !== bookId)) {
+        throw new Error('河马分集数据异常，请稍后重试');
+      }
+      seen.add(id);
+    }
+    return result;
+  })().finally(() => detailPending.delete(canonicalId));
+  detailPending.set(canonicalId, pending);
+  return pending;
 }
 
 async function fetchEpisodeList(seriesId) {

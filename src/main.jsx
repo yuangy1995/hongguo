@@ -16,10 +16,12 @@ initializePosterSize();
 initializeSkin();
 
 
-initializeLanguage().then(() => ReactDOM.createRoot(document.getElementById('root')).render(
+// 先以本地存储与系统默认语言同步挂载首屏，随后异步同步主进程区域设置
+void initializeLanguage();
+ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <ErrorBoundary>
       <App />
     </ErrorBoundary>
   </React.StrictMode>
-));
+);

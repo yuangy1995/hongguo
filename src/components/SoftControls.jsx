@@ -144,7 +144,9 @@ export function SoftKnob({
 }) {
   useLanguage();
   const dialRef = useRef(null);
+  const dragCleanupRef = useRef(null);
   const [dragging, setDragging] = useState(false);
+  useEffect(() => () => dragCleanupRef.current?.(), []);
 
   const stops = options
     ? options.map((opt, index) => ({
@@ -203,13 +205,19 @@ export function SoftKnob({
     updateFromPointer(event.clientX, event.clientY, dragState);
 
     const onMove = moveEvent => updateFromPointer(moveEvent.clientX, moveEvent.clientY, dragState);
-    const onUp = upEvent => {
-      target.releasePointerCapture?.(upEvent.pointerId);
-      setDragging(false);
+    const detach = () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
+      dragCleanupRef.current = null;
     };
+    const onUp = upEvent => {
+      target.releasePointerCapture?.(upEvent.pointerId);
+      setDragging(false);
+      detach();
+    };
+    dragCleanupRef.current?.();
+    dragCleanupRef.current = detach;
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onUp);
@@ -350,6 +358,8 @@ export function SoftKnob({
 export function SoftVerticalSwitch({ checked, onChange, disabled = false, ariaLabel }) {
   const [dragOffset, setDragOffset] = useState(null);
   const movedRef = useRef(false);
+  const dragCleanupRef = useRef(null);
+  useEffect(() => () => dragCleanupRef.current?.(), []);
 
   const handlePointerDown = event => {
     if (disabled || (event.button !== undefined && event.button !== 0)) return;
@@ -367,11 +377,15 @@ export function SoftVerticalSwitch({ checked, onChange, disabled = false, ariaLa
         setDragOffset(clamped);
       }
     };
-    const onUp = upEvent => {
-      target.releasePointerCapture?.(upEvent.pointerId);
+    const detach = () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
+      dragCleanupRef.current = null;
+    };
+    const onUp = upEvent => {
+      target.releasePointerCapture?.(upEvent.pointerId);
+      detach();
       if (movedRef.current) {
         const dy = upEvent.clientY - startY;
         const finalPos = Math.max(-18, Math.min(0, base + dy));
@@ -382,6 +396,8 @@ export function SoftVerticalSwitch({ checked, onChange, disabled = false, ariaLa
         setDragOffset(null);
       }
     };
+    dragCleanupRef.current?.();
+    dragCleanupRef.current = detach;
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onUp);
@@ -441,6 +457,7 @@ export function useSoftCheckboxDrag(rootRef) {
   useEffect(() => {
     if (skin !== 'soft') return undefined;
     const container = rootRef?.current || document;
+    let activeCleanup = null;
     const onPointerDown = event => {
       const input = event.target instanceof HTMLInputElement
         && event.target.type === 'checkbox'
@@ -461,12 +478,16 @@ export function useSoftCheckboxDrag(rootRef) {
           input.dataset.dragging = 'true';
         }
       };
-      const onUp = upEvent => {
+      const detach = () => {
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
         window.removeEventListener('pointercancel', onUp);
         delete input.dataset.dragging;
         input.style.removeProperty('--soft-thumb-y');
+        activeCleanup = null;
+      };
+      const onUp = upEvent => {
+        detach();
         if (!dragged) return;
         const dy = upEvent.clientY - startY;
         const shouldCheck = Math.max(-16, Math.min(0, base + dy)) <= -8;
@@ -479,12 +500,17 @@ export function useSoftCheckboxDrag(rootRef) {
           input.click();
         }
       };
+      activeCleanup?.();
+      activeCleanup = detach;
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
       window.addEventListener('pointercancel', onUp);
     };
     container.addEventListener('pointerdown', onPointerDown);
-    return () => container.removeEventListener('pointerdown', onPointerDown);
+    return () => {
+      activeCleanup?.();
+      container.removeEventListener('pointerdown', onPointerDown);
+    };
   }, [skin, rootRef]);
 }
 
@@ -505,7 +531,10 @@ export function SoftCardStack({
   useLanguage();
   const [drag, setDrag] = useState({ x: 0, y: 0, active: false });
   const [expanded, setExpanded] = useState(false);
+  const dragCleanupRef = useRef(null);
   const current = items[activeIndex];
+
+  useEffect(() => () => dragCleanupRef.current?.(), []);
 
   useEffect(() => {
     setExpanded(false);
@@ -538,11 +567,15 @@ export function SoftCardStack({
         setDrag({ x: dx, y: dy, active: true });
       }
     };
-    const onUp = upEvent => {
-      target.releasePointerCapture?.(upEvent.pointerId);
+    const detach = () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
+      dragCleanupRef.current = null;
+    };
+    const onUp = upEvent => {
+      target.releasePointerCapture?.(upEvent.pointerId);
+      detach();
       const dx = upEvent.clientX - startX;
       const dy = upEvent.clientY - startY;
       const dist = Math.hypot(dx, dy);
@@ -554,6 +587,8 @@ export function SoftCardStack({
         onSelectIndex?.((activeIndex + 1) % items.length);
       }
     };
+    dragCleanupRef.current?.();
+    dragCleanupRef.current = detach;
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onUp);

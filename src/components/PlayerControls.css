@@ -13,8 +13,8 @@
   background: linear-gradient(transparent, rgba(0, 0, 0, .84));
 }
 .player-controls-row { display: flex; align-items: center; gap: 8px; }
-.player-controls { transition: opacity .18s ease; }
-.player-controls.controls-hidden { opacity: 0; pointer-events: none; }
+.player-controls { visibility: visible; transition: opacity .18s ease, visibility 0s linear 0s; }
+.player-controls.controls-hidden { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .18s ease, visibility 0s linear .18s; }
 .player-controls.controls-hidden .player-controls-bar { pointer-events: none; }
 .player-controls button { display: inline-flex; align-items: center; justify-content: center; gap: 3px; min-width: 36px; min-height: 36px; padding: 5px; border: 0; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
 .player-controls button:hover { background: rgba(255, 255, 255, .16); }
@@ -80,7 +80,7 @@
   .player-now-playing { padding: 16px; gap: 4px 10px; }
   .player-now-title { gap: 10px; }
 }
-@media (prefers-reduced-motion: reduce) { .player-controls { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .player-controls, .player-controls.controls-hidden { transition: none; } }
 
 .player-stage:has(> .player-controls.controls-hidden),
 .player-stage:has(> .player-controls.controls-hidden) .player-video { cursor: none; }

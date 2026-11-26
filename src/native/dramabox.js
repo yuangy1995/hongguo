@@ -75,18 +75,29 @@ async function search(keyword, page = 1, options = {}) {
     return pageResult(await request('/search', { searchValue, page }, options), page, 'totalPage');
   } catch (error) { return { success: false, error: error.message }; }
 }
+const detailPending = new Map();
 async function detail(seriesId, options = {}) {
-  const id = parseId(seriesId), props = await request(`/drama/${id.bookId}`, {}, options);
-  const book = normalizeBook(props.bookInfo), chapters = props.chapterList;
-  if (book?.series_id !== seriesId || !Array.isArray(chapters) || !chapters.length || chapters.length > 10000
-    || !Number.isSafeInteger(book.episode_count) || book.episode_count !== chapters.length) throw new Error('DramaBox 返回的剧集或完整分集数量不一致');
-  const ids = new Set(), sorted = [...chapters].sort((a, b) => Number(a.index) - Number(b.index));
-  for (const [index, chapter] of sorted.entries()) {
-    const cid = String(chapter?.id || '');
-    if (!ID.test(cid) || ids.has(cid) || !Number.isSafeInteger(chapter.index) || chapter.index !== index) throw new Error('DramaBox 分集编号重复或不连续');
-    ids.add(cid);
-  }
-  return { book, chapters: sorted };
+  const id = parseId(seriesId);
+  const shareable = !(Number(options.deadline) > 0);
+  if (shareable && detailPending.has(id.seriesId)) return detailPending.get(id.seriesId);
+  // 合并同剧并发详情拉取，结束后立即清理以保证后续请求实时读取解锁状态
+  const run = async () => {
+    const props = await request(`/drama/${id.bookId}`, {}, options);
+    const book = normalizeBook(props.bookInfo), chapters = props.chapterList;
+    if (book?.series_id !== seriesId || !Array.isArray(chapters) || !chapters.length || chapters.length > 10000
+      || !Number.isSafeInteger(book.episode_count) || book.episode_count !== chapters.length) throw new Error('DramaBox 返回的剧集或完整分集数量不一致');
+    const ids = new Set(), sorted = [...chapters].sort((a, b) => Number(a.index) - Number(b.index));
+    for (const [index, chapter] of sorted.entries()) {
+      const cid = String(chapter?.id || '');
+      if (!ID.test(cid) || ids.has(cid) || !Number.isSafeInteger(chapter.index) || chapter.index !== index) throw new Error('DramaBox 分集编号重复或不连续');
+      ids.add(cid);
+    }
+    return { book, chapters: sorted };
+  };
+  if (!shareable) return run();
+  const pending = run().finally(() => detailPending.delete(id.seriesId));
+  detailPending.set(id.seriesId, pending);
+  return pending;
 }
 async function fetchEpisodeList(seriesId, options = {}) {
   const { book, chapters } = await detail(seriesId, options);

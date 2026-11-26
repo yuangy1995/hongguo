@@ -57,13 +57,25 @@ async function searchSeries(keyword, search, knownSeries = [], { afterSeason = 1
     }
   }
   const errors = [];
-  for (const query of queries) {
-    if (deadline && Date.now() >= deadline) { errors.push('搜索时间预算已用完'); break; }
-    try {
-      const response = await search(query, { fuzzy: false, deadline });
-      if (!response?.success) throw new Error(response?.error || '来源未返回结果');
-      results.push(...(response.results || []));
-    } catch (error) { errors.push(error.message); }
+  if (queries.length) {
+    if (deadline && Date.now() >= deadline) {
+      errors.push('搜索时间预算已用完');
+    } else {
+      // 并行发起同轮补充季数查询，保持按候选顺序合并结果与错误
+      const settled = await Promise.all(queries.map(async query => {
+        try {
+          const response = await search(query, { fuzzy: false, deadline });
+          if (!response?.success) throw new Error(response?.error || '来源未返回结果');
+          return { ok: true, results: response.results || [] };
+        } catch (error) {
+          return { ok: false, message: error.message };
+        }
+      }));
+      for (const item of settled) {
+        if (item.ok) results.push(...item.results);
+        else errors.push(item.message);
+      }
+    }
   }
   const supplementError = errors.length ? `补充搜索未完成：${[...new Set(errors)].join('；')}` : '';
   const partialErrors = [primary.error, supplementError].filter(Boolean);

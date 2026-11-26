@@ -5,6 +5,15 @@ import './WatchHistory.css';
 import { groupHistory, historyGroupSuggestions } from './historyGroups.mjs';
 import { RollingNumber } from './SoftControls';
 
+// 基于 useRef 的轻量记忆化，兼容未注入 useMemo 的精简测试运行时
+function useRefMemo(factory, deps) {
+  const ref = useRef(null);
+  if (!ref.current || ref.current.deps.length !== deps.length || ref.current.deps.some((v, i) => !Object.is(v, deps[i]))) {
+    ref.current = { deps, value: factory() };
+  }
+  return ref.current.value;
+}
+
 const PREFERENCES_KEY = 'hongguo:watch-history-preferences';
 const ACCOUNT_VIEW_KEY = 'hongguo:account-history-view';
 const CARD_SIZE_KEY = 'hongguo:history-card-size';
@@ -79,17 +88,34 @@ export default function WatchHistory({ active = true, onNavigate }) {
   const openingRequest = useRef(0);
   const seasonRequest = useRef(null);
   const [seasonPanel, setSeasonPanel] = useState(null);
-  const groups = groupHistory(rows, decisions);
-  const groupById = new Map(groups.flatMap(items => items.map(row => [row.series_id, items])));
-  const suggestionsByGroup = new Map(groups.map(items => [items, historyGroupSuggestions(items)]));
-  const listedGroups = groups.map(items => hideLowSeasons && !expanded[items[0].series_id] ? items.slice(0, 1) : items);
-  const listedRows = listedGroups.flat();
-  const completedCount = listedRows.filter(row => row.completed === true).length;
-  const visibleRows = listedGroups.map(items => items
-    .filter(row => (filter === 'all' || (row.completed === true) === (filter === 'completed'))
-      && (!accountSignedIn || row.series_title.toLowerCase().includes(query.trim().toLowerCase())))
-    .sort((a, b) => b.updatedAt - a.updatedAt))
-    .filter(items => items.length).sort((a, b) => b[0].updatedAt - a[0].updatedAt).flat();
+  const groups = useRefMemo(() => groupHistory(rows, decisions), [rows, decisions]);
+  const groupById = useRefMemo(() => new Map(groups.flatMap(items => items.map(row => [row.series_id, items]))), [groups]);
+  const suggestionsByGroup = useRefMemo(() => new Map(groups.map(items => [items, historyGroupSuggestions(items)])), [groups]);
+  const listedGroups = useRefMemo(() => groups.map(items => hideLowSeasons && !expanded[items[0].series_id] ? items.slice(0, 1) : items), [groups, hideLowSeasons, expanded]);
+  const listedRows = useRefMemo(() => listedGroups.flat(), [listedGroups]);
+  const completedCount = useRefMemo(() => listedRows.filter(row => row.completed === true).length, [listedRows]);
+  const visibleRows = useRefMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return listedGroups.map(items => items
+      .filter(row => (filter === 'all' || (row.completed === true) === (filter === 'completed'))
+        && (!accountSignedIn || !normalizedQuery || row.series_title.toLowerCase().includes(normalizedQuery)))
+      .sort((a, b) => b.updatedAt - a.updatedAt))
+      .filter(items => items.length).sort((a, b) => b[0].updatedAt - a[0].updatedAt).flat();
+  }, [listedGroups, filter, accountSignedIn, query]);
+  // 预计算每个分组在可见列表中的首条记录，消除渲染与恢复时的 O(N^2) 扫描
+  const visibleHeadIds = useRefMemo(() => {
+    const seenGroups = new Set();
+    const heads = new Set();
+    for (const item of visibleRows) {
+      const grp = groupById.get(item.series_id);
+      if (grp && !seenGroups.has(grp)) {
+        seenGroups.add(grp);
+        heads.add(item.series_id);
+      }
+    }
+    return heads;
+  }, [visibleRows, groupById]);
+  const rowById = useRefMemo(() => new Map(rows.map(item => [item.series_id, item])), [rows]);
 
   const savePreferences = next => {
     setPreferences(next);
@@ -244,7 +270,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
       // Opening a season from the catalogue or a similar title leaves the original updates unread.
       if (!acknowledge || (sequel && row.similarSeries?.some(item => item.series_id === sequel.series_id))) return;
       const group = groupById.get(row.series_id) || [row];
-      const acknowledgedRows = sequel || visibleRows.find(item => groupById.get(item.series_id) === group) === row
+      const acknowledgedRows = sequel || visibleHeadIds.has(row.series_id)
         ? group.filter(item => item === row || item.sequels?.some(candidate => !sequel || candidate.series_id === sequel.series_id))
         : [row];
       for (const target of acknowledgedRows) {
@@ -338,7 +364,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
       const cardView = !mobile && accountSignedIn && view === 'cards';
       const group = groupById.get(row.series_id);
       const groupHeadId = group[0].series_id;
-      const isHead = visibleRows.find(item => groupById.get(item.series_id) === group) === row;
+      const isHead = visibleHeadIds.has(row.series_id);
       const { sequels, similarSeries: similar, hasUnreadSequels } = suggestionsByGroup.get(group);
       const hasUpdates = row.unreadEpisodes > 0 || (isHead && hasUnreadSequels);
       const menuId = `history-actions-${row.series_id}`;
@@ -357,7 +383,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
       <button className="history-resume" onClick={() => resume(row)} disabled={!active || !!opening || !!removing} aria-label={row.vid_index > 0
         ? t(`继续观看 ${row.series_title} 第${row.vid_index}集${hasUpdates ? `，有更新${row.unreadEpisodes ? `，新增${row.unreadEpisodes}集` : `，发现${sequelLabel}`}` : ''}`)
         : t('继续观看 {0}', [row.series_title])}>
-        {row.cover ? <img className="history-cover" src={row.cover} alt="" loading="lazy" /> : <span className="history-cover history-cover-empty"><Play size={20} /></span>}
+        {row.cover ? <img className="history-cover" src={row.cover} alt="" loading="lazy" decoding="async" /> : <span className="history-cover history-cover-empty"><Play size={20} /></span>}
         <span className="history-copy">
           <span className="history-name">{hasUpdates && <span className="history-dot" role="img" aria-label={t("有更新")} />}{row.series_title}</span>
           <span className="history-progress">{row.vid_index > 0 && <>{t("看到第 ")}{t(row.vid_index)}{row.total > 0 && <>{t(" 集 / 共 ")}{t(row.total)}</>}{t(" 集 · ")}</>}{t(Math.floor((row.currentTime || 0) / 60))}:{t(String(Math.floor((row.currentTime || 0) % 60)).padStart(2, '0'))}</span>
@@ -404,7 +430,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
               return <button type="button" key={season.series_id} className="btn btn-outline" aria-current={selected ? 'true' : undefined}
                 disabled={!season.playable || !active || !!opening || !!removing} onClick={event => {
                   event.currentTarget.closest('.history-seasons-menu')?.hidePopover?.();
-                  const existing = rows.find(item => item.series_id === season.series_id);
+                  const existing = rowById.get(season.series_id);
                   if (existing) void resume(existing);
                   else void resume(row, season, false);
                 }}>
@@ -418,7 +444,7 @@ export default function WatchHistory({ active = true, onNavigate }) {
       {isHead && !!similar.length && !officialSeasons && <Relations className={mobile ? "history-sequels" : "history-related"} title={t("名称相近，仅供核对；不会用于隐藏低季或批量归组")}>
         {mobile ? <span>{t("疑似同剧（仅提示）")}</span> : <summary>{t("疑似同剧（仅提示）")} · {similar.length}</summary>}
         <div className="history-related-actions">{similar.map(candidate => <button key={candidate.series_id} className="btn btn-outline btn-sm" disabled={!active || !!opening || !!removing} onClick={() => resume(candidate.origin, candidate)}>{candidate.series_title}</button>)}
-        {similar.filter(candidate => rows.some(item => item.series_id === candidate.series_id)).map(candidate => <button key={`group:${candidate.series_id}`} className="btn btn-outline btn-sm" onClick={() => decide(candidate.series_id, row.series_id)}>{t("确认《")}{candidate.series_title}{t("》为同剧")}</button>)}</div>
+        {similar.filter(candidate => rowById.has(candidate.series_id)).map(candidate => <button key={`group:${candidate.series_id}`} className="btn btn-outline btn-sm" onClick={() => decide(candidate.series_id, row.series_id)}>{t("确认《")}{candidate.series_title}{t("》为同剧")}</button>)}</div>
       </Relations>}
       {!!updateErrors.length && <Relations className={mobile ? undefined : 'history-related history-check-summary'}>
         {!mobile && <summary><AlertCircle size={14} />{t("检查未完成，可稍后重试")}</summary>}

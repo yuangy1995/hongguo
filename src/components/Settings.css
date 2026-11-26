@@ -164,11 +164,6 @@
   animation: proxy-mask-in 0.15s ease-out;
 }
 
-@keyframes proxy-mask-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
 .proxy-modal {
   width: 100%;
   max-width: 520px;
@@ -180,11 +175,6 @@
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   animation: proxy-modal-in 0.18s ease-out;
-}
-
-@keyframes proxy-modal-in {
-  from { opacity: 0; transform: translateY(12px) scale(0.985); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .proxy-modal-head {
@@ -536,7 +526,7 @@
 .builtin-source-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 0; border-bottom: 1px solid var(--border-muted); font-size: 13px; }
 .builtin-source-row:last-of-type { border-bottom: 0; padding-bottom: 0; }
 .builtin-source-row em { display: block; margin-top: 4px; font-size: 12px; font-style: normal; color: var(--text-secondary); }
-.builtin-source-row input { appearance: none; flex: 0 0 36px; width: 36px; height: 22px; border: 1px solid var(--text-muted); border-radius: 11px; background: var(--bg-canvas); cursor: pointer; position: relative; }
+.builtin-source-row input { appearance: none; flex: 0 0 36px; width: 36px; height: 22px; border: 1px solid var(--text-muted, var(--border-strong)); border-radius: 11px; background: var(--bg-canvas); cursor: pointer; position: relative; }
 .builtin-source-row input::before { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--text-secondary); }
 .builtin-source-row input:checked { background: var(--primary); border-color: var(--primary); }
 .builtin-source-row input:checked::before { transform: translateX(14px); background: white; }

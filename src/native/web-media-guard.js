@@ -58,6 +58,8 @@ function blockedAddress() {
 // HTTPS resolvers only when every system answer is Fake-IP; never connect to Fake-IP.
 const publicDnsCache = new Map(), publicDnsPending = new Map();
 const PUBLIC_DNS_CACHE_LIMIT = 256;
+// 复用安全 DoH 解析 Agent 实例，避免每次解析重复创建 Agent 对象
+const dohHttpsAgent = new https.Agent({ keepAlive: false });
 function resolvePublicAddresses(hostname) {
   const key = hostname.toLowerCase();
   const cached = publicDnsCache.get(key);
@@ -68,7 +70,7 @@ function resolvePublicAddresses(hostname) {
   // Race trusted resolvers so a blocked regional route cannot delay the usable one.
   const pending = Promise.any(['https://1.1.1.1/dns-query', 'https://223.5.5.5/resolve'].map(endpoint => new Promise((resolve, reject) => {
     const request = https.get(`${endpoint}?name=${encodeURIComponent(hostname)}&type=A`, {
-      agent: new https.Agent({ keepAlive: false }), headers: { Accept: 'application/dns-json' },
+      agent: dohHttpsAgent, headers: { Accept: 'application/dns-json' },
     }, response => {
       let body = '';
       response.setEncoding('utf8');
@@ -84,7 +86,7 @@ function resolvePublicAddresses(hostname) {
           if (response.statusCode !== 200 || data.Status !== 0 || !rows.length ||
               rows.some(item => isIP(item.data) !== 4 || !isPublicAddress(item.data))) throw blockedAddress();
           const addresses = rows.map(item => ({ address: item.data, family: 4 }));
-          const ttl = Math.max(0, Math.min(60, ...rows.map(item => Number(item.TTL) || 0)));
+          const ttl = Math.max(10, Math.min(60, ...rows.map(item => Number(item.TTL) || 0)));
           resolve({ addresses, expires: Date.now() + ttl * 1000 });
         } catch (_) { reject(blockedAddress()); }
       });

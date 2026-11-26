@@ -2,6 +2,16 @@
 // 红果短剧 6.2：桌面桥接入口，发行说明见 docs/release-6.0.md。
 const { contextBridge, ipcRenderer } = require('electron');
 
+const accountCheckpointCallbacks = new Set();
+let accountCheckpointListening = false;
+const handleAccountCheckpoint = async (_event, id) => {
+  try {
+    await Promise.allSettled([...accountCheckpointCallbacks].map(fn => Promise.resolve().then(() => fn())));
+  } finally {
+    await ipcRenderer.invoke('account-sync-checkpoint-ready', id).catch(() => {});
+  }
+};
+
 contextBridge.exposeInMainWorld('electronAPI', {
   getPublicDetails: (seriesId, vid) => ipcRenderer.invoke('get-public-details', seriesId, vid),
   getEpisodeComments: options => ipcRenderer.invoke('get-episode-comments', options),
@@ -181,12 +191,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAccountHistory: (options) => ipcRenderer.invoke('get-account-history', options),
   syncAccountProgress: options => ipcRenderer.invoke('sync-account-progress', options),
   onCaptureAccountCheckpoint: cb => {
-    const listener = async (_event, id) => {
-      try { await cb(); }
-      finally { await ipcRenderer.invoke('account-sync-checkpoint-ready', id).catch(() => {}); }
+    if (typeof cb !== 'function') return () => {};
+    accountCheckpointCallbacks.add(cb);
+    if (!accountCheckpointListening) {
+      accountCheckpointListening = true;
+      ipcRenderer.on('capture-account-sync-checkpoint', handleAccountCheckpoint);
+    }
+    return () => {
+      accountCheckpointCallbacks.delete(cb);
+      if (!accountCheckpointCallbacks.size && accountCheckpointListening) {
+        accountCheckpointListening = false;
+        ipcRenderer.removeListener('capture-account-sync-checkpoint', handleAccountCheckpoint);
+      }
     };
-    ipcRenderer.on('capture-account-sync-checkpoint', listener);
-    return () => ipcRenderer.removeListener('capture-account-sync-checkpoint', listener);
   },
   testAccountProgressSync: () => ipcRenderer.invoke('test-account-progress-sync'),
   playAccountHistory: (seriesId, options) => ipcRenderer.invoke('play-account-history', seriesId, options),

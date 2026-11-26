@@ -33,12 +33,26 @@ async function remuxHls({ url, output, ffmpeg, signal, cancelToken, request = re
     if (failure) throw failure;
     checkAccess();
   };
+  let lastFree = -1, lastStatAt = 0, lastStatBytes = 0;
   const ensureCapacity = extra => {
     if (stagedBytes + extra > capacityBytes) throw new Error('HLS 暂存空间不足，已停止');
-    const stat = fs.statfsSync(temporary), free = Number(stat.bsize) * Number(stat.bavail);
+    const now = Date.now();
     const needed = [...diskJobs].filter(job => job.device === diskJob.device)
       .reduce((sum, job) => sum + job.remaining(job === diskJob ? extra : 0), DISK_RESERVE);
-    if (!Number.isFinite(free) || free < needed) throw new Error('HLS 暂存或输出空间不足，已停止');
+    // 空间充裕且单任务暂存时按字节量与时间窗口节流 statfsSync，临界状态及 extra===0 时始终实时查询
+    const shouldRefresh = extra === 0
+      || lastFree < 0
+      || diskJobs.size > 1
+      || lastFree - needed < 32 * 1024 * 1024
+      || stagedBytes + extra - lastStatBytes >= 1024 * 1024
+      || now - lastStatAt >= 250;
+    if (shouldRefresh) {
+      const stat = fs.statfsSync(temporary);
+      lastFree = Number(stat.bsize) * Number(stat.bavail);
+      lastStatAt = now;
+      lastStatBytes = stagedBytes;
+    }
+    if (!Number.isFinite(lastFree) || lastFree < needed) throw new Error('HLS 暂存或输出空间不足，已停止');
   };
   signal?.addEventListener('abort', abort, { once:true }); cancelToken?.subscribe(abort);
   const deadline = setTimeout(() => fail(new Error('HLS 准备超时，请重试')), 10 * 60 * 1000);

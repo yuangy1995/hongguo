@@ -10,7 +10,6 @@ let dataFile = null;
 let playbackFile = null;
 let cache = null; // { settings, tasks }
 let playbackCache = null;
-let durable = '{}';
 let errorHandler = null;
 let readError = null;
 let playbackReadError = null;
@@ -118,13 +117,37 @@ function hydrateProxyPassword(settings) {
 }
 
 function serializableCache() {
-  const copy = structuredClone(cache || {});
+  const source = cache || {};
+  const copy = { ...source };
   if (playbackCache !== null) delete copy.playback;
-  if (copy.settings) {
-    stripPublicSecretFields(copy.settings);
-    if (!copy.settings[PROXY_PASSWORD_CIPHER]) delete copy.settings[PROXY_PASSWORD_CIPHER];
+  if (source.settings && typeof source.settings === 'object' && !Array.isArray(source.settings)) {
+    const cleanSettings = { ...source.settings };
+    stripPublicSecretFields(cleanSettings);
+    if (!cleanSettings[PROXY_PASSWORD_CIPHER]) delete cleanSettings[PROXY_PASSWORD_CIPHER];
+    copy.settings = cleanSettings;
   }
   return copy;
+}
+
+// 写入异常时优先按磁盘持久态恢复，磁盘路径失效时回退保存前引用，避免常驻 32MB JSON 字符串副本
+function restoreDurableCache(fallback = null) {
+  if (readError || !dataFile) {
+    cache = { settings: {}, tasks: [] };
+    return;
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+    cache = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    if (fallback && cache && typeof cache === 'object') {
+      Object.assign(cache, fallback);
+    } else {
+      cache = fallback ? { ...fallback } : {};
+    }
+  }
+  if (!Array.isArray(cache.tasks)) cache.tasks = [];
+  if (!cache.settings || typeof cache.settings !== 'object' || Array.isArray(cache.settings)) cache.settings = {};
+  if (playbackCache !== null) delete cache.playback;
 }
 
 function loadCache() {
@@ -161,28 +184,26 @@ function loadCache() {
   if (!Array.isArray(cache.tasks)) cache.tasks = [];
   if (!cache.settings || typeof cache.settings !== 'object') cache.settings = {};
   secretsChanged = hydrateProxyPassword(cache.settings);
-  durable = JSON.stringify(serializableCache());
   if (secretsChanged && !readError) flush();
   return cache;
 }
 
-function flush() {
+function flush(fallback = null) {
   if (!dataFile) return;
   if (readError) {
-    cache = JSON.parse(durable);
+    restoreDurableCache();
     reportReadError(readError.message);
     throw readError;
   }
   try {
-    const serialized = writeJsonAtomic(dataFile, serializableCache(), { maxBytes });
-    durable = serialized;
+    writeJsonAtomic(dataFile, serializableCache(), { maxBytes });
     if (writeError) {
       writeError = false;
       try { errorHandler?.(null); } catch {}
     }
     if (playbackCache !== null) playbackCleanupPending = false;
   } catch (e) {
-    cache = JSON.parse(durable);
+    restoreDurableCache(fallback);
     writeError = true;
     const message = e.code === 'STORE_TOO_LARGE'
       ? e.message
@@ -293,7 +314,8 @@ function getSettings() {
 
 function saveSettings(settings, { clearProxyPassword = false } = {}) {
   const current = loadCache();
-  const previousCache = structuredClone(current);
+  // 仅备份 settings 子树，避免每次保存设置时深拷贝全量任务与剧库
+  const previousSettings = structuredClone(current.settings);
   const previousPassword = runtimeProxyPassword;
   const previousWarning = proxyPasswordWarning;
   const incoming = settings && typeof settings === 'object' ? structuredClone(settings) : {};
@@ -333,7 +355,7 @@ function saveSettings(settings, { clearProxyPassword = false } = {}) {
   try {
     flush();
   } catch (error) {
-    cache = previousCache;
+    if (cache && !readError) cache.settings = previousSettings;
     runtimeProxyPassword = previousPassword;
     proxyPasswordWarning = previousWarning;
     throw error;
@@ -345,8 +367,10 @@ function getTasks() {
 }
 
 function saveTasks(tasks) {
-  loadCache().tasks = tasks || [];
-  flush();
+  const current = loadCache();
+  const previous = current.tasks;
+  current.tasks = tasks || [];
+  flush({ tasks: previous });
 }
 
 // ===== 短剧档案（让播放页在没有下载任务时也能列出完整分集）=====
@@ -357,8 +381,10 @@ function getSeries() {
 }
 
 function saveSeries(list) {
-  loadCache().series = list || [];
-  flush();
+  const current = loadCache();
+  const previous = current.series;
+  current.series = list || [];
+  flush({ series: previous });
 }
 
 // ===== 播放进度（断点续播）=====
@@ -367,10 +393,15 @@ function getPlayback() {
   return structuredClone(loadPlaybackCache());
 }
 
-function savePlayback(map) {
+// 单剧读取播放进度，避免仅查询单部剧时深拷贝整个播放记录表
+function getPlaybackItem(seriesId) {
   loadCache();
-  if (readError) throw readError;
-  loadPlaybackCache();
+  const map = loadPlaybackCache();
+  const item = map?.[String(seriesId)];
+  return item ? structuredClone(item) : null;
+}
+
+function commitPlayback(next) {
   if (playbackCleanupPending) {
     delete cache.playback;
     try {
@@ -380,7 +411,6 @@ function savePlayback(map) {
       /* Playback is saved independently; a later main save will retry the cleanup. */
     }
   }
-  const next = structuredClone(map || {});
   try {
     writeJsonAtomic(playbackFile, next, { maxBytes: playbackMaxBytes });
     playbackCache = next;
@@ -398,13 +428,20 @@ function savePlayback(map) {
   }
 }
 
+function savePlayback(map) {
+  loadCache();
+  if (readError) throw readError;
+  loadPlaybackCache();
+  commitPlayback(structuredClone(map || {}));
+}
+
 function updatePlayback(updater) {
   loadCache();
   if (readError) throw readError;
   loadPlaybackCache();
   const next = structuredClone(playbackCache || {});
   const result = updater(next);
-  savePlayback(next);
+  commitPlayback(next);
   return result;
 }
 
@@ -416,8 +453,10 @@ function getMergeTasks() {
 }
 
 function saveMergeTasks(list) {
-  loadCache().mergeTasks = list || [];
-  flush();
+  const current = loadCache();
+  const previous = current.mergeTasks;
+  current.mergeTasks = list || [];
+  flush({ mergeTasks: previous });
 }
 
 module.exports = {
@@ -430,6 +469,7 @@ module.exports = {
   getSeries,
   saveSeries,
   getPlayback,
+  getPlaybackItem,
   savePlayback,
   updatePlayback,
   getMergeTasks,

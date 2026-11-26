@@ -68,7 +68,7 @@ export default function VideoEnhancement({ videoRef, source, available = true, e
     if (!video || !canvas) return;
     const originalFilter = video.style.filter;
     canvas.style.visibility = 'hidden';
-    setStatus({ state: 'idle', message: '' });
+    setStatus(current => current.state === 'idle' && current.message === '' ? current : { state: 'idle', message: '' });
     if (!available || !source || mode === 'original') return;
     if (mode === 'sharpen') {
       video.style.filter = `url(#${filterId})`;

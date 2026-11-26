@@ -57,22 +57,27 @@ export function attachSoftwareVideo(video, loadPlayer, wasmBaseUrl) {
       const player = state.player = new AVPlayer({ container: state.stream, wasmBaseUrl,
         enableHardware: false, enableWebCodecs: false, enableWebGPU: false,
         enableWorker: true, checkUseMSE: () => false });
+      let lastTimeEmit = 0;
       player.on('time', () => {
         if (!current(state)) return;
         if (desiredPlayback && !video.paused && !seeking) state.position = null;
-        emit('timeupdate');
+        const now = Date.now();
+        if (now - lastTimeEmit >= 200) {
+          lastTimeEmit = now;
+          emit('timeupdate');
+        }
       });
       player.on('seeking', () => { if (current(state)) { seeking = true; emit('seeking'); } });
-      player.on('seeked', () => { if (current(state)) { seeking = false; emit('seeked'); emit('timeupdate'); } });
+      player.on('seeked', () => { if (current(state)) { seeking = false; lastTimeEmit = Date.now(); emit('seeked'); emit('timeupdate'); } });
       player.on('ended', () => {
         if (!current(state)) return;
-        ended = true; desiredPlayback = false; playIntent++; nativePause(); emit('timeupdate'); emit('ended');
+        ended = true; desiredPlayback = false; playIntent++; nativePause(); lastTimeEmit = Date.now(); emit('timeupdate'); emit('ended');
       });
       player.on('error', reason => fail(state, reason));
       player.setVolume(1);
       player.setPlaybackRate(rate);
       await player.load(state.source, { ext: 'mp4', isLive: false });
-      if (!current(state)) return;
+      if (!current(state)) { release(state); return; }
       state.duration = Number(player.getDuration()) / 1000;
       state.loaded = true;
       emit('durationchange'); emit('loadedmetadata');

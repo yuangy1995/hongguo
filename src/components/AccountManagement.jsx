@@ -27,6 +27,7 @@ export default function AccountManagement({ active = true, loginDialog = false }
   const generation = useRef(0);
   const pollTimer = useRef(null);
   const qrActive = useRef(false);
+  const qrIdRef = useRef('');
   const visibleQr = qr && (!loginDialog || secondsLeft > 0);
   const visibleRows = rows.filter(row => !query.trim() || row.series_title.includes(query.trim()));
   const showHistory = !loginDialog;
@@ -77,6 +78,7 @@ export default function AccountManagement({ active = true, loginDialog = false }
   const finishLogin = ({ status = '', error = '' }) => {
     generation.current++;
     clearTimeout(pollTimer.current);
+    qrIdRef.current = '';
     setQr(null);
     setBusy(false);
     setStatus(status);
@@ -130,6 +132,7 @@ export default function AccountManagement({ active = true, loginDialog = false }
       const now = Date.now();
       const expiresAt = result.expiresAt ?? now + result.expiresIn * 1000;
       if (loginDialog && (!Number.isFinite(expiresAt) || expiresAt <= now)) throw new Error('二维码获取失败，请重试');
+      qrIdRef.current = result.loginId || '';
       setQr({ id: result.loginId, image: result.image, expiresAt });
       if (loginDialog) setSecondsLeft(Math.ceil((expiresAt - now) / 1000));
       setStatus(loginDialog ? '等待手机确认扫码登录…' : `请用手机红果 App 扫码，并在手机上确认登录。二维码约 ${result.expiresIn} 秒有效。`);
@@ -202,7 +205,11 @@ export default function AccountManagement({ active = true, loginDialog = false }
       generation.current++;
       clearTimeout(auto);
       clearTimeout(pollTimer.current);
-      if (loginDialog && qrActive.current) void window.electronAPI.cancelAccountLogin?.().catch(() => {});
+      if (loginDialog && qrActive.current) {
+        const pendingId = qrIdRef.current || undefined;
+        qrIdRef.current = '';
+        void window.electronAPI.cancelAccountLogin?.(pendingId).catch(() => {});
+      }
     };
   }, [loginDialog]);
   useEffect(() => {
@@ -275,7 +282,7 @@ export default function AccountManagement({ active = true, loginDialog = false }
           : <ul className="account-history-list" data-view={historyView}>{visibleRows.map(row => <li key={row.series_id}>
             <button type="button" disabled={busy} onClick={() => open(row)} aria-label={t(`继续观看 ${row.series_title} 第${row.vid_index}集`)}>
               <span className="account-history-cover">
-                {row.cover && <img key={row.cover} src={row.cover} alt="" loading="lazy" onError={event => { event.currentTarget.hidden = true; }} />}
+                {row.cover && <img key={row.cover} src={row.cover} alt="" loading="lazy" decoding="async" onError={event => { event.currentTarget.hidden = true; }} />}
                 <Play size={18} aria-hidden="true" />
               </span>
               <span className="account-history-copy">

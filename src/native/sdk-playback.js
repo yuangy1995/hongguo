@@ -117,6 +117,16 @@ function runHelper(executable, args, signal, timeoutMs, maxOutput = MAX_OUTPUT, 
             windowsHide: true,
             stdio: ['ignore', 'pipe', 'pipe'],
         });
+        let killTimer = null;
+        const terminateChild = () => {
+            if (!child.killed) {
+                try { child.kill(); } catch {}
+                killTimer = setTimeout(() => {
+                    try { child.kill('SIGKILL'); } catch {}
+                }, 2000);
+                killTimer.unref?.();
+            }
+        };
         const finish = value => {
             if (settled) return;
             settled = true;
@@ -126,11 +136,11 @@ function runHelper(executable, args, signal, timeoutMs, maxOutput = MAX_OUTPUT, 
         };
         const fail = (message, code) => finish({ error: sdkError(message, code) });
         const cancel = () => {
-            if (!child.killed) child.kill();
+            terminateChild();
             fail('SDK 取源已取消', 'ERR_CANCELED');
         };
         const timer = setTimeout(() => {
-            if (!child.killed) child.kill();
+            terminateChild();
             fail('SDK 取源超时', 'SDK_TIMEOUT');
         }, timeoutMs);
         signal?.addEventListener('abort', cancel, { once: true });
@@ -138,15 +148,19 @@ function runHelper(executable, args, signal, timeoutMs, maxOutput = MAX_OUTPUT, 
         child.stdout.on('data', chunk => {
             stdout += chunk.toString('utf8');
             if (stdout.length > maxOutput) {
-                if (!child.killed) child.kill();
+                terminateChild();
                 fail('SDK 返回数据过长', 'SDK_INVALID_RESPONSE');
             }
         });
         child.stderr.on('data', chunk => {
             stderr = (stderr + chunk.toString('utf8')).slice(-4096);
         });
-        child.on('error', () => fail('SDK 执行文件启动失败', 'SDK_SPAWN_FAILED'));
+        child.on('error', () => {
+            clearTimeout(killTimer);
+            fail('SDK 执行文件启动失败', 'SDK_SPAWN_FAILED');
+        });
         child.on('close', code => {
+            clearTimeout(killTimer);
             if (settled) return;
             if (code !== 0) {
                 if (args[0] === '--videos' && /unrecognized arguments:\s*--videos/i.test(stderr)) {
@@ -591,6 +605,9 @@ async function resolveSdkPlayback(vid, options = {}) {
             if (outcome.error) {
                 reportFailure(options, outcome.error);
                 return null;
+            }
+            if (outcome.result) {
+                storeCachedModels(new Map([[key, outcome.result]]), contentType);
             }
             return outcome.result;
         } finally {

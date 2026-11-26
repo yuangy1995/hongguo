@@ -7,6 +7,15 @@ const { Storage, fail, safeError, assertFields, numericId } = require('./storage
 const defaultMedia = require('./media.cjs');
 const { search: searchHongguo } = require('./search.cjs');
 const PUBLIC = path.join(__dirname, 'public');
+const staticAssetCache = new Map();
+function readPublicAsset(filename) {
+  if (staticAssetCache.has(filename)) return staticAssetCache.get(filename);
+  const fullPath = path.join(PUBLIC, filename);
+  if (!fs.existsSync(fullPath)) return null;
+  const content = fs.readFileSync(fullPath);
+  staticAssetCache.set(filename, content);
+  return content;
+}
 
 function makeTask(fields) {
   const now = new Date().toISOString();
@@ -79,8 +88,10 @@ function createApp({ token, dataRoot, downloadRoot, media = defaultMedia, search
       if (!url.pathname.startsWith('/api/')) {
         if (!['GET', 'HEAD'].includes(request.method)) throw fail('方法不允许', 405);
         const files = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.html': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/style.css': ['style.css', 'text/css; charset=utf-8'], '/styles.css': ['styles.css', 'text/css; charset=utf-8'] };
-        const file = files[url.pathname]; if (!file || !fs.existsSync(path.join(PUBLIC, file[0]))) throw fail('页面不存在', 404);
-        response.setHeader('Content-Type', file[1]); return response.end(request.method === 'HEAD' ? undefined : fs.readFileSync(path.join(PUBLIC, file[0])));
+        const file = files[url.pathname];
+        const asset = file ? readPublicAsset(file[0]) : null;
+        if (!asset) throw fail('页面不存在', 404);
+        response.setHeader('Content-Type', file[1]); return response.end(request.method === 'HEAD' ? undefined : asset);
       }
       if (!authorized(request)) throw fail('访问令牌无效', 401);
       if (stopped) throw fail('服务正在停止或持久化失败，请检查存储后重启', 503);
@@ -92,7 +103,7 @@ function createApp({ token, dataRoot, downloadRoot, media = defaultMedia, search
       if (request.method === 'GET' && route === '/api/status') return send(200, { success: true, version: require('../package.json').version, downloadRoot: '/downloads', concurrency: 1 });
       if (request.method === 'GET' && route === '/api/tasks') {
         store.checkRoot(); store.reconcileCompleted();
-        return send(200, { success: true, tasks: store.tasks.map(task => store.publicTask(task)).reverse() });
+        return send(200, { success: true, tasks: store.tasks.map(task => store.publicTask(task, { verified: true })).reverse() });
       }
       if (request.method === 'GET' && (route === '/api/search' || /^\/api\/series\/[^/]+$/.test(route))) {
         if (reading >= 2) throw fail('上游查询繁忙，请稍后重试', 429);

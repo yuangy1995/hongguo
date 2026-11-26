@@ -87,7 +87,7 @@ async function convertBytevc2({ executable, input, output, contentKey, duration,
             ...(Number.isFinite(maxBytes) ? ['-fs', String(maxBytes)] : []), '-f', 'mp4', output];
           await new Promise((resolve, reject) => {
             const child = require('node:child_process').spawn(executable, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: localMediaEnv() });
-            let killTimer, buffer = '', stopping = false;
+            let killTimer, watchdogTimer, buffer = '', stopping = false, stalled = false;
             const stop = () => {
               if (stopping) return;
               stopping = true;
@@ -95,12 +95,24 @@ async function convertBytevc2({ executable, input, output, contentKey, duration,
               killTimer = setTimeout(() => child.kill('SIGKILL'), 2000);
               killTimer.unref?.();
             };
+            // 无输出活跃看门狗：防止解码子进程卡死永久占用全局转码槽位
+            const refreshWatchdog = () => {
+              clearTimeout(watchdogTimer);
+              watchdogTimer = setTimeout(() => {
+                stalled = true;
+                stop();
+              }, 120 * 1000);
+              watchdogTimer.unref?.();
+            };
+            refreshWatchdog();
             const cleanup = () => {
               clearTimeout(killTimer);
+              clearTimeout(watchdogTimer);
               signal?.removeEventListener('abort', stop);
               cancelToken?.unsubscribe(stop);
             };
             child.stdout.on('data', data => {
+              refreshWatchdog();
               buffer += data.toString();
               const lines = buffer.split('\n'); buffer = lines.pop();
               for (const line of lines) {
@@ -110,13 +122,15 @@ async function convertBytevc2({ executable, input, output, contentKey, duration,
             });
             // Classify privately; native diagnostics may contain keys and paths.
             child.stderr.on('data', data => {
+              refreshWatchdog();
               diagnostics = (diagnostics + data.toString()).slice(-65536);
               terminalFailure ||= /No space left|Permission denied|Input\/output error|Disk quota|Read-only file system|File too large|Cannot allocate memory|Out of memory|Invalid data found|Error while decoding|Error submitting packet|corrupt|decryption/i.test(diagnostics);
             });
             child.once('error', cause => { cleanup(); reject(Object.assign(new Error('无法启动内置 ByteVC2 解码组件'), { code:'LOCAL_MEDIA_TOOL_ERROR', cause })); });
             child.once('close', code => {
               cleanup();
-              if (stopping || cancelled()) reject(abortError());
+              if (stalled && !cancelled()) reject(Object.assign(new Error('ByteVC2 转码响应超时，请重试本集'), { code: 'BYTEVC2_CONVERSION_FAILED' }));
+              else if (stopping || cancelled()) reject(abortError());
               else if (code !== 0) reject(Object.assign(new Error('ByteVC2 转码失败，请重新获取片源后重试'), {
                 code: 'BYTEVC2_CONVERSION_FAILED',
                 hardwareEncoderFailed: encoder !== 'libx264' && !terminalFailure

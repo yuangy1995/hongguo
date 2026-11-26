@@ -48,10 +48,18 @@ async function discover() {
     const packet = Buffer.from('M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: "ssdp:discover"\r\nMX: 2\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n');
     const addresses = Object.values(networkInterfaces()).flat().filter(item => !item.internal && privateIp(item.address)).map(item => item.address);
     if (!addresses.length) throw new Error('没有可用的局域网连接');
+    let sentCount = 0, lastSendError = null;
     for (const address of addresses) {
-      socket.setMulticastInterface(address);
-      await new Promise((resolve,reject) => socket.send(packet,1900,'239.255.255.250',error => error ? reject(error) : resolve()));
+      try {
+        socket.setMulticastInterface(address);
+        await new Promise((resolve,reject) => socket.send(packet,1900,'239.255.255.250',error => error ? reject(error) : resolve()));
+        sentCount++;
+      } catch (error) {
+        // 单个虚拟网卡不支持组播时跳过，继续扫描其余可用局域网接口
+        lastSendError = error;
+      }
     }
+    if (!sentCount && lastSendError) throw lastSendError;
     await new Promise(resolve => setTimeout(resolve,3000));
   } finally { socket.close(); }
   return (await Promise.allSettled([...locations.keys()].map(async url => { const response = await request(url); return parseDevice(response.text,url,response.localAddress); }))).filter(result => result.status === 'fulfilled').map(result => result.value);

@@ -667,8 +667,6 @@ function Browse({ onNavigate, active = true }) {
       {source === 'xifan' && <p className="browse-source-note">{t("当前提供题材分类，西饭热播榜暂未接入。")}</p>}
       {source === 'reelshort' && <p className="browse-source-note">{t("官网公开片单，按原顺序显示，每类最多 12 部；当前只提供首页快照，无后续分页。受地区限制，付费集请在官方平台确认权限。")}</p>}
 
-      {source === 'reelshort' && <p className="browse-source-note">官网公开片单，按原顺序显示，每类最多 12 部；当前只提供首页快照，无后续分页。受地区限制，付费集请在官方平台确认权限。</p>}
-
       {/* 题材 chips */}
       <FilterContainer className={mobile ? 'mobile-browse-filters' : 'browse-filters'}>
       {mobile && <summary>{t("筛选题材与状态")}{genre && <> · {t(meta.genres.find(item => item.slug === genre)?.label || '')}</>}{completion !== 'all' && <> · {t(completion === 'completed' ? '已完结' : '更新中')}</>}</summary>}
@@ -737,7 +735,7 @@ function Browse({ onNavigate, active = true }) {
                   <div className="browse-cover">
                     {item.rank > 0 && <span className="browse-rank-badge">{t("榜单第 {0} 名", [item.rank])}</span>}
                     {item.cover ? (
-                      <img src={item.cover} alt={item.series_title} loading="lazy" />
+                      <img src={item.cover} alt={item.series_title} loading="lazy" decoding="async" />
                     ) : (
                       <div className="cover-placeholder"><Film size={22} /></div>
                     )}

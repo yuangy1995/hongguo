@@ -85,10 +85,25 @@ function applyEpisodeUpdate(record, oldSeries, freshSeries, now = Date.now()) {
     lastEpisodeCheckError: '', lastCheckError: record.lastSequelCheckError || '' };
 }
 
+const SEASON_TITLE_CACHE = new Map();
+const SEASON_TITLE_CACHE_LIMIT = 2048;
+
+function rememberSeasonTitle(key, result) {
+  const frozen = Object.freeze(result);
+  SEASON_TITLE_CACHE.set(key, frozen);
+  if (SEASON_TITLE_CACHE.size > SEASON_TITLE_CACHE_LIMIT) {
+    SEASON_TITLE_CACHE.delete(SEASON_TITLE_CACHE.keys().next().value);
+  }
+  return frozen;
+}
+
 function seasonTitle(title) {
-  const text = String(title || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+  const rawKey = typeof title === 'string' ? title : String(title || '');
+  const cached = SEASON_TITLE_CACHE.get(rawKey);
+  if (cached) return cached;
+  const text = rawKey.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
   const match = text.match(/^(.*?)(?:(?:第)?([一二三四五六七八九十百零两\d]+)[季部]|[（(](?:第)?([一二三四五六七八九十百零两\d]+)(?:[季部])?[）)]|season(\d+))$/i);
-  if (!match) return { base: text, season: 1, explicit: false };
+  if (!match) return rememberSeasonTitle(rawKey, { base: text, season: 1, explicit: false });
   const value = match[2] || match[3] || match[4];
   let season = Number(value);
   if (!Number.isFinite(season)) {
@@ -101,9 +116,9 @@ function seasonTitle(title) {
     season = /[十百]/.test(value) ? n + digit : Number([...value].map(char => digits[char]).join(''));
   }
   // Bare bracket numbers can be years or other title metadata; accept only modest season numbers.
-  if (match[3] && season > 99) return { base: text, season: 1, explicit: false };
-  if (!Number.isSafeInteger(season) || season < 1) return { base: text, season: 1, explicit: false, invalid: true };
-  return { base: match[1], season, explicit: true };
+  if (match[3] && season > 99) return rememberSeasonTitle(rawKey, { base: text, season: 1, explicit: false });
+  if (!Number.isSafeInteger(season) || season < 1) return rememberSeasonTitle(rawKey, { base: text, season: 1, explicit: false, invalid: true });
+  return rememberSeasonTitle(rawKey, { base: match[1], season, explicit: true });
 }
 
 function sourceOf(id) {

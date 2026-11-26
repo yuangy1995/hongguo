@@ -27,9 +27,16 @@ function SearchPanel({ onSelectSeries, onViewSeries, onSwitchToInput, active = t
   const [history, setHistory] = useState(readSearchHistory);
   const [historyError, setHistoryError] = useState('');
   const inputRef = useRef(null);
+  const activeRef = useRef(active);
+  activeRef.current = active;
   useEffect(() => {
     // Chromium's native datalist can stay at its old screen position after a container scroll.
-    const dismissSuggestions = () => inputRef.current?.blur();
+    const dismissSuggestions = () => {
+      if (!activeRef.current) return;
+      if (typeof document === 'undefined' || !document.activeElement || document.activeElement === inputRef.current) {
+        inputRef.current?.blur();
+      }
+    };
     window.addEventListener('scroll', dismissSuggestions, true);
     window.addEventListener('resize', dismissSuggestions);
     return () => {
@@ -329,7 +336,7 @@ function SearchPanel({ onSelectSeries, onViewSeries, onSwitchToInput, active = t
               <Film size={22} />
             </div>
           )}
-          {item.cover && <img src={item.cover} alt={item.series_title} loading="lazy"
+          {item.cover && <img src={item.cover} alt={item.series_title} loading="lazy" decoding="async"
             onError={mobile ? undefined : event => { event.currentTarget.hidden = true; }} />}
         </div>
         <div className="search-card-body">

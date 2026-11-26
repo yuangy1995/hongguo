@@ -125,27 +125,32 @@ class Storage {
       },
     };
   }
-  directory(task) {
-    this.checkRoot();
+  directory(task, { rootChecked = false } = {}) {
+    if (!rootChecked) this.checkRoot();
     const dir = path.join(this.root, `${safeTitle(task.seriesTitle)}_${numericId(task.seriesId)}`);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { mode: 0o750 });
     const stat = fs.lstatSync(dir);
     if (!stat.isDirectory() || stat.isSymbolicLink() || fs.realpathSync(dir) !== dir) throw fail('剧集目录不可是符号链接', 409);
     return dir;
   }
-  artifactPath(task) {
+  artifactPath(task, options) {
     if (!ID.test(task.id)) throw fail('任务标识无效');
     const name = task.type === 'merge' ? `合并_${task.id}.mp4` : `第${String(task.episodeIndex).padStart(3, '0')}集_${task.id}.mp4`;
-    return path.join(this.directory(task), name);
+    return path.join(this.directory(task, options), name);
   }
-  output(task) {
-    const file = this.artifactPath(task);
-    if (fs.existsSync(file) && (!fs.lstatSync(file).isFile() || fs.lstatSync(file).isSymbolicLink())) throw fail('目标文件不是普通文件', 409, 'ARTIFACT_INVALID');
+  output(task, options) {
+    const file = this.artifactPath(task, options);
+    let stat;
+    try { stat = fs.lstatSync(file); } catch (error) {
+      if (error.code === 'ENOENT') return file;
+      throw error;
+    }
+    if (!stat.isFile() || stat.isSymbolicLink()) throw fail('目标文件不是普通文件', 409, 'ARTIFACT_INVALID');
     return file;
   }
-  artifact(task) {
-    this.checkRoot();
-    const file = this.output(task);
+  artifact(task, { rootChecked = false } = {}) {
+    if (!rootChecked) this.checkRoot();
+    const file = this.output(task, { rootChecked: true });
     let stat;
     try { stat = fs.lstatSync(file); } catch (error) {
       if (error.code === 'ENOENT') throw invalidArtifact();
@@ -168,11 +173,12 @@ class Storage {
     return target;
   }
   reconcileCompleted() {
+    this.checkRoot();
     const before = [], failed = [];
     for (const task of this.tasks) {
       if (task.status !== 'completed') continue;
       try {
-        const { fingerprint } = this.artifact(task);
+        const { fingerprint } = this.artifact(task, { rootChecked: true });
         if (!task.artifact) { before.push([task, { ...task }]); task.artifact = fingerprint; }
       } catch (error) {
         if (error.code === 'MOUNT_CHANGED') throw error;
@@ -201,10 +207,19 @@ class Storage {
     }
     return queued.length;
   }
-  publicTask(task) {
+  publicTask(task, { verified = false } = {}) {
     const { id, type, seriesId, seriesTitle, episodeTitle, episodeIndex, status, progress, error, createdAt, updatedAt, quality } = task;
+    let relativeFile;
+    if (status === 'completed') {
+      if (verified) {
+        const name = type === 'merge' ? `合并_${id}.mp4` : `第${String(episodeIndex).padStart(3, '0')}集_${id}.mp4`;
+        relativeFile = path.join(`${safeTitle(seriesTitle)}_${numericId(seriesId)}`, name);
+      } else {
+        relativeFile = path.relative(this.root, this.artifact(task).file);
+      }
+    }
     return { id, type, seriesId, seriesTitle, episodeTitle, episodeIndex, status, progress, error, createdAt, updatedAt, quality,
-      ...(status === 'completed' ? { file: path.relative(this.root, this.artifact(task).file) } : {}) };
+      ...(status === 'completed' ? { file: relativeFile } : {}) };
   }
   save() {
     let stat;

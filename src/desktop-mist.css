@@ -919,6 +919,10 @@
   backdrop-filter: blur(12px);
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
 }
+.desktop-mist .browse-card:not(:hover):not(:focus-visible) .browse-hover-play {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
 .desktop-mist .browse-card-title { margin-top: 9px; margin-bottom: auto; padding-inline: 2px; font-size: 13px; }
 .desktop-mist .browse-card-heat,
 .desktop-mist .browse-card-tags,

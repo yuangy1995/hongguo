@@ -119,12 +119,19 @@ async function search(keyword, page = 1, options = {}) {
   } catch (error) { return { success: false, error: error.message }; }
 }
 
+const detailPending = new Map();
 async function detail(seriesId) {
   const id = parseId(seriesId);
-  const props = await request(`/movie/${id.slug}-${id.bookId}`), data = props.data;
-  if (!data || !Array.isArray(data.online_base) || data.online_base.length > 10000
-    || ((data.book_id || data._id) && String(data.book_id || data._id) !== id.bookId)) throw new Error('ReelShort 返回的剧集与请求不一致');
-  return { id, data };
+  if (detailPending.has(id.seriesId)) return detailPending.get(id.seriesId);
+  // 合并同剧并发详情请求，结束后立即清理以保证每次独立请求重新校验锁定状态
+  const pending = (async () => {
+    const props = await request(`/movie/${id.slug}-${id.bookId}`), data = props.data;
+    if (!data || !Array.isArray(data.online_base) || data.online_base.length > 10000
+      || ((data.book_id || data._id) && String(data.book_id || data._id) !== id.bookId)) throw new Error('ReelShort 返回的剧集与请求不一致');
+    return { id, data };
+  })().finally(() => detailPending.delete(id.seriesId));
+  detailPending.set(id.seriesId, pending);
+  return pending;
 }
 
 async function fetchEpisodeList(seriesId) {

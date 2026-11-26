@@ -48,9 +48,26 @@ export function danmakuDisplayText(value) {
   return String(value ?? '').replace(/\[([^\[\]\r\n]{1,16})\]/g, (token, code) => DANMAKU_EMOJI[code.toLowerCase()] ?? token);
 }
 
+// 预归一化内置敏感词并缓存自定义屏蔽词编译结果，避免弹幕帧循环重复 NFKC 归一化
+const BUILTIN_BLOCKED_COMPARABLE = Object.freeze(BUILTIN_BLOCKED_WORDS.map(comparable).filter(Boolean));
+let cachedBlockedKey = null;
+let cachedBlockedWords = [];
+
+function resolveBlockedWords(settings) {
+  const raw = settings.blockedWords || '';
+  const sensitive = settings.sensitiveFilter !== false;
+  const key = `${sensitive ? 1 : 0}\0${raw}`;
+  if (key === cachedBlockedKey) return cachedBlockedWords;
+  const words = raw ? raw.split(/[\n,，;；]+/).map(comparable).filter(Boolean) : [];
+  if (sensitive) words.push(...BUILTIN_BLOCKED_COMPARABLE);
+  cachedBlockedKey = key;
+  cachedBlockedWords = words;
+  return words;
+}
+
 export function commentIsBlocked(content, settings) {
-  const words = (settings.blockedWords || '').split(/[\n,，;；]+/).map(comparable).filter(Boolean);
-  if (settings.sensitiveFilter) words.push(...BUILTIN_BLOCKED_WORDS);
+  const words = resolveBlockedWords(settings);
+  if (!words.length) return false;
   const text = comparable(content);
   return words.some(word => text.includes(word));
 }

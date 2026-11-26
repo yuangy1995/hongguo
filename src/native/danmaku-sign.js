@@ -251,9 +251,42 @@ function commentLadon(aid, timestamp, prefix) {
 
 const ARGUS_KEY = Buffer.from('ac1adaae95a7af94a5114ab3b3a97dd80050aa0a39314c40528caec95256c28c', 'hex');
 
+// 预计算由 ARGUS_KEY 与固定常量派生的空体 SM3、72 轮轮密钥与 AES 密钥/IV，避免多页拉取时重复运算
+const ARGUS_EMPTY_BODY_HASH6 = Buffer.from(sm3(Buffer.alloc(16)).subarray(0, 6));
+const ARGUS_AES_KEY = md5(ARGUS_KEY.subarray(0, 16));
+const ARGUS_AES_IV = md5(ARGUS_KEY.subarray(16));
+const ARGUS_XOR_MASK = Buffer.from([0xD0, 0x4F, 0xFD, 0xFF, 0xD0, 0x4F, 0xFD, 0xFF]);
+const ARGUS_CONTAINER_HEAD = Buffer.from([0xA6, 0xE7, 0x83, 0xEE, 0x70, 0x01, 0x10, 0x09, 0x18]);
+const ARGUS_CONTAINER_TAIL = Buffer.from([0x56, 0x7B]);
+const ARGUS_OUT_PREFIX = Buffer.from([0x3C, 0xCC]);
+const ARGUS_NESTED_SUFFIX = (() => {
+  const arr = [];
+  for (const field of [2, 3, 4]) {
+    arr.push(...uvarint(BigInt(field) * 8n));
+    arr.push(...uvarint(1388734n));
+  }
+  return arr;
+})();
+const ARGUS_ROUNDS = Object.freeze((() => {
+  const derived = sm3(Buffer.concat([ARGUS_KEY, Buffer.from([0x3C, 0xCC, 0x56, 0x7B]), ARGUS_KEY]));
+  const rounds = new Array(72).fill(0n);
+  for (let i = 0; i < 4; i++) rounds[i] = u64le(derived.subarray(i * 8, i * 8 + 8));
+  for (let i = 4; i < 72; i++) {
+    let mixed = BigInt.asUintN(64, rotr64(rounds[i - 1], 3) ^ rounds[i - 3]);
+    mixed = BigInt.asUintN(64, mixed ^ rotr64(mixed, 1));
+    rounds[i] = BigInt.asUintN(
+      64,
+      (~rounds[i - 4] & M64)
+        ^ mixed
+        ^ (BigInt.asUintN(64, 0x3DC94C3A046D678Bn >> BigInt((i - 4) % 62)) & 1n)
+        ^ 3n,
+    );
+  }
+  return rounds;
+})());
+
 /** 手写 protobuf 组包 + SM3 派生 + 72 轮变换 + AES-128-CBC 封装。 */
 function commentArgus(rawQuery, timestamp, nonce) {
-  const key = ARGUS_KEY;
   const parts = [];
 
   const varint = (field, value) => {
@@ -277,42 +310,21 @@ function commentArgus(rawQuery, timestamp, nonce) {
   bytesField(10, Buffer.alloc(8));
   varint(12, BigInt.asUintN(64, BigInt(timestamp) * 2n));
 
-  const bodyHash = sm3(Buffer.alloc(16));
   const queryHash = sm3(Buffer.from(rawQuery, 'utf8'));
-  bytesField(13, bodyHash.subarray(0, 6));
+  bytesField(13, ARGUS_EMPTY_BODY_HASH6);
   bytesField(14, queryHash.subarray(0, 6));
 
-  const nested = [0x08, (2 + (nonce[10] % 49) * 2) & 0xFF];
-  for (const field of [2, 3, 4]) {
-    nested.push(...uvarint(BigInt(field) * 8n));
-    nested.push(...uvarint(1388734n));
-  }
-  bytesField(15, Buffer.from(nested));
+  const nested = Buffer.from([0x08, (2 + (nonce[10] % 49) * 2) & 0xFF, ...ARGUS_NESTED_SUFFIX]);
+  bytesField(15, nested);
   bytesField(20, Buffer.from('none'));
   varint(21, 738n);
 
   const data = Buffer.from(pad(Buffer.concat(parts)));
 
-  const derived = sm3(Buffer.concat([key, Buffer.from([0x3C, 0xCC, 0x56, 0x7B]), key]));
-
-  const rounds = new Array(72).fill(0n);
-  for (let i = 0; i < 4; i++) rounds[i] = u64le(derived.subarray(i * 8, i * 8 + 8));
-  for (let i = 4; i < 72; i++) {
-    let mixed = BigInt.asUintN(64, rotr64(rounds[i - 1], 3) ^ rounds[i - 3]);
-    mixed = BigInt.asUintN(64, mixed ^ rotr64(mixed, 1));
-    rounds[i] = BigInt.asUintN(
-      64,
-      (~rounds[i - 4] & M64)
-        ^ mixed
-        ^ (BigInt.asUintN(64, 0x3DC94C3A046D678Bn >> BigInt((i - 4) % 62)) & 1n)
-        ^ 3n,
-    );
-  }
-
   for (let offset = 0; offset < data.length; offset += 16) {
     let left = u64le(data.subarray(offset, offset + 8));
     let right = u64le(data.subarray(offset + 8, offset + 16));
-    for (const round of rounds) {
+    for (const round of ARGUS_ROUNDS) {
       const next = BigInt.asUintN(
         64,
         left ^ (rotl64(right, 1) & rotl64(right, 8)) ^ rotl64(right, 2) ^ round,
@@ -324,23 +336,22 @@ function commentArgus(rawQuery, timestamp, nonce) {
     putU64le(right, data, offset + 8);
   }
 
-  const xor = Buffer.from([0xD0, 0x4F, 0xFD, 0xFF, 0xD0, 0x4F, 0xFD, 0xFF]);
-  for (let i = 0; i < data.length; i++) data[i] ^= xor[i % 8];
-  const reversed = Buffer.concat([xor, data]).reverse();
+  for (let i = 0; i < data.length; i++) data[i] ^= ARGUS_XOR_MASK[i % 8];
+  const reversed = Buffer.concat([ARGUS_XOR_MASK, data]).reverse();
 
   const container = pad(Buffer.concat([
-    Buffer.from([0xA6, 0xE7, 0x83, 0xEE, 0x70, 0x01, 0x10, 0x09, 0x18]),
+    ARGUS_CONTAINER_HEAD,
     reversed,
-    Buffer.from([0x56, 0x7B]),
+    ARGUS_CONTAINER_TAIL,
   ]));
 
   // 参考实现的 AES-CBC 要求明文长度已是 16 的整数倍，且**不再**追加填充，
   // 所以这里必须关掉 Node 的自动填充，否则会多出一个整块。
-  const cipher = createCipheriv('aes-128-cbc', md5(key.subarray(0, 16)), md5(key.subarray(16)));
+  const cipher = createCipheriv('aes-128-cbc', ARGUS_AES_KEY, ARGUS_AES_IV);
   cipher.setAutoPadding(false);
   const encrypted = Buffer.concat([cipher.update(container), cipher.final()]);
 
-  return Buffer.concat([Buffer.from([0x3C, 0xCC]), encrypted]).toString('base64');
+  return Buffer.concat([ARGUS_OUT_PREFIX, encrypted]).toString('base64');
 }
 
 // ── 头部组装 ──────────────────────────────────────────────────────────────

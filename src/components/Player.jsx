@@ -223,6 +223,16 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
   const grantedLocalRef = useRef(null);
   const retryAutoplayRef = useRef(false);
   const onlineQualityVersion = useRef(0);
+  const changeSoftwareDecodeRef = useRef(null);
+  const downloadingMissingRef = useRef(false);
+
+  // 过渡帧展示结束后立即释放全分辨率 Canvas 位图内存
+  useEffect(() => {
+    if (!holdingFrame && transitionFrameRef.current) {
+      transitionFrameRef.current.width = 0;
+      transitionFrameRef.current.height = 0;
+    }
+  }, [holdingFrame]);
 
   const holdVideoFrame = useCallback(() => {
     const media = loadedMediaRef.current;
@@ -630,7 +640,7 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
         if (decoderRevision === playbackSettingRevision.current) {
           const fast = !mobile && settings?.fast_conversion === true;
           setFastConversion(fast);
-          if (fast) changeSoftwareDecode(false);
+          if (fast) changeSoftwareDecodeRef.current?.(false);
         }
       }
     }).catch(() => {
@@ -672,35 +682,6 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
       playbackSettingPending.current = false;
       setPlaybackSettingSaving(false);
     }
-  };
-
-  const changeSoftwareDecode = next => {
-    if (next === softwareDecode) return;
-    if (videoRef.current) {
-      volumeRef.current = videoRef.current.volume; mutedRef.current = videoRef.current.muted;
-      savePlaybackPreferences();
-    }
-    pendingSeekRef.current = currentPosition();
-    if (loadedMediaRef.current) pendingAutoplayRef.current = !loadedMediaRef.current.element.paused;
-    persistPosition(true); holdVideoFrame(); videoRef.current?.pause(); loadedMediaRef.current = null;
-    setSoftwareDecode(next);
-    if (current?.status === 'completed' && (playbackError || decodeFailed || !usableLocal(current, String(activeSeriesId)))) {
-      void retryPlayback(pendingAutoplayRef.current);
-    }
-  };
-
-  const changeDecoder = mode => {
-    if (qualityLoading || playbackSettingPending.current || !['auto', 'software', 'hardware'].includes(mode) || mobile && mode === 'hardware') return;
-    const software = mode === 'software', fast = mode === 'hardware';
-    if (software === softwareDecode && fast === fastConversion) return;
-    const apply = saved => {
-      changeSoftwareDecode(software);
-      setFastConversion(saved);
-      try { window.localStorage.setItem('hongguo:software-decode', String(software)); }
-      catch { showToast('解码方式已切换，但未能保存'); }
-    };
-    if (mobile) return apply(false);
-    return savePlaybackSetting('fast_conversion', fast, apply);
   };
 
   // 只读轻量缓存；当前面板内的剧逐部异步补齐，不阻塞主进程。
@@ -754,15 +735,32 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
   // 事件合并后才核对文件；等待下载本身不触发磁盘扫描。
   useEffect(() => {
     if (!activeSeriesId || !playbackActive) return;
-    let busy = false, dirty = true;
+    let busy = false, dirty = true, progressTimer = null;
+    const progressPatches = new Map();
+    const flushProgress = () => {
+      progressTimer = null;
+      if (!progressPatches.size) return;
+      const updates = new Map(progressPatches);
+      progressPatches.clear();
+      setDetail(previous => {
+        if (!previous?.episodes.length) return previous;
+        let changed = false;
+        const nextEpisodes = previous.episodes.map(ep => {
+          const patch = ep.taskId ? updates.get(ep.taskId) : undefined;
+          if (!patch) return ep;
+          if (ep.status === 'downloading' && ep.progress === patch.progress && ep.retryAt === null) return ep;
+          changed = true;
+          return { ...ep, status: 'downloading', progress: patch.progress, retryAt: null };
+        });
+        return changed ? { ...previous, episodes: nextEpisodes } : previous;
+      });
+    };
     const unsubscribe = ['onDownloadTaskAdded', 'onDownloadCompleted', 'onDownloadFailed', 'onDownloadStopped', 'onDownloadQueueChanged', 'onWatchHistoryUpdated']
       .map(name => window.electronAPI[name]?.(() => { dirty = true; }));
     unsubscribe.push(window.electronAPI.onDownloadProgress?.(data => {
-      setDetail(previous => {
-        if (!previous?.episodes.some(ep => ep.taskId === data?.id)) return previous;
-        return { ...previous, episodes: previous.episodes.map(ep => ep.taskId === data.id
-          ? { ...ep, status: 'downloading', progress: data.progress, retryAt: null } : ep) };
-      });
+      if (!data?.id) return;
+      progressPatches.set(data.id, data);
+      if (progressTimer === null) progressTimer = setTimeout(flushProgress, 200);
     }));
     const timer = setInterval(async () => {
       if (busy || !dirty) return;
@@ -795,9 +793,13 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
         }
       }
     }, 2000);
-    return () => { clearInterval(timer); unsubscribe.forEach(off => off?.()); };
+    return () => {
+      clearInterval(timer);
+      if (progressTimer !== null) clearTimeout(progressTimer);
+      unsubscribe.forEach(off => off?.());
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playbackActive, activeSeriesId, waitingFor, loadDetail, currentPosition, isCurrentFallback, usableLocal, resumeLocal, localPlaybackError]);
+  }, [playbackActive, activeSeriesId, loadDetail, currentPosition, isCurrentFallback, usableLocal, resumeLocal, localPlaybackError]);
 
   const episodes = detail ? detail.episodes : [];
   const current = useMemo(
@@ -1215,6 +1217,36 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
   };
   const retryUserPlayback = () => retryPlayback(retryAutoplayRef.current);
 
+  const changeSoftwareDecode = next => {
+    if (next === softwareDecode) return;
+    if (videoRef.current) {
+      volumeRef.current = videoRef.current.volume; mutedRef.current = videoRef.current.muted;
+      savePlaybackPreferences();
+    }
+    pendingSeekRef.current = currentPosition();
+    if (loadedMediaRef.current) pendingAutoplayRef.current = !loadedMediaRef.current.element.paused;
+    persistPosition(true); holdVideoFrame(); videoRef.current?.pause(); loadedMediaRef.current = null;
+    setSoftwareDecode(next);
+    if (current?.status === 'completed' && (playbackError || decodeFailed || !usableLocal(current, String(activeSeriesId)))) {
+      void retryPlayback(pendingAutoplayRef.current);
+    }
+  };
+  changeSoftwareDecodeRef.current = changeSoftwareDecode;
+
+  const changeDecoder = mode => {
+    if (qualityLoading || playbackSettingPending.current || !['auto', 'software', 'hardware'].includes(mode) || mobile && mode === 'hardware') return;
+    const software = mode === 'software', fast = mode === 'hardware';
+    if (software === softwareDecode && fast === fastConversion) return;
+    const apply = saved => {
+      changeSoftwareDecode(software);
+      setFastConversion(saved);
+      try { window.localStorage.setItem('hongguo:software-decode', String(software)); }
+      catch { showToast('解码方式已切换，但未能保存'); }
+    };
+    if (mobile) return apply(false);
+    return savePlaybackSetting('fast_conversion', fast, apply);
+  };
+
   const changeOnlineQuality = (quality) => {
     if (!['auto', '720p', '1080p', 'compat'].includes(quality) || !supportsOnlineQuality) return;
     onlineQualityVersion.current++;
@@ -1392,17 +1424,17 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
     }
   }, [findNext, goToEpisode, showToast, autoDelete, episodes, refreshCacheInfo, loadDetail, persistPosition, holdVideoFrame, resetPlayback, releaseOnline]);
 
-  // 离开页面、暂停和关闭窗口强制保存最后一秒。
+  // 离开页面、暂停和关闭窗口强制保存最后一秒；后台未播放时不空转定时器。
   useEffect(() => {
-    const timer = setInterval(persistPosition, 15000);
+    const timer = playbackActive ? setInterval(persistPosition, 15000) : null;
     const save = () => persistPosition(true);
     window.addEventListener('beforeunload', save);
     return () => {
-      clearInterval(timer);
+      if (timer !== null) clearInterval(timer);
       window.removeEventListener('beforeunload', save);
       save();
     };
-  }, [persistPosition]);
+  }, [persistPosition, playbackActive]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -1735,23 +1767,33 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
   };
 
   const downloadMissing = async (nextCount = null) => {
-    if (qualityLoading || (nextCount !== null && !current)) return;
+    if (qualityLoading || downloadingMissingRef.current || (nextCount !== null && !current)) return;
     const missing = episodes.filter((e) => !e.locked && e.status !== 'completed'
       && (nextCount === null || (e.vid_index > current.vid_index && e.vid_index <= current.vid_index + nextCount)));
     if (!missing.length) {
       showToast(nextCount === null ? '可下载的集数已全部下载' : '所选范围内没有需要下载的集数');
       return;
     }
+    const seriesId = activeSeriesId;
+    const selection = selectionVersion.current;
+    downloadingMissingRef.current = true;
     let ok = 0;
     let firstError = '';
-    for (const ep of missing) {
-      try {
-        const r = await window.electronAPI.downloadSingleEpisode(activeSeriesId, ep.vid_index, downloadQuality, ep.vid);
-        if (r?.success) ok++;
-        else if (!firstError) firstError = r?.error || '加入下载失败';
-      } catch (error) { if (!firstError) firstError = error.message || '加入下载失败'; }
+    try {
+      for (const ep of missing) {
+        if (selection !== selectionVersion.current) return;
+        try {
+          const r = await window.electronAPI.downloadSingleEpisode(seriesId, ep.vid_index, downloadQuality, ep.vid);
+          if (r?.success) ok++;
+          else if (!firstError) firstError = r?.error || '加入下载失败';
+        } catch (error) { if (!firstError) firstError = error.message || '加入下载失败'; }
+      }
+      if (selection === selectionVersion.current) {
+        showToast(firstError ? `${ok} 集提交成功，${missing.length - ok} 集失败：${firstError}` : `已把 ${ok} 集加入下载队列`);
+      }
+    } finally {
+      downloadingMissingRef.current = false;
     }
-    showToast(firstError ? `${ok} 集提交成功，${missing.length - ok} 集失败：${firstError}` : `已把 ${ok} 集加入下载队列`);
   };
 
   // 一键合并当前这部剧（弹出格式选择）
@@ -2537,7 +2579,7 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
       {/* 合并格式选择 */}
       {mergeAsk && (
         <div className="player-confirm-mask" onClick={() => closeMergeDialog()}>
-          <div className="player-confirm" role="dialog" aria-modal="true" aria-label={t(confirmAsk ? confirmAsk.title : '合并导出')} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
+          <div className="player-confirm" role="dialog" aria-modal="true" aria-label={t('合并导出')} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
             <div className="player-confirm-title" style={{ color: 'var(--accent)' }}>
               <Layers size={17} />{t("合并导出全集")}</div>
             <div className="player-confirm-msg">
@@ -2560,7 +2602,7 @@ function Player({ target, onNavigate, onSeriesSelected, onFloatingChange, accoun
 
       {/* 删除确认 */}
       {confirmAsk && (        <div className="player-confirm-mask" onClick={() => setConfirmAsk(null)}>
-          <div className="player-confirm" role="dialog" aria-modal="true" aria-label={t(confirmAsk ? confirmAsk.title : '合并导出')} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
+          <div className="player-confirm" role="dialog" aria-modal="true" aria-label={t(confirmAsk.title)} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
             <div className="player-confirm-title">
               <Trash2 size={17} />
               {t(confirmAsk.title)}

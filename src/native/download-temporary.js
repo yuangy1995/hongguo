@@ -146,7 +146,7 @@ async function removeOwnedFile(file, identity, canRemove = () => true) {
 
 async function reserveOwnedFile(file, onChange = () => {}) {
   const handle = await fs.open(file, 'wx', 0o600);
-  let identity, open = true;
+  let identity, lastIdentityKey = '', open = true;
   const inspect = async () => {
     let stat = await handle.stat({ bigint:true });
     // Some removable filesystems allocate their durable ID when the first byte is written.
@@ -156,7 +156,14 @@ async function reserveOwnedFile(file, onChange = () => {}) {
     }
     const current = await fs.lstat(file, statOptions(stat));
     if (!current.isFile() || !sameLiveIdentity(current, stat)) return null;
-    identity = stat; onChange(stat);
+    identity = stat;
+    // 仅在文件身份首次分配或发生重分配时通知上层落盘，避免每次核验重复触发同步写盘
+    const nextId = identityOf(stat);
+    const nextKey = `${nextId.dev}:${nextId.ino}:${nextId.birthtimeNs ?? nextId.birthtimeMs}`;
+    if (nextKey !== lastIdentityKey) {
+      lastIdentityKey = nextKey;
+      onChange(stat);
+    }
     return stat;
   };
   const check = async () => {
@@ -219,8 +226,8 @@ async function createDownloadTemporary(directory, { owner, onChange = () => {} }
       return await cleanupDownloadTemporary(record, owner);
     } finally { await Promise.all([...reservations.values()].map(reserved => reserved.close())); }
   };
-  try { onChange(record); await reserve(input); }
-  catch (error) { await cleanup().catch(() => {}); throw error; }
+  try { await reserve(input); }
+  catch (error) { onChange(record); await cleanup().catch(() => {}); throw error; }
   return { input, output, record, reserveOutput: () => reserve(output),
     removeOutput, cleanup,
     checkInput: async () => {
