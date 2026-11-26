@@ -24,6 +24,7 @@
     "build:mac:dir": "node scripts/setup-ffmpeg-mac.js arm64 x64 && npm run build:react && electron-builder --config build/electron-builder-mac.cjs --mac --arm64 --x64 --dir --publish never",
     "build:mac:test": "node scripts/setup-ffmpeg-mac.js arm64 && npm run build:react && node scripts/package-mac-test.cjs",
     "test": "node scripts/test.cjs",
+    "lint": "node scripts/check-code-hygiene.cjs",
     "test:source-pack": "node scripts/source-pack-check.cjs",
     "setup:software": "node scripts/setup-software-player.cjs",
     "setup:sdk:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-sdk-playback-win.ps1",
@@ -67,13 +68,12 @@
       "preload.js",
       "dist-react/**/*",
       "build/app-icons/*.png",
-      "build/sdk-playback/darwin-*/hongguo-sdk-playback",
-      "build/sdk-playback/win32-x64/hongguo-sdk-playback.exe",
       "build/sdk-playback/README.txt",
       "source-packs/**/*",
       "src/native/**/*",
       "!src/native/**/*.test.cjs",
       "!src/native/**/*-fixture.cjs",
+      "!src/native/*fixture*.cjs",
       "!src/native/fixtures/**",
       "src/store.js"
     ],
@@ -84,6 +84,9 @@
     ],
     "artifactName": "hongguo-downloader-${version}-${os}-${arch}.${ext}",
     "win": {
+      "files": [
+        "build/sdk-playback/win32-${arch}/hongguo-sdk-playback.exe"
+      ],
       "target": [
         {
           "target": "nsis",
@@ -137,6 +140,9 @@
       "artifactName": "hongguo-downloader-${version}-win-x64-setup.${ext}"
     },
     "mac": {
+      "files": [
+        "build/sdk-playback/darwin-${arch}/hongguo-sdk-playback"
+      ],
       "target": [
         {
           "target": "dmg",

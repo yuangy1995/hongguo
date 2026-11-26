@@ -18,5 +18,16 @@ export default defineConfig({
   build: {
     outDir: 'dist-react',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/') || id.includes('node_modules/scheduler/')) {
+            return 'vendor-react';
+          }
+          if (id.includes('/src/i18n/')) return 'i18n';
+          return undefined;
+        },
+      },
+    },
   },
 });

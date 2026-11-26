@@ -23,6 +23,10 @@ if [ "$ARCH" != "$HOST_ARCH" ]; then
     printf '%s\n' "Build $ARCH on a matching host architecture." >&2
     exit 1
 fi
+TARGET_ARCH="$ARCH"
+if [ "$ARCH" = "x64" ]; then
+    TARGET_ARCH="x86_64"
+fi
 PYTHON_ARCH="$("$PYTHON" -c 'import platform; print(platform.machine())')"
 if [ "$PYTHON_ARCH" != "$TARGET_ARCH" ]; then
     printf '%s\n' "Python architecture $PYTHON_ARCH does not match target $TARGET_ARCH." >&2

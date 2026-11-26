@@ -59,6 +59,7 @@ const { createIpcBoundary } = require('./src/native/ipc-boundary');
 const { downloadTaskView, pathConflicts } = require('./src/native/download-task-view');
 const { createProxyConfig } = require('./src/native/proxy-config');
 const { createProxyManager } = require('./src/native/proxy-manager');
+const { registerProxyIpc } = require('./src/native/proxy-ipc');
 const { createHistoryService } = require('./src/native/history-service');
 const { createAccountController } = require('./src/native/account-controller');
 const { episodeDisplayTitle } = require('./src/native/xifan');
@@ -913,7 +914,8 @@ async function verifyDownloadQuality(file, quality, existing = false, verifyDeco
 }
 
 async function publishDownloadFile(temporary, destination) {
-  fs.copyFileSync(temporary, destination, fs.constants.COPYFILE_EXCL);
+  // 避免硬链接在延迟清理临时文件时修改最终文件 ctime，同时避免阻塞主线程
+  await fsp.copyFile(temporary, destination, fs.constants.COPYFILE_EXCL);
 }
 
 async function completeNasExports(task) {
@@ -3662,15 +3664,15 @@ function localPlayUrl(filePath, validate) {
 function localMediaBody(file, options, signal) {
   const stream = fs.createReadStream(file, options);
   localFileReaders.set(file, (localFileReaders.get(file) || 0) + 1);
-  const onAbort = () => stream.destroy();
-  signal?.addEventListener('abort', onAbort, { once: true });
-  stream.on('error', () => stream.destroy());
+  const abort = () => { if (!stream.destroyed) stream.destroy(); };
+  signal?.addEventListener('abort', abort, { once: true });
+  stream.on('error', abort);
   stream.once('close', () => {
-    signal?.removeEventListener('abort', onAbort);
+    signal?.removeEventListener('abort', abort);
     const remaining = (localFileReaders.get(file) || 1) - 1;
     if (remaining > 0) localFileReaders.set(file, remaining); else localFileReaders.delete(file);
   });
-  if (signal?.aborted) stream.destroy();
+  if (signal?.aborted) abort();
   return Readable.toWeb(stream);
 }
 
@@ -5004,7 +5006,9 @@ async function saveSettings(settings) {
       sendToRenderer('app-update-preference', merged.app_updates_enabled !== false);
     }
     getCurrentSettings(); // 刷新并发数
+    const wasFallback = proxyStartupFallback;
     proxyStartupFallback = false;
+    if (wasFallback) ensureBackgroundSchedules();
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
@@ -5020,65 +5024,9 @@ function enqueueSettingsMutation(run) {
 ipcMain.handle('save-settings', (_event, settings) => enqueueSettingsMutation(() => saveSettings(settings)));
 
 // ===== IPC：网络代理 =====
-ipcMain.handle('get-proxy-status', async () => {
-  const settings = getCurrentSettings();
-  const resolved = resolveProxyConfig(settings);
-  return {
-    enabled: settings.proxy_enabled === true,
-    mode: resolved.mode,
-    url: publicProxyUrl(resolved.url),
-    effective: resolved.mode !== 'direct' && !!resolved.url,
-  };
-});
-
-// 用当前表单值实测代理是否连通（未保存也能测）
-ipcMain.handle('test-proxy', async (event, draft) => {
-  const settings = applyEditableSettings(getCurrentSettings(), draft);
-  const resolved = resolveProxyConfig(settings);
-  if (resolved.mode === 'custom' && !resolved.url) {
-    return { success: false, error: '请填写完整的代理地址与端口' };
-  }
-
-  // 只测 API/下载路由。system 使用启动快照，避免未保存的草稿读到当前手动/直连环境。
-  let proxyOption;
-  try { proxyOption = proxyConfig.requestOption(resolved); }
-  catch { return { success: false, error: '代理地址格式无效' }; }
-
-  const started = Date.now();
-  const controller = new AbortController();
-  const deadline = setTimeout(() => controller.abort(), 12000);
-  try {
-    const res = await axios.get(PROXY_TEST_URL, {
-      timeout: 12000,
-      signal: controller.signal,
-      proxy: proxyOption,
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-      validateStatus: () => true,
-    });
-    const ms = Date.now() - started;
-    if (res.status >= 200 && res.status < 400) {
-      return {
-        success: true,
-        elapsed: ms,
-        mode: resolved.mode,
-        via: publicProxyUrl(resolved.url) || '(直连)',
-        message: `红果官网连接正常（HTTP ${res.status}，耗时 ${ms}ms）`,
-      };
-    }
-    return { success: false, error: `请求返回 HTTP ${res.status}（耗时 ${ms}ms）` };
-  } catch (error) {
-    const ms = Date.now() - started;
-    const code = (error && error.code) || '';
-    let hint = publicProxyError(error.message, settings, resolved);
-    if (['UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'CERT_HAS_EXPIRED', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN', 'ERR_TLS_CERT_ALTNAME_INVALID'].includes(code)) hint = `测试站点证书校验失败，连接已拒绝；请检查系统时间、证书链或代理的 HTTPS 配置（${code}）`;
-    else if (code === 'ECONNREFUSED') hint = '代理端口拒绝连接，请确认代理软件已启动、端口填写正确';
-    else if (controller.signal.aborted || code === 'ETIMEDOUT' || code === 'ECONNABORTED') hint = '连接超时，请检查代理地址/端口或代理是否可用';
-    else if (code === 'ENOTFOUND') hint = '无法解析代理地址，请检查主机名';
-    else if (/407/.test(hint)) hint = '代理需要认证，请填写用户名与密码';
-    return { success: false, error: `${hint}（耗时 ${ms}ms）`, code };
-  } finally {
-    clearTimeout(deadline);
-  }
+registerProxyIpc({
+  ipcMain, axios, getCurrentSettings, applyEditableSettings,
+  resolveProxyConfig, publicProxyUrl, publicProxyError, proxyConfig, PROXY_TEST_URL,
 });
 
 // ===== IPC：下载管理 =====
@@ -6203,6 +6151,24 @@ app.on('web-contents-created', (_event, contents) => {
   contents.session.setPermissionCheckHandler((webContents, permission, _origin, details) => allowed(webContents, permission, details));
 });
 
+let sourcePackTimerStarted = false;
+let watchHistoryTimerStarted = false;
+function ensureBackgroundSchedules() {
+  if (proxyStartupFallback) return;
+  if (appSourcePacks && !sourcePackTimerStarted) {
+    sourcePackTimerStarted = true;
+    void appSourcePacks.check().then(result => sendToRenderer('source-pack-status', result)).catch(() => {});
+    setInterval(() => {
+      if (!proxyStartupFallback) void appSourcePacks.check().then(result => sendToRenderer('source-pack-status', result)).catch(() => {});
+    }, 6 * 60 * 60 * 1000).unref();
+  }
+  if (!watchHistoryTimerStarted) {
+    watchHistoryTimerStarted = true;
+    setTimeout(() => { if (!proxyStartupFallback) void refreshWatchHistory(); }, 10000).unref();
+    setInterval(() => { if (!proxyStartupFallback) void refreshWatchHistory(); }, 15 * 60 * 1000).unref();
+  }
+}
+
 if (hasSingleInstanceLock) app.whenReady().then(async () => {
   let startupStage = '读取本地数据';
   try {
@@ -6247,12 +6213,6 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
         bundledEnvelope,
         request: (url, options) => axios.get(url, options),
       });
-      if (!proxyStartupFallback) {
-        void appSourcePacks.check().then(result => sendToRenderer('source-pack-status', result)).catch(() => {});
-        setInterval(() => {
-          if (!proxyStartupFallback) void appSourcePacks.check().then(result => sendToRenderer('source-pack-status', result)).catch(() => {});
-        }, 6 * 60 * 60 * 1000).unref();
-      }
     } catch (error) {
       console.warn('[SourcePack] 内置动态取源包不可用:', error.message);
     }
@@ -6296,11 +6256,10 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
         } catch (_) { /* 无窗口环境忽略 */ }
       }, 500);
     } else {
-      setTimeout(() => { void refreshWatchHistory(); }, 10000).unref();
-      setInterval(() => { void refreshWatchHistory(); }, 15 * 60 * 1000).unref();
+      ensureBackgroundSchedules();
     }
-  } catch (_) {
-    console.error(`[Startup] ${startupStage}失败`);
+  } catch (error) {
+    console.error(`[Startup] ${startupStage}失败:`, safeErrorText(error?.message || String(error || '')));
     try {
       dialog.showErrorBox(`${APP_TITLE}启动失败`, `未能完成${startupStage}。请退出后重试；若仍失败，请将此提示反馈给开发者。已有资料不会被清空。`);
     } finally { app.quit(); }
@@ -6330,7 +6289,7 @@ app.on('before-quit', event => {
   if (compatClearing) pending.push(compatClearing);
   if (mergeTempCleanup) pending.push(mergeTempCleanup);
   const downloading = downloadRuns.size || downloadQueue.length || sourceRetryTimers.size;
-  if (!pending.length && !downloading) { quitReady = true; return; }
+  if (!pending.length && !downloading) { bossKey.dispose(); quitReady = true; return; }
   event.preventDefault();
   if (downloading) {
     try { pauseAllTasks(); }

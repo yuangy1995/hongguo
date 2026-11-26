@@ -71,6 +71,7 @@ async function crashedTemporary(overrides = {}) {
     await Promise.all(handles.filter(handle => handle.fd !== -1).map(handle => handle.close()));
   }
   h.run('saveDownloadTasks()');
+  await temporary.close();
   const restored = load({ root:h.dir }, overrides); restored.set('seriesRegistry', series());
   restored.context.crashSnapshot = h.saved();
   restored.run('store.saveTasks(crashSnapshot); store.getTasks = () => crashSnapshot; loadDownloadTasks();');
